@@ -1,0 +1,16 @@
+# Runtime deps of the bot, admin, fetchers and ingest (versions = the working Mac .venv, 21.10.2026).
+# No playwright, no codex: on the server LLM_PROVIDER=openai talks to the API over httpx.
+httpx==0.28.1
+psycopg[binary]==3.3.6   # db.py: the shared PostgreSQL (DATABASE_URL)
+# the bot imports the backend's services and app.telegram (same DB, same rules): install backend/requirements.txt too
+-r ../backend/requirements.txt
+python-telegram-bot==22.8
+curl_cffi==0.16.3
+pillow==13.0.0
+gspread==6.2.1
+google-auth==2.62.0
+numpy==2.5.4
+yt-dlp==2026.10.21   # fetch_videos.py: listing video links -> mp4 (HLS/merge need ffmpeg, in the image)
+# Embedding deps for search_mode=hybrid (embed.py: torch + transformers) live in requirements-embed.txt:
+# heavy (CPU torch ~1 GB installed + ~1.5 GB model download into the HF cache), so the image installs them only with
+# `docker build --build-arg WITH_EMBED=1`.

@@ -1,0 +1,8 @@
+# ===== EMBEDDINGS (search_mode=hybrid, embed.py) =====
+# Installed into the image only with --build-arg WITH_EMBED=1, from the CPU-only torch index.
+# Versions = the Mac .venv on 21.10.2026; update together with embed.py.
+torch==2.14.1
+transformers==5.20.2
+# the multilingual SigLIP tokenizer (google/siglip-base-patch16-256-multilingual) needs these two
+sentencepiece==0.2.2
+protobuf==7.36.2

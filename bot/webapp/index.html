@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Homes in Georgia · карта</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800;900&family=Noto+Sans+Georgian:wght@400;700&display=swap">
+<style>
+  /* Homes in Georgia design system: blue #032D6A, deep blue #021F4A, red #E3172D (small labels only),
+     white, light grey #F3F5F9, grey-blue #4A5A75; Montserrat (HG Sans substitute) + Noto Sans Georgian */
+  :root { --blue: #032D6A; --deep: #021F4A; --red: #E3172D; --grey: #F3F5F9; --muted: #4A5A75; }
+  html, body { margin: 0; height: 100%; font: 400 15px/1.4 Montserrat, 'Noto Sans Georgian', system-ui, sans-serif;
+    background: #fff; color: var(--deep); }
+  #map { position: absolute; inset: 0; }
+  .top { position: absolute; z-index: 1000; left: 0; right: 0; top: 0; padding: 12px 12px 14px;
+    background: linear-gradient(180deg, var(--blue), var(--deep)); box-shadow: 0 4px 16px rgba(2,31,74,.25); }
+  .brand { color: #fff; font-weight: 900; font-size: 15px; text-transform: uppercase; letter-spacing: .02em;
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .tag { background: var(--red); color: #fff; font-weight: 700; font-size: 10px; letter-spacing: .14em;
+    padding: 3px 7px; border-radius: 4px; }
+  .bar { display: flex; gap: 6px; }
+  .bar input { flex: 1; min-width: 0; padding: 11px 12px; border: 0; border-radius: 10px; font: 400 15px Montserrat, 'Noto Sans Georgian', sans-serif;
+    color: var(--deep); background: #fff; }
+  .bar input::placeholder { color: var(--muted); }
+  .bar button, .radius button { border: 0; border-radius: 10px; padding: 0 14px; cursor: pointer;
+    font: 700 12px Montserrat, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+  .bar button { background: #fff; color: var(--blue); }
+  .hint { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 66px; text-align: center; pointer-events: none; }
+  .hint span { background: var(--deep); color: #fff; padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+  .radius { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 14px; display: flex; gap: 6px; justify-content: center; }
+  .radius button { padding: 10px 14px; background: #fff; color: var(--blue); box-shadow: 0 1px 6px rgba(2,31,74,.25); }
+  .radius button.on { background: var(--blue); color: #fff; }
+  .leaflet-control-attribution { font-size: 10px; }
+  /* view mode (?pin=…): one listing's point, nothing to send */
+  .view-only { display: none; }
+  body.view .pick-only { display: none; }
+  body.view .view-only { display: block; }
+  .title { color: #fff; font-weight: 800; font-size: 18px; line-height: 1.25; }
+  .note { position: absolute; z-index: 1000; left: 10px; right: 10px; bottom: 14px; background: #fff; border-radius: 14px;
+    padding: 14px; box-shadow: 0 4px 18px rgba(2,31,74,.22); }
+  .note p { margin: 0 0 12px; color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+  .note p b { color: var(--deep); }
+  .dot { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; background: var(--blue);
+    border: 2px solid #fff; box-shadow: 0 0 0 2px var(--blue); box-sizing: border-box; }
+  .note button { width: 100%; border: 0; border-radius: 10px; padding: 13px; cursor: pointer; background: var(--blue); color: #fff;
+    font: 700 12px Montserrat, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+  .pin div { width: 26px; height: 26px; background: var(--blue); border: 3px solid #fff; border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg); box-shadow: 0 2px 8px rgba(2,31,74,.45); box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="top">
+  <div class="brand">Homes in Georgia <span class="tag" id="tag">КАРТА</span></div>
+  <form class="bar pick-only" id="search"><input id="q" placeholder="Метро, улица, парк…"><button>Найти</button></form>
+  <div class="title view-only" id="title"></div>
+</div>
+<div class="hint pick-only"><span id="hint">Нажмите на карту, где хотите жить</span></div>
+<div class="radius pick-only" id="radius"></div>
+<div class="note view-only"><p><span class="dot"></span><b id="caption"></b></p><button type="button" id="close"></button></div>
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready(); tg.expand();
+try { tg.setHeaderColor('#032D6A'); tg.setBackgroundColor('#FFFFFF'); } catch (e) {}
+const map = L.map('map', { zoomControl: false }).setView([41.7151, 44.7871], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+const pinIcon = L.divIcon({ className: 'pin', html: '<div></div>', iconSize: [26, 26], iconAnchor: [13, 30] });
+
+// view mode (?pin=lat,lng&prec=…&title=…&lang=ru|en): where one listing is, opened by "📍 На карте" under a client's
+// card or an agent's lead card. Nothing is sent back to the bot.
+const qs = new URLSearchParams(location.search);
+const pin = (qs.get('pin') || '').split(',').map(Number);
+const VIEW = pin.length === 2 && pin.every(Number.isFinite);
+if (VIEW) {
+  const en = qs.get('lang') === 'en';
+  document.body.classList.add('view');
+  document.documentElement.lang = en ? 'en' : 'ru';
+  document.getElementById('tag').textContent = en ? 'MAP' : 'КАРТА';
+  document.getElementById('title').textContent = qs.get('title') || '';
+  // geo_precision: «точный» = street + house number; otherwise the point is only the street or the district centre
+  const PREC = en ? { 'точный': 'Apartment location', 'примерный': 'Approximate location: street', 'район': 'Approximate location: district' }
+                  : { 'точный': 'Расположение квартиры', 'примерный': 'Примерное расположение: улица', 'район': 'Примерное расположение: район' };
+  document.getElementById('caption').textContent = PREC[qs.get('prec')] || (en ? 'Approximate location' : 'Примерное расположение');
+  const close = document.getElementById('close');
+  const back = document.referrer.startsWith(location.origin);  // opened from the agents' panel: back to it
+  close.textContent = back ? (en ? 'Back' : 'Назад') : en ? 'Close' : 'Закрыть';
+  close.onclick = () => back ? history.back() : tg.close();
+  L.marker(pin, { icon: pinIcon, interactive: false }).addTo(map);
+  map.setView(pin, qs.get('prec') === 'район' ? 15 : 17);
+  const top = document.querySelector('.top').offsetHeight, bottom = document.querySelector('.note').offsetHeight + 14;
+  map.panBy([0, (bottom - top) / 2], { animate: false });  // the pin between the header and the caption
+}
+
+let marker = null, circle = null, label = null, radius = 2;
+
+[1, 2, 3, 5].forEach(r => {
+  const b = document.createElement('button');
+  b.textContent = r + ' км'; b.type = 'button';
+  b.className = r === radius ? 'on' : '';
+  b.onclick = () => {
+    radius = r;
+    document.querySelectorAll('.radius button').forEach(x => x.className = x === b ? 'on' : '');
+    if (circle) circle.setRadius(radius * 1000);
+  };
+  document.getElementById('radius').appendChild(b);
+});
+
+function place(latlng, name) {
+  label = name || null;
+  if (!marker) {
+    marker = L.marker(latlng, { draggable: true, icon: pinIcon }).addTo(map);
+    marker.on('dragend', () => place(marker.getLatLng()));
+    circle = L.circle(latlng, { radius: radius * 1000, color: '#032D6A', weight: 2, fillColor: '#032D6A', fillOpacity: .1 }).addTo(map);
+  }
+  marker.setLatLng(latlng); circle.setLatLng(latlng);
+  document.getElementById('hint').textContent = label ? '📍 ' + label : 'Точку можно перетащить';
+  tg.MainButton.setParams({ text: 'Искать квартиры здесь', color: '#032D6A', text_color: '#FFFFFF' }).show();
+}
+
+if (!VIEW) map.on('click', e => place(e.latlng));
+
+document.getElementById('search').onsubmit = async e => {
+  e.preventDefault();
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&bounded=1'
+    + '&viewbox=44.60,41.85,45.05,41.60&accept-language=ru&q=' + encodeURIComponent(q);
+  try {
+    const hits = await (await fetch(url)).json();
+    if (!hits.length) { tg.showAlert('Не нашёл такое место в Тбилиси'); return; }
+    const ll = [ +hits[0].lat, +hits[0].lon ];
+    map.setView(ll, 15);
+    place(L.latLng(ll), q);
+  } catch { tg.showAlert('Поиск не сработал, отметьте точку на карте'); }
+};
+
+tg.MainButton.onClick(() => {
+  if (VIEW || !marker) return;
+  const { lat, lng } = marker.getLatLng();
+  tg.sendData(JSON.stringify({ lat, lng, radius, label }));
+});
+</script>
+</body>
+</html>

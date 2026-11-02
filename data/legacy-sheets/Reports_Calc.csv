@@ -1,0 +1,2 @@
+﻿timestamp,agent,agent_level,price,comm_pct,comm_total,platform,agent_amt,is_exclusive,deal_type,link,rent_from,rent_to
+2030-01-01,DEMO_02,DEMO_03,DEMO_04,DEMO_05,DEMO_06,DEMO_07,DEMO_08,FALSE,DEMO_10,https://example.invalid/synthetic,DEMO_12,DEMO_13

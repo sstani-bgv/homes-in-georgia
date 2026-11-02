@@ -1,0 +1,2 @@
+﻿id,name,telegram,mentor_id,is_active,,photo_url,user_id
+DEMO_01,DEMO_02,DEMO_03,DEMO_04,FALSE,DEMO_06,https://example.invalid/synthetic,DEMO_TG_ID_NOT_SENDABLE

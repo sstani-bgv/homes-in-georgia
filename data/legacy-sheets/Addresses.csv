@@ -1,0 +1,2 @@
+﻿id,district,address,ad_link_advertising,is_active
+DEMO_01,DEMO_02,DEMO_03,https://example.invalid/synthetic,FALSE

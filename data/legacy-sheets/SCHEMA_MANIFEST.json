@@ -1,0 +1,612 @@
+[
+  {
+    "sheet": "Лист1",
+    "file": "Лист1.csv",
+    "headers": [],
+    "schema_status": "empty_sheet",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "Пустой лист XLSX: строк и заголовков нет. CSV оставлен пустым, чтобы не выдумывать схему."
+    ],
+    "synthetic_rows": 0,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Agent_Accounts",
+    "file": "Agent_Accounts.csv",
+    "headers": [
+      "tg_id",
+      "telegram",
+      "name",
+      "role",
+      "phone",
+      "birth_date",
+      "registered_at",
+      "last_login_at"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Лист6",
+    "file": "Лист6.csv",
+    "headers": [],
+    "schema_status": "empty_sheet",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "Пустой лист XLSX: строк и заголовков нет. CSV оставлен пустым, чтобы не выдумывать схему."
+    ],
+    "synthetic_rows": 0,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Platform_Desk_Users",
+    "file": "Platform_Desk_Users.csv",
+    "headers": [
+      "name",
+      "password",
+      "role"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Assigned_Showings",
+    "file": "Assigned_Showings.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "client_name",
+      "client_contact",
+      "client_contact_type",
+      "address",
+      "maps_link",
+      "date",
+      "time",
+      "pets",
+      "children",
+      "term",
+      "source",
+      "comment",
+      "photos_count",
+      "status",
+      "agent_message",
+      "client_message"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Rerented",
+    "file": "Reports_Rerented.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "link",
+      "price",
+      "client_name",
+      "client_phone",
+      "owner_name",
+      "owner_phone",
+      "rent_from",
+      "rent_to",
+      "cadastral"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Ticker_Messages",
+    "file": "Ticker_Messages.csv",
+    "headers": [
+      "id",
+      "text",
+      "status",
+      "created"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "TG_Users",
+    "file": "TG_Users.csv",
+    "headers": [
+      "username",
+      "tg_id",
+      "first_name",
+      "last_updated"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Active_Listings",
+    "file": "Active_Listings.csv",
+    "headers": [
+      "message_id",
+      "date",
+      "agent",
+      "district",
+      "price",
+      "rooms",
+      "building",
+      "exclusive",
+      "link",
+      "status"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Analytics_Cache",
+    "file": "Analytics_Cache.csv",
+    "headers": [
+      "key",
+      "value",
+      "updated"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Deals",
+    "file": "Reports_Deals.csv",
+    "headers": [
+      "column_01",
+      "column_02",
+      "column_03",
+      "column_04",
+      "column_05",
+      "column_06",
+      "column_07",
+      "column_08",
+      "column_09",
+      "column_10",
+      "column_11",
+      "column_12",
+      "column_13",
+      "column_14",
+      "column_15",
+      "column_16",
+      "column_17",
+      "column_18",
+      "column_19",
+      "column_20",
+      "column_21"
+    ],
+    "schema_status": "no_header_row_placeholder",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "В первой строке XLSX находятся значения сделки и формулы, не названия колонок. Они не скопированы. column_XX — технические вымышленные имена, не реальные заголовки. Сопоставление 21 позиции со скриптом требует проверки."
+    ],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_General",
+    "file": "Reports_General.csv",
+    "headers": [
+      "timestamp",
+      "author",
+      "preview"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Daily",
+    "file": "Reports_Daily.csv",
+    "headers": [
+      "timestamp",
+      "author",
+      "date",
+      "calls",
+      "calls_no",
+      "calls_yes",
+      "stickers",
+      "photos",
+      "showings",
+      "preview"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Photo_Queue",
+    "file": "Photo_Queue.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "address",
+      "phone",
+      "owner",
+      "date",
+      "message_id",
+      "raw",
+      "source"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Owner_Base",
+    "file": "Owner_Base.csv",
+    "headers": [
+      "Name of Owner",
+      "Telephone",
+      "Address",
+      "Link"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "News",
+    "file": "News.csv",
+    "headers": [
+      "date",
+      "text",
+      "message_id"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Calc",
+    "file": "Reports_Calc.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "agent_level",
+      "price",
+      "comm_pct",
+      "comm_total",
+      "platform",
+      "agent_amt",
+      "is_exclusive",
+      "deal_type",
+      "link",
+      "rent_from",
+      "rent_to"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_T0",
+    "file": "Reports_T0.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "recruit",
+      "object",
+      "deal_date",
+      "h2o_client",
+      "h2o_owner",
+      "h2o_process",
+      "deal_result",
+      "comment"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Agent_Counters",
+    "file": "Agent_Counters.csv",
+    "headers": [
+      "agent",
+      "exclusive_deals",
+      "level",
+      "next_level_at",
+      "last_updated"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Settings",
+    "file": "Settings.csv",
+    "headers": [
+      "key",
+      "value"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Agents",
+    "file": "Agents.csv",
+    "headers": [
+      "id",
+      "name",
+      "telegram",
+      "is_active",
+      "level",
+      "",
+      "photo_url",
+      "user_id"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "Пустой заголовок колонки 6 сохранён; семантику уточнить. user_id — колонка 8."
+    ],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Listings",
+    "file": "Listings.csv",
+    "headers": [
+      "message_id",
+      "date",
+      "agent",
+      "district",
+      "price",
+      "rooms",
+      "building",
+      "exclusive",
+      "link",
+      "raw"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Recruits",
+    "file": "Recruits.csv",
+    "headers": [
+      "id",
+      "name",
+      "telegram",
+      "mentor_id",
+      "is_active",
+      "",
+      "photo_url",
+      "user_id"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "Пустой заголовок колонки 6 сохранён; семантику уточнить. user_id — колонка 8."
+    ],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Addresses",
+    "file": "Addresses.csv",
+    "headers": [
+      "id",
+      "district",
+      "address",
+      "ad_link_advertising",
+      "is_active"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Counters",
+    "file": "Counters.csv",
+    "headers": [
+      "recruit",
+      "photo_done",
+      "photo_plan",
+      "showing_done",
+      "showing_plan",
+      "stickers_done",
+      "stickers_plan",
+      "rental_done",
+      "rental_plan"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Photo",
+    "file": "Reports_Photo.csv",
+    "headers": [
+      "timestamp",
+      "recruit",
+      "mentor",
+      "district_address",
+      "ad_link_advertising",
+      "counter",
+      "date"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Showing",
+    "file": "Reports_Showing.csv",
+    "headers": [
+      "timestamp",
+      "recruit",
+      "mentor",
+      "district_address",
+      "ad_link_advertising",
+      "client_telegram",
+      "result",
+      "counter",
+      "date",
+      "photo_url"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Stickers",
+    "file": "Reports_Stickers.csv",
+    "headers": [
+      "timestamp",
+      "recruit",
+      "mentor",
+      "district",
+      "stickers_count",
+      "counter",
+      "date",
+      "map_photo_url"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_Rental",
+    "file": "Reports_Rental.csv",
+    "headers": [
+      "timestamp",
+      "agent",
+      "recruit",
+      "ad_link_advertising",
+      "rent_price",
+      "agency_commission",
+      "recruit_commission",
+      "platform_commission",
+      "cadastral_number",
+      "client_telegram",
+      "owner_name",
+      "owner_phone",
+      "rent_from",
+      "rent_to",
+      "deal_type",
+      "counter",
+      "t14_date",
+      "t14_status",
+      "agent_chat_id"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Rent_out_Apartment",
+    "file": "Rent_out_Apartment.csv",
+    "headers": [
+      "Отметка времени",
+      "Cadastral ## ",
+      "Price $$",
+      "Sale Price",
+      "Start Rent ",
+      "End Rent ",
+      "Full Name Owner",
+      "Owner Contact ",
+      "Date Of Birth Owner ",
+      "Full Name Clients ",
+      "Clients Contact",
+      "Date of Birth Clients ",
+      "Address ",
+      "Баллы",
+      "Metro Station",
+      "Agent Name",
+      "Total Commission $$",
+      "Total Sale Commission $$",
+      "Agent Commission %%",
+      "Price $$",
+      "Month",
+      "ID"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [
+      "Повтор Price $$ и завершающие пробелы сохранены буквально; автоматическое преобразование в словарь может потерять колонку."
+    ],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  },
+  {
+    "sheet": "Reports_T14",
+    "file": "Reports_T14.csv",
+    "headers": [
+      "timestamp",
+      "object",
+      "agent",
+      "deal_date",
+      "h2o_client",
+      "h2o_owner",
+      "h2o_process",
+      "changes",
+      "complaints",
+      "complaints_text",
+      "deal_result",
+      "agent_comment"
+    ],
+    "schema_status": "verified_xlsx_first_row",
+    "source": "private XLSX snapshot received 2026-10-29; no original rows included",
+    "notes": [],
+    "synthetic_rows": 1,
+    "data": "synthetic_only"
+  }
+]

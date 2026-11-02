@@ -1,0 +1,21 @@
+# Secrets and local state never go into the image
+.env
+.env.*
+.venv
+data
+raw
+listings.json
+proof
+test/e2e
+docs/*.png
+docs/*.html
+# the mockups page is served at /journey (admin.py): only its self-contained index.html goes into the image
+docs/user-journey/*
+!docs/user-journey/index.html
+__pycache__
+*/__pycache__
+*.pyc
+*.log
+.git
+.DS_Store
+# seed/seed.tgz IS included when present (scripts/make_drop_zip.sh with SEED=1)

@@ -1,0 +1,7 @@
+.env
+.venv/
+raw/
+__pycache__/
+*.log
+data/
+seed/*.tgz

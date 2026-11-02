@@ -1,0 +1,14 @@
+# Backend (API, worker, importer). Versions = the shared repo .venv, 02.11.2026.
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.6
+psycopg[binary]==3.3.6
+alembic==1.20.1
+pydantic-settings==2.16.2
+pyjwt==2.15.1
+bcrypt==5.0.0
+httpx==0.28.1
+python-multipart==0.0.33
+tzdata
+# tests
+pytest==9.2.0

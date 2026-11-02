@@ -1,0 +1,24 @@
+# secrets & local state
+.env
+*.env.local
+docs/legacy/
+data/media/
+bot/data/
+bot/raw/
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+frontend/dist/
+.pytest_cache/
+.DS_Store
+dist-handoff/
+
+# real agency data and scraped listings: never in the repo
+data/sheets-copy/
+bot/listings.json
+bot/agents.json
+tmp/
+proof/
+*.log

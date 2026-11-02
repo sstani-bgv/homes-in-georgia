@@ -1,0 +1,2 @@
+﻿message_id,date,agent,district,price,rooms,building,exclusive,link,status
+DEMO_01,2030-01-01,DEMO_03,DEMO_04,DEMO_05,DEMO_06,DEMO_07,FALSE,https://example.invalid/synthetic,DEMO_10

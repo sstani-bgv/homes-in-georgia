@@ -1,0 +1,263 @@
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Trash2 } from 'lucide-react';
+import { api } from '../api';
+import { itemsOf } from '../api/client';
+import type { Role, Settings, User } from '../api/types';
+import { errText, useToast } from '../components/toast';
+import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
+import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime } from '../lib/format';
+import { parseMetrics } from '../lib/useUserNames';
+import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
+
+const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit'];
+
+function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [f, setF] = useState<Partial<User> & { password?: string }>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
+  const set = <K extends keyof User>(k: K, v: User[K]) => setF((x) => ({ ...x, [k]: v }));
+  const save = useMutation({
+    mutationFn: () => {
+      const body = { name: f.name, role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
+        tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans, ...(f.password ? { password: f.password } : {}) };
+      return user ? api.users.update(user.id, body) : api.users.create(body);
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Сохранено'); onDone(); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const promote = useMutation({ mutationFn: () => api.users.promote(user!.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Рекрут переведён в агенты'); onDone(); } });
+  const toggleDistrict = (d: string) => set('districts', (f.districts || []).includes(d) ? (f.districts || []).filter((x) => x !== d) : [...(f.districts || []), d]);
+  const plans = f.plans || { photo: 15, showing: 15, stickers: 15, rental: 15 };
+  return (
+    <div className="col gap-lg">
+      <div className="form-grid">
+        <Field label="Имя" className="span2"><Input value={f.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>
+        <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
+        <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
+        <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
+        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
+        {f.role === 'recruit' ? (
+          <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent').map((u) => ({ value: u.id, label: u.name }))} /></Field>
+        ) : <div />}
+        <Field label="Логин для входа"><Input value={f.login || ''} onChange={(e) => set('login', e.target.value)} autoComplete="off" /></Field>
+        <Field label={user ? 'Новый пароль' : 'Пароль'}><Input type="password" value={f.password || ''} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></Field>
+      </div>
+      <div>
+        <span className="label">Районы</span>
+        <div className="row row-wrap gap-sm mt">{DISTRICTS.map((d) => <button key={d} type="button" className={`chip ${(f.districts || []).includes(d) ? 'active' : ''}`} onClick={() => toggleDistrict(d)}>{d}</button>)}</div>
+      </div>
+      {f.role === 'recruit' && (
+        <div>
+          <span className="label">План на месяц</span>
+          <div className="grid g4 mt">
+            {(['photo', 'showing', 'stickers', 'rental'] as const).map((k) => (
+              <Field key={k} label={{ photo: 'Фото', showing: 'Показы', stickers: 'Расклейка', rental: 'Сдачи' }[k]}>
+                <Input type="number" value={plans[k]} onChange={(e) => set('plans', { ...plans, [k]: Number(e.target.value) })} />
+              </Field>
+            ))}
+          </div>
+        </div>
+      )}
+      <Switch checked={!!f.is_active} onChange={(v) => set('is_active', v)} label="Активен" />
+      <div className="row row-wrap">
+        <Button disabled={!f.name} loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button>
+        {user?.role === 'recruit' && <Button variant="secondary" loading={promote.isPending} onClick={() => promote.mutate()}>Перевести в агенты</Button>}
+      </div>
+    </div>
+  );
+}
+
+function Users() {
+  const [role, setRole] = useState('');
+  const [open, setOpen] = useState<User | 'new' | null>(null);
+  const qc = useQueryClient();
+  const { data, isLoading, error } = useQuery({ queryKey: ['users', 'admin', role], queryFn: () => api.users.list({ role: role || undefined }) });
+  const all = useQuery({ queryKey: ['users', 'admin', ''], queryFn: () => api.users.list({}) });
+  const toggle = useMutation({ mutationFn: (u: User) => api.users.update(u.id, { is_active: !u.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
+  const items = itemsOf(data);
+  return (
+    <>
+      <div className="row row-between row-wrap" style={{ marginBottom: 14 }}>
+        <Seg value={role} onChange={setRole} options={[{ value: '', label: 'Все' }, ...ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))]} />
+        <Button onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
+      </div>
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
+        <div className="card table-wrap">
+          <table className="table">
+            <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
+            <tbody>
+              {items.map((u) => (
+                <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
+                  <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
+                  <td><Badge tone={u.role === 'superadmin' || u.role === 'admin' ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
+                  <td className="num">{u.level ? `${u.level}%` : '—'}</td>
+                  <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>
+                  <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
+                  <td onClick={(e) => e.stopPropagation()}><Switch checked={u.is_active} onChange={() => toggle.mutate(u)} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Drawer open={!!open} onClose={() => setOpen(null)} title={open === 'new' ? 'Новый пользователь' : (open as User | null)?.name || ''}>
+        {open && <UserForm key={open === 'new' ? 'new' : open.id} user={open === 'new' ? undefined : open} all={itemsOf(all.data)} onDone={() => setOpen(null)} />}
+      </Drawer>
+    </>
+  );
+}
+
+/** t.me/<channel> → Telegram channel, facebook.com/groups/<id> → FB group (the parser reads them on the next run). */
+function sourceFromUrl(url: string): { kind: string; key: string } | null {
+  const tg = url.match(/t\.me\/(?:s\/)?([\w]+)/i);
+  if (tg) return { kind: 'tg_competitor', key: tg[1] };
+  const fb = url.match(/facebook\.com\/groups\/([\w.]+)/i);
+  return fb ? { kind: 'fb_group', key: fb[1] } : null;
+}
+
+function Sources() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [url, setUrl] = useState('');
+  const [name, setName] = useState('');
+  const { data, isLoading, error } = useQuery({ queryKey: ['sources'], queryFn: api.sources.list });
+  const upd = useMutation({ mutationFn: ({ id, enabled }: { id: number | string; enabled: boolean }) => api.sources.update(id, { enabled }), onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }) });
+  const parsed = sourceFromUrl(url.trim());
+  const add = useMutation({
+    mutationFn: () => api.sources.create({ ...parsed!, url: url.trim(), name: name.trim() || undefined, enabled: true } as never),
+    onSuccess: () => { setUrl(''); setName(''); qc.invalidateQueries({ queryKey: ['sources'] }); toast('Источник добавлен, парсер заберёт его при следующем запуске'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorBox error={error} />;
+  const items = itemsOf(data);
+  return (
+    <div className="col gap-lg">
+      <Card title="Добавить источник">
+        <div className="row row-wrap" style={{ alignItems: 'flex-end' }}>
+          <Field label="Ссылка на Telegram-канал или группу Facebook" className="grow"><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://t.me/channel или https://facebook.com/groups/123" /></Field>
+          <Field label="Название (необязательно)"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Button disabled={!parsed} loading={add.isPending} onClick={() => add.mutate()}><Plus size={16} />Добавить</Button>
+        </div>
+        {url.trim() && !parsed && <div className="muted mt" style={{ fontSize: 12 }}>Нужна ссылка вида t.me/… или facebook.com/groups/…</div>}
+        {parsed && <div className="muted mt" style={{ fontSize: 12 }}>{parsed.kind === 'fb_group' ? 'Группа Facebook' : 'Telegram-канал'}: {parsed.key}</div>}
+      </Card>
+      {!items.length ? <Empty text="Источников нет" /> : (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {items.map((s) => (
+            <div key={s.id} className="card card-pad col">
+              <div className="row row-between"><h3>{s.name || (s as { key?: string }).key || s.kind}</h3><Switch checked={s.enabled} onChange={(v) => upd.mutate({ id: s.id, enabled: v })} /></div>
+              <div className="muted ellipsis" style={{ fontSize: 13 }}>{s.url || s.kind}</div>
+              <div className="row gap-sm">{s.count !== undefined && <Badge tone="grey">{s.count} объявлений</Badge>}{s.last_run_at && <Badge tone="grey">{ago(s.last_run_at)}</Badge>}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TickerAdmin() {
+  const qc = useQueryClient();
+  const [text, setText] = useState('');
+  const { data } = useQuery({ queryKey: ['ticker'], queryFn: api.ticker.list });
+  const add = useMutation({ mutationFn: () => api.ticker.create(text), onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['ticker'] }); } });
+  const del = useMutation({ mutationFn: (id: number) => api.ticker.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['ticker'] }) });
+  return (
+    <Card label="Главная" title="Бегущая строка">
+      <div className="row" style={{ marginBottom: 12 }}>
+        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Текст сообщения, без восклицательных знаков" />
+        <Button disabled={!text.trim()} loading={add.isPending} onClick={() => add.mutate()}><Plus size={16} />Добавить</Button>
+      </div>
+      {itemsOf(data).map((t) => (
+        <div key={t.id} className="list-row">
+          <span className="grow">{t.text}</span><span className="faint" style={{ fontSize: 12 }}>{fmtDateTime(t.created_at)}</span>
+          <Button size="sm" variant="ghost" onClick={() => del.mutate(t.id)} aria-label="Удалить"><Trash2 size={14} /></Button>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+const METRICS: [string, string][] = [['deals', 'Сделки'], ['platform', 'Комиссия платформы'], ['active_objects', 'Активные объекты'], ['reposts', 'Репосты'],
+  ['leaderboard', 'Топ-5 агентов'], ['telegram_top', 'Telegram топ-10'], ['funnel', 'Объекты и заявки по этапам'], ['response_times', 'Время реакции']];
+
+function SettingsAdmin() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data, isLoading, error } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get });
+  const [s, setS] = useState<Settings>({});
+  useEffect(() => { if (data) setS(data); }, [data]);
+  const save = useMutation({ mutationFn: () => api.settings.put(s), onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); toast('Настройки сохранены'); }, onError: (e) => toast(errText(e), true) });
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorBox error={error} />;
+  const str = (k: string) => (s[k] === undefined || s[k] === null ? '' : String(s[k]));
+  const setK = (k: string, v: unknown) => setS({ ...s, [k]: v });
+  const metrics = parseMetrics(s.dashboard_metrics) || Object.fromEntries([...METRICS, ...ANALYTICS_METRICS].map(([k]) => [k, true]));
+  // metrics saved before the analytics tab existed have no an_* keys: treat those as on
+  if (!Object.keys(metrics).some((k) => k.startsWith('an_'))) ANALYTICS_METRICS.forEach(([k]) => { metrics[k] = true; });
+  const sections = parseMetrics(s.dashboard_sections) || Object.fromEntries(ANALYTICS_SECTIONS.map(([k]) => [k, true]));
+  const setSection = (k: string, on: boolean) => {
+    const next = { ...sections, [k]: on };
+    setK('dashboard_sections', JSON.stringify(Object.keys(next).filter((x) => next[x])));
+  };
+  const setMetric = (k: string, on: boolean) => {
+    const next = { ...metrics, [k]: on };
+    setK('dashboard_metrics', JSON.stringify(Object.keys(next).filter((x) => next[x])));
+  };
+  const flag = (k: string) => ['1', 'true', 'on', 'yes'].includes(str(k).toLowerCase());
+  return (
+    <div className="grid g2">
+      <Card label="Заявки" title="Сроки (SLA), минуты">
+        <div className="form-grid">
+          <Field label="Оператор берёт заявку"><Input type="number" value={str('sla_operator_take_min')} onChange={(e) => setK('sla_operator_take_min', e.target.value)} /></Field>
+          <Field label="Агент вводит время"><Input type="number" value={str('sla_agent_slots_min')} onChange={(e) => setK('sla_agent_slots_min', e.target.value)} /></Field>
+          <Field label="Время клиенту"><Input type="number" value={str('sla_slots_to_client_min')} onChange={(e) => setK('sla_slots_to_client_min', e.target.value)} /></Field>
+          <Field label="Обещание клиенту"><Input type="number" value={str('client_promise_min')} onChange={(e) => setK('client_promise_min', e.target.value)} /></Field>
+          <Field label="Куда идут заявки (lead_target)"><Input value={str('lead_target')} onChange={(e) => setK('lead_target', e.target.value)} placeholder="group" /></Field>
+          <Field label="План сделок в месяц"><Input type="number" value={str('deals_plan')} onChange={(e) => setK('deals_plan', e.target.value)} /></Field>
+          <Field label="Каталог для клиентов" className="span2"><Select value={str('client_catalog') || 'listings'} onChange={(e) => setK('client_catalog', e.target.value)} options={[{ value: 'listings', label: 'Весь опубликованный каталог бота' }, { value: 'properties', label: 'Только объекты в работе' }]} /></Field>
+        </div>
+        <div className="mt-lg"><Switch checked={flag('moderate_all')} onChange={(v) => setK('moderate_all', v ? '1' : '0')} label="Проверять вручную все новые объявления" /></div>
+      </Card>
+      <Card label="Главная" title="Метрики дашборда">
+        <div className="col">
+          {METRICS.map(([k, label]) => <Switch key={k} checked={!!metrics[k]} onChange={(v) => setMetric(k, v)} label={label} />)}
+        </div>
+      </Card>
+      <Card label="Сделки → Аналитика" title="Метрики аналитики">
+        <div className="col">
+          {ANALYTICS_METRICS.map(([k, label]) => <Switch key={k} checked={!!metrics[k]} onChange={(v) => setMetric(k, v)} label={label} />)}
+        </div>
+      </Card>
+      <Card label="Сделки → Аналитика" title="Секции дашборда">
+        <div className="col">
+          <div className="label">Канал и объекты</div>
+          {ANALYTICS_SECTIONS.slice(0, 3).map(([k, label]) => <Switch key={k} checked={!!sections[k]} onChange={(v) => setSection(k, v)} label={label} />)}
+          <div className="label mt">Платформа и сделки</div>
+          {ANALYTICS_SECTIONS.slice(3).map(([k, label]) => <Switch key={k} checked={!!sections[k]} onChange={(v) => setSection(k, v)} label={label} />)}
+        </div>
+      </Card>
+      <div><Button size="lg" loading={save.isPending} onClick={() => save.mutate()}>Сохранить настройки</Button></div>
+    </div>
+  );
+}
+
+export function AdminPage() {
+  const [tab, setTab] = useState<'users' | 'sources' | 'ticker' | 'settings'>('users');
+  return (
+    <>
+      <PageHead label="Только для администраторов" title="Управление" />
+      <Tabs value={tab} onChange={setTab} tabs={[
+        { value: 'users', label: 'Пользователи' }, { value: 'sources', label: 'Источники' },
+        { value: 'ticker', label: 'Бегущая строка' }, { value: 'settings', label: 'Настройки' },
+      ]} />
+      {tab === 'users' && <Users />}
+      {tab === 'sources' && <Sources />}
+      {tab === 'ticker' && <TickerAdmin />}
+      {tab === 'settings' && <SettingsAdmin />}
+    </>
+  );
+}

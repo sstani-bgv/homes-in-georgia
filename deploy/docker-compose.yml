@@ -1,0 +1,44 @@
+# docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+# Secrets come only from .env (see .env.example). Postgres is not exposed outside the compose network.
+x-app: &app
+  build: { context: .., dockerfile: deploy/Dockerfile }
+  env_file: ../.env
+  environment:
+    SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-homes}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-homes}
+  depends_on: { db: { condition: service_healthy } }
+  restart: unless-stopped
+  volumes: [media:/app/data, botdata:/app/bot/data, botraw:/app/bot/raw]
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-homes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-homes}
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"], interval: 5s, retries: 20 }
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    ports: ["127.0.0.1:8000:8000"]   # put a TLS reverse proxy (Caddy/Traefik/Dokploy) in front
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"], interval: 30s }
+
+  worker:
+    <<: *app
+    command: ["sh", "-c", "cd backend && python -m app.worker"]
+    depends_on: { api: { condition: service_started } }
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "bot.run"]
+    depends_on: { api: { condition: service_started } }
+
+  refresh:
+    <<: *app
+    command: ["sh", "-c", "cd bot && ./refresh_loop.sh"]
+    depends_on: { api: { condition: service_started } }
+
+volumes: { pg: {}, media: {}, botdata: {}, botraw: {} }

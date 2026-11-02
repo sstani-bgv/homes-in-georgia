@@ -1,0 +1,151 @@
+// Typed API functions, straight from docs/ARCHITECTURE.md §7.
+import { http } from './client';
+import {
+  normAgentStat, normAuth, normBoard, normCabinet, normClient, normCounter, normDashboard, normEvent, normLead, normListing, normPage,
+  normProperty, normRecommend, normReport,
+} from './normalize';
+import type {
+  AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
+  EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
+  Settings, Source, TickerMessage, User, ChannelPost, ListingsStats,
+} from './types';
+
+type L<T> = Page<T> | T[];
+const LIMIT = 200;
+const then = <A, B>(p: Promise<A>, f: (a: A) => B) => p.then(f);
+
+export const api = {
+  config: () => http.get<AppConfig>('/config'),
+
+  auth: {
+    login: (login: string, password: string) => then(http.post<AuthOut>('/auth/login', { login, password }), normAuth),
+    telegramWebApp: (init_data: string) => then(http.post<AuthOut>('/auth/telegram-webapp', { init_data }), normAuth),
+    telegramLogin: (data: Record<string, unknown>) => then(http.post<AuthOut>('/auth/telegram-login', data), normAuth),
+    me: () => http.get<User>('/auth/me'),
+  },
+
+  users: {
+    list: (q?: { role?: string; active?: boolean | string }) => http.get<L<User>>('/users', q),
+    create: (b: Partial<User> & { password?: string }) => http.post<User>('/users', b),
+    update: (id: number, b: Partial<User> & { password?: string }) => http.patch<User>(`/users/${id}`, b),
+    promote: (id: number) => http.post<User>(`/users/${id}/promote`),
+    stats: (id: number) => http.get<Record<string, unknown>>(`/users/${id}/stats`),
+  },
+
+  cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
+
+  listings: {
+    new: (q?: { q?: string; source?: string; flag?: string }) => then(http.get<L<Listing>>('/listings/new', { ...q, limit: LIMIT }), (d) => normPage(d, normListing)),
+    get: (id: string) => then(http.get<Listing>(`/listings/${id}`), normListing),
+  },
+
+  properties: {
+    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number }) => then(http.get<L<Property>>('/properties', { ...q, limit: LIMIT }), (d) => normPage(d, normProperty)),
+    board: () => then(http.get<Record<string, Property[]>>('/properties/board'), (d) => normBoard(d, normProperty)),
+    take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),
+    create: (b: Partial<Property>) => http.post<Property>('/properties', b),
+    get: (id: number) => then(http.get<Property>(`/properties/${id}`), normProperty),
+    update: (id: number, b: Partial<Property>) => http.patch<Property>(`/properties/${id}`, b),
+    call: (id: number, reached: boolean) => http.post<Property>(`/properties/${id}/call`, { reached }),
+    owner: (id: number, b: { is_owner: boolean; owner_name?: string; owner_phone?: string }) =>
+      http.post<Property>(`/properties/${id}/owner`, b),
+    shoot: (id: number, shoot_at: string) =>
+      http.post<Property & { dup_check?: 'added' | 'exists' }>(`/properties/${id}/shoot`, { shoot_at }),
+    uploadMedia: (id: number, files: File[], room?: string) => {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      if (room) fd.append('room', room);
+      return http.post<Property>(`/properties/${id}/media`, fd);
+    },
+    deleteMedia: (id: number, mid: number) => http.del<unknown>(`/properties/${id}/media/${mid}`),
+    checklist: (id: number, checklist: Record<string, boolean>) => http.post<Property>(`/properties/${id}/checklist`, { checklist }),
+    submit: (id: number) => http.post<Property>(`/properties/${id}/submit`),
+    review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
+    publish: (id: number) => http.post<Property>(`/properties/${id}/publish`),
+    archive: (id: number) => http.post<Property>(`/properties/${id}/archive`),
+    history: (id: number) => then(http.get<L<EventItem>>(`/properties/${id}/history`), (d) => normPage(d, normEvent)),
+    checkDuplicate: (b: { phone?: string; address?: string; url?: string; cadastral?: string }) =>
+      http.post<{ status?: string; matches?: unknown[]; [k: string]: unknown }>('/properties/check-duplicate', b),
+  },
+
+  owners: {
+    list: (q?: string) => http.get<L<Owner>>('/owners', { q }),
+    create: (b: Partial<Owner>) => http.post<Owner>('/owners', b),
+    update: (id: number, b: Partial<Owner>) => http.patch<Owner>(`/owners/${id}`, b),
+  },
+
+  leads: {
+    list: (q?: { status?: string; agent_id?: number; operator_id?: number; q?: string }) => then(http.get<L<Lead>>('/leads', { ...q, limit: LIMIT }), (d) => normPage(d, normLead)),
+    board: () => then(http.get<Record<string, Lead[]>>('/leads/board'), (d) => normBoard(d, normLead)),
+    get: (id: number) => then(http.get<Lead>(`/leads/${id}`), normLead),
+    take: (id: number) => http.post<Lead>(`/leads/${id}/take`),
+    recommend: (id: number) => then(http.get<L<RecommendedAgent>>(`/leads/${id}/recommend-agents`), (d) => normPage(d, normRecommend)),
+    assign: (id: number, agent_id: number) => http.post<Lead>(`/leads/${id}/assign`, { agent_id }),
+    slots: (id: number, starts: string[]) => http.post<Lead>(`/leads/${id}/slots`, { starts }),
+    reschedule: (id: number) => http.post<Lead>(`/leads/${id}/reschedule`),
+    outcome: (id: number, outcome: string, reason?: string) => http.post<Lead>(`/leads/${id}/outcome`, { outcome, reason }),
+    cancel: (id: number, reason: string) => http.post<Lead>(`/leads/${id}/cancel`, { reason }),
+    message: (id: number, text: string) => http.post<unknown>(`/leads/${id}/message`, { text }),
+  },
+
+  clients: {
+    list: (q?: string) => http.get<L<Client>>('/clients', { q }),
+    get: (id: number) => then(http.get<Client>(`/clients/${id}`), normClient),
+  },
+
+  deals: {
+    calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),
+    list: (q?: { month?: string; agent_id?: number; status?: string }) => http.get<L<Deal>>('/deals', { ...q, limit: LIMIT }),
+    create: (b: Partial<Deal>) => http.post<Deal>('/deals', b),
+    get: (id: number) => http.get<Deal>(`/deals/${id}`),
+    confirm: (id: number) => http.post<Deal>(`/deals/${id}/confirm`),
+    cancel: (id: number) => http.post<Deal>(`/deals/${id}/cancel`),
+    expiring: (days = 30) => http.get<L<Deal>>('/deals/expiring', { days }),
+    find: (cadastral: string) => http.get<L<Deal>>('/deals/find', { cadastral }),
+  },
+
+  evaluations: {
+    create: (b: Partial<Evaluation>) => http.post<Evaluation>('/evaluations', b),
+    list: (deal_id: number) => http.get<L<Evaluation>>('/evaluations', { deal_id }),
+  },
+
+  reports: {
+    create: (kind: ReportKind, b: Record<string, unknown>) => then(http.post<Report>(`/reports/${kind}`, b), normReport),
+    list: (q?: { kind?: string; author_id?: number; month?: string }) => then(http.get<L<Report>>('/reports', { ...q, limit: LIMIT }), (d) => normPage(d, normReport)),
+    counters: (month?: string) => then(http.get<L<CounterRow>>('/counters', { month }), (d) => normPage(d, normCounter)),
+  },
+
+  analytics: {
+    dashboard: () => then(http.get<Dashboard>('/analytics/dashboard'), normDashboard),
+    funnel: (from?: string, to?: string) => http.get<Record<string, unknown>>('/analytics/funnel', { from, to }),
+    listings: () => http.get<ListingsStats>('/analytics/listings'),
+    agents: () => then(http.get<L<AgentStat>>('/analytics/agents'), (d) => normPage(d, normAgentStat)),
+  },
+
+  ticker: {
+    list: () => http.get<L<TickerMessage>>('/ticker'),
+    create: (text: string) => http.post<TickerMessage>('/ticker', { text }),
+    remove: (id: number) => http.del<unknown>(`/ticker/${id}`),
+  },
+  news: () => http.get<L<NewsItem>>('/news'),
+  channelPosts: (q?: { hashtag?: string; district?: string; status?: string; q?: string; agent_id?: number; source?: string; rooms?: string; exclusive?: boolean; limit?: number; offset?: number }) =>
+    http.get<L<ChannelPost>>('/channel-posts', { limit: 60, ...q }),
+
+  settings: {
+    get: () => http.get<Settings>('/settings'),
+    put: (b: Settings) => http.put<Settings>('/settings', b),
+  },
+
+  sources: {
+    list: () => http.get<L<Source>>('/sources'),
+    create: (b: Partial<Source>) => http.post<Source>('/sources', b),
+    update: (id: number | string, b: Partial<Source>) => http.patch<Source>(`/sources/${id}`, b),
+  },
+
+  moderation: {
+    list: () => then(http.get<L<Listing>>('/moderation', { limit: LIMIT }), (d) => normPage(d, normListing)),
+    decide: (listing_id: string, approve: boolean) => http.post<unknown>(`/moderation/${listing_id}`, { approve }),
+  },
+
+  addresses: () => http.get<L<{ id: number; district: string; address: string; ad_link?: string }>>('/addresses'),
+};

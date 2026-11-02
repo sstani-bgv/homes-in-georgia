@@ -1,0 +1,21 @@
+{
+  "telegram_defaults": {"want": 100, "photos": 3, "scan": 2000},
+  "telegram_channels": [
+    {"username": "rent_tbilisi_ge", "kind": "agency", "caption_marker": "💰"},
+    {"username": "flats_in_georgia", "kind": "competitor", "want": 40},
+    {"username": "tbilisi_apartments", "kind": "competitor", "want": 40},
+    {"username": "crescotbilisi", "kind": "competitor", "want": 40},
+    {"username": "Tbilisi_Rent_Expert", "kind": "competitor", "want": 40},
+    {"username": "kvartiry_tbili_city", "kind": "competitor", "want": 40},
+    {"username": "propertyintbilisi", "kind": "competitor", "want": 40}
+  ],
+  "facebook_defaults": {"posts_per_group": 30, "days_back": 7, "photos": 3},
+  "facebook_groups": [
+    {"key": "kiraoba_tbilisi", "url": "https://www.facebook.com/groups/315406794412410/", "lang": "ka/en", "name": "ბინების ქირაობა თბილისში. Apartments for rent in Tbilisi"},
+    {"key": "binebisgakiraveba", "id": "562473541078668", "url": "https://www.facebook.com/groups/binebisgakiraveba/", "lang": "ka", "name": "ბინების გაქირავება თბილისში / ბინები თბილისში"},
+    {"key": "rental_apartments_tbilisi", "url": "https://www.facebook.com/groups/1723741688236417/", "lang": "ru/en", "name": "Rental Apartments In Tbilisi / аренда квартир в Тбилиси"},
+    {"key": "snimu_sdayu_tbilisi", "url": "https://www.facebook.com/groups/918131402810112/", "lang": "ru", "name": "Тбилиси сниму /сдаю/ продам жильё"},
+    {"key": "snyat_kvartiru_tbilisi", "url": "https://www.facebook.com/groups/361958447581372/", "lang": "ru", "name": "Снять квартиру в Тбилиси"},
+    {"key": "tbilisi_obyavleniya", "url": "https://www.facebook.com/groups/2138972052801792/", "lang": "ru/en", "name": "Тбилиси Объявления Аренда жилья, апартаменты, квартиры"}
+  ]
+}
