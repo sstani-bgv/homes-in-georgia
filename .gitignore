@@ -15,10 +15,5 @@ frontend/dist/
 .DS_Store
 dist-handoff/
 
-# real agency data and scraped listings: never in the repo
-data/sheets-copy/
+# объявления с телефонами — персональные данные, не хранить в git
 bot/listings.json
-bot/agents.json
-tmp/
-proof/
-*.log

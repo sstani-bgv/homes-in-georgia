@@ -107,10 +107,10 @@ export function DashboardPage() {
               <MyTasks />
               {show('funnel') && (
                 <div className="grid g2">
-                  <Card title="Объекты">
+                  <Card label="Воронка 1" title="Объекты">
                     <FunnelRow order={PROPERTY_BOARD} labels={PROPERTY_STATUS} counts={data.funnel?.properties} link="/objects?tab=board" />
                   </Card>
-                  <Card title="Заявки">
+                  <Card label="Воронка 2" title="Заявки">
                     <FunnelRow order={LEAD_BOARD} labels={LEAD_STATUS} counts={data.funnel?.leads} link="/leads" />
                   </Card>
                 </div>

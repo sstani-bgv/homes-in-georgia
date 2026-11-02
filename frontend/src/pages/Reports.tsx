@@ -32,7 +32,7 @@ function ReportsInner() {
   const [filter, setFilter] = useState<string>('');
   return (
     <>
-      <PageHead label="Фото, показы, расклейка, сдачи — то, что агенты раньше слали в рабочую группу" title="Отчёты" />
+      <PageHead label="Работа команды" title="Отчёты" />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'new', label: 'Новый отчёт' }, { value: 'list', label: 'Журнал' }, { value: 'check', label: 'Проверка объекта' }]} />
       {tab === 'check' ? <PropertyCheck /> : tab === 'new' ? (
         <div style={{ maxWidth: 760 }}>

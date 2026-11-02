@@ -20,12 +20,12 @@ router = APIRouter(tags=["objects"])
 
 @router.get("/listings/new")
 def listings_new(q: str | None = None, source: str | None = None, flag: str | None = None,
-                 limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                 limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.new_listings(db, q, source, flag, limit, offset)
 
 
 @router.get("/listings/{listing_id}")
-def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def listing_get(listing_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     listing = get_or_404(db, Listing, listing_id, "listing")
     prop = db.scalar(select(Property).where(Property.listing_id == listing_id))
     # original links / text with phones / dup sources: staff and the agent holding the object only
@@ -83,7 +83,7 @@ class DupIn(BaseModel):
 
 @router.get("/properties")
 def properties_list(status: str | None = None, agent_id: int | None = None, q: str | None = None, mine: int = 0,
-                    limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                    limit: int = 50, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)):
     stmt = P.query(db, user, status, agent_id, q, bool(mine))
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))
@@ -91,12 +91,12 @@ def properties_list(status: str | None = None, agent_id: int | None = None, q: s
 
 
 @router.get("/properties/board")
-def properties_board(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_board(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.board(db, user)
 
 
 @router.post("/properties/check-duplicate")
-def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def check_duplicate(body: DupIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     res = P.check_duplicate(db, body.phone, body.address, body.url, body.cadastral)
     if user.role not in STAFF:
         mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
@@ -107,82 +107,82 @@ def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function")
 
 
 @router.post("/properties")
-def properties_create(body: PropertyIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_create(body: PropertyIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     data = body.model_dump(exclude_none=True)
     p = P.take(db, data.pop("listing_id", None), user, data)
     return P.out(db, p, user, full=True)
 
 
 @router.get("/properties/{pid}")
-def properties_get(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_get(pid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, get_or_404(db, Property, pid, "property"), user, full=True)
 
 
 @router.patch("/properties/{pid}")
-def properties_patch(pid: int, body: PropertyIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_patch(pid: int, body: PropertyIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     data = body.model_dump(exclude_unset=True)
     data.pop("listing_id", None)
     return P.out(db, P.update(db, pid, data, user), user, full=True)
 
 
 @router.post("/properties/{pid}/call")
-def properties_call(pid: int, body: CallIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_call(pid: int, body: CallIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, P.call_result(db, pid, user, body.reached), user, full=True)
 
 
 @router.post("/properties/{pid}/owner")
-def properties_owner(pid: int, body: OwnerStepIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_owner(pid: int, body: OwnerStepIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, P.owner_or_agent(db, pid, user, body.is_owner, body.owner_name, body.owner_phone), user, full=True)
 
 
 @router.post("/properties/{pid}/shoot")
-def properties_shoot(pid: int, body: ShootIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_shoot(pid: int, body: ShootIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     p, dup = P.schedule_shoot(db, pid, user, body.shoot_at)
     return {**P.out(db, p, user, full=True), "dup_check": dup}
 
 
 @router.post("/properties/{pid}/media")
 async def properties_media(pid: int, files: list[UploadFile] = File(...), room: str | None = Form(None),
-                           db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                           db: Session = Depends(get_db), user: User = Depends(current_user)):
     payload = [(f.filename or "file", await f.read()) for f in files]
     P.upload_media(db, pid, payload, room, user)
     return P.out(db, get_or_404(db, Property, pid), user, full=True)
 
 
 @router.delete("/properties/{pid}/media/{mid}")
-def properties_media_delete(pid: int, mid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_media_delete(pid: int, mid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     P.delete_media(db, pid, mid, user)
     return {"ok": True}
 
 
 @router.post("/properties/{pid}/checklist")
-def properties_checklist(pid: int, body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_checklist(pid: int, body: dict, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, P.set_checklist(db, pid, body.get("checklist", body), user), user, full=True)
 
 
 @router.post("/properties/{pid}/submit")
-def properties_submit(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_submit(pid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, P.submit_for_review(db, pid, user), user, full=True)
 
 
 @router.post("/properties/{pid}/review")
-def properties_review(pid: int, body: ReviewIn, db: Session = Depends(get_db, scope="function"),
+def properties_review(pid: int, body: ReviewIn, db: Session = Depends(get_db),
                       user: User = Depends(require_roles(*STAFF_ROLES))):
     return P.out(db, P.review(db, pid, user, body.approve, body.comment), user, full=True)
 
 
 @router.post("/properties/{pid}/publish")
-def properties_publish(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def properties_publish(pid: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return P.out(db, P.publish(db, pid, user), user, full=True)
 
 
 @router.post("/properties/{pid}/archive")
-def properties_archive(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_archive(pid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return P.out(db, P.archive(db, pid, user), user, full=True)
 
 
 @router.get("/properties/{pid}/history")
-def properties_history(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def properties_history(pid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     get_or_404(db, Property, pid, "property")
     return P.history(db, pid)
 
@@ -205,7 +205,7 @@ def owner_out(o: Owner, show_phone: bool = True) -> dict:
 
 
 @router.get("/owners")
-def owners_list(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+def owners_list(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db),
                 user: User = Depends(current_user)):
     stmt = select(Owner)
     if q:
@@ -224,7 +224,7 @@ def owners_list(q: str | None = None, limit: int = 50, offset: int = 0, db: Sess
 
 
 @router.post("/owners")
-def owners_create(body: OwnerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def owners_create(body: OwnerIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     o, _ = P.upsert_owner(db, body.name, body.phone, body.address, body.link, bool(body.is_agent), user)
     if body.notes:
         o.notes = body.notes
@@ -233,7 +233,7 @@ def owners_create(body: OwnerIn, db: Session = Depends(get_db, scope="function")
 
 
 @router.patch("/owners/{oid}")
-def owners_patch(oid: int, body: OwnerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def owners_patch(oid: int, body: OwnerIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     o = get_or_404(db, Owner, oid, "owner")
     data = body.model_dump(exclude_unset=True)
     for k, v in data.items():

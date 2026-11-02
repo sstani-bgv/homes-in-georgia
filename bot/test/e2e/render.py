@@ -96,23 +96,11 @@ def transcript(log, chat, since=0, until=None, users=None):
             imgs = "".join(f'<div class="vid"><video src="file://{p["file"]}#t=1" muted preload="auto"></video><span>▶</span></div>'
                            if p.get("type") == "video" else f'<img src="file://{p["file"]}">' for p in x["media"] if p.get("file"))
             blocks.append(f'<div class="album in n{len(x["media"])}">{imgs}</div>')
-            cap = next((p.get("caption") for p in x["media"] if p.get("caption")), None)
-            if cap:  # a channel post: the caption sits under the album
-                blocks.append({"body": tg_html(cap) if x["media"][0].get("parse_mode") == "HTML" else esc(cap), "markup": None,
-                               "tm": tm, "edited": False})
         elif m == "sendPhoto":
-            img = f'<img class="single" src="file://{x["file"]}">' if x.get("file") else ""
-            cap = x.get("caption") or ""
-            blk = {"img": img, "body": img + (tg_html(cap) if x.get("parse_mode") == "HTML" else esc(cap)),
-                   "markup": x.get("reply_markup"), "tm": tm, "edited": False}
-            by_mid[x["message_id"]] = blk
-            blocks.append(blk)
-        elif m in ("editMessageText", "editMessageReplyMarkup", "editMessageCaption"):
+            blocks.append(f'<div class="msg in"><img class="single" src="file://{x["file"]}"><div class="time">{tm}</div></div>')
+        elif m in ("editMessageText", "editMessageReplyMarkup"):
             blk = by_mid.get(x["message_id"])
             if blk:
-                if m == "editMessageCaption":
-                    cap = x.get("caption") or ""
-                    blk["body"] = blk.get("img", "") + (tg_html(cap) if x.get("parse_mode") == "HTML" else esc(cap))
                 if m == "editMessageText":
                     blk["body"] = tg_html(x["text"]) if x.get("parse_mode") == "HTML" else esc(x["text"])
                 blk["markup"] = x.get("reply_markup")

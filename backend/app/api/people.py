@@ -57,7 +57,7 @@ class PromoteIn(BaseModel):
 
 
 @router.get("/users")
-def list_users(role: str | None = None, active: bool | None = None, db: Session = Depends(get_db, scope="function"),
+def list_users(role: str | None = None, active: bool | None = None, db: Session = Depends(get_db),
                user: User = Depends(current_user)):
     rows = users.list_users(db, role, active)
     if user.role not in STAFF:  # agents see the team (names/levels), not logins
@@ -67,23 +67,23 @@ def list_users(role: str | None = None, active: bool | None = None, db: Session 
 
 
 @router.post("/users")
-def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def create_user(body: UserIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     data = body.model_dump(exclude_none=True)
     return user_out(users.create(db, data, user))
 
 
 @router.patch("/users/{uid}")
-def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user))
 
 
 @router.post("/users/{uid}/promote")
-def promote(uid: int, body: PromoteIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def promote(uid: int, body: PromoteIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     return user_out(users.promote(db, uid, body.level, user))
 
 
 @router.get("/users/{uid}/stats")
-def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if user.role not in STAFF and user.id != uid:
         raise forbidden()
     u = get_or_404(db, User, uid, "user")
@@ -101,7 +101,7 @@ def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db,
 
 
 @router.get("/me/cabinet")
-def cabinet(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def cabinet(db: Session = Depends(get_db), user: User = Depends(current_user)):
     y, m = reports.month_bounds(None)
     mo = f"{m}/{y}"
     today = now().astimezone(TZ).date()
@@ -150,7 +150,7 @@ def client_out(c: Client, full: bool = True) -> dict:
 
 
 @router.get("/clients")
-def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db),
                  user: User = Depends(require_roles(*STAFF_ROLES))):
     stmt = select(Client)
     if q:
@@ -165,7 +165,7 @@ def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Ses
 
 
 @router.get("/clients/{cid}")
-def get_client(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def get_client(cid: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     c = get_or_404(db, Client, cid, "client")
     d = client_out(c)
     d["leads"] = [leads.card(db, x, user) for x in db.scalars(select(Lead).where(Lead.client_id == cid)

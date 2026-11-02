@@ -45,33 +45,33 @@ def _visible(db: Session, lead_id: int, user: User) -> Lead:
 
 @router.get("/leads")
 def leads_list(status: str | None = None, agent_id: int | None = None, operator_id: int | None = None,
-               q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+               q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db),
                user: User = Depends(current_user)):
     return L.page(db, L.query(db, user, status, agent_id, operator_id, q), user, limit, offset)
 
 
 @router.get("/leads/board")
-def leads_board(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_board(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return L.board(db, user)
 
 
 @router.get("/leads/{lead_id}")
-def leads_get(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_get(lead_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return L.detail(db, _visible(db, lead_id, user), user)
 
 
 @router.post("/leads/{lead_id}/take")
-def leads_take(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def leads_take(lead_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return L.detail(db, L.operator_take(db, lead_id, user), user)
 
 
 @router.get("/leads/{lead_id}/recommend-agents")
-def leads_recommend(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def leads_recommend(lead_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return L.recommend_agents(db, lead_id)
 
 
 @router.post("/leads/{lead_id}/assign")
-def leads_assign(lead_id: int, body: AssignIn, db: Session = Depends(get_db, scope="function"),
+def leads_assign(lead_id: int, body: AssignIn, db: Session = Depends(get_db),
                  user: User = Depends(require_roles(*STAFF_ROLES))):
     lead = get_or_404(db, Lead, lead_id, "lead")
     if lead.status in ("new", "operator_taken", "agent_assigned"):
@@ -82,32 +82,32 @@ def leads_assign(lead_id: int, body: AssignIn, db: Session = Depends(get_db, sco
 
 
 @router.post("/leads/{lead_id}/slots")
-def leads_slots(lead_id: int, body: SlotsIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_slots(lead_id: int, body: SlotsIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
     L.reject_past_slots(body.starts)
     return L.detail(db, L.add_slots(db, lead_id, body.starts, user), user)
 
 
 @router.post("/leads/{lead_id}/reschedule")
-def leads_reschedule(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_reschedule(lead_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
     return L.detail(db, L.request_reschedule(db, lead_id, "agent" if user.role not in STAFF_ROLES else "operator", user),
                     user)
 
 
 @router.post("/leads/{lead_id}/outcome")
-def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
     return L.detail(db, L.set_outcome(db, lead_id, "agent", body.outcome, body.reason, user), user)
 
 
 @router.post("/leads/{lead_id}/cancel")
-def leads_cancel(lead_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
+def leads_cancel(lead_id: int, body: ReasonIn, db: Session = Depends(get_db),
                  user: User = Depends(require_roles(*STAFF_ROLES))):
     return L.detail(db, L.cancel(db, lead_id, user, body.reason), user)
 
 
 @router.post("/leads/{lead_id}/message")
-def leads_message(lead_id: int, body: TextIn, db: Session = Depends(get_db, scope="function"),
+def leads_message(lead_id: int, body: TextIn, db: Session = Depends(get_db),
                   user: User = Depends(require_roles(*STAFF_ROLES))):
     return L.detail(db, L.message_client(db, lead_id, body.text, user), user)

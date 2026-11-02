@@ -28,7 +28,7 @@ function EvalForm({ deal, kind, onDone }: { deal: Deal; kind: 't0' | 't14'; onDo
       deal_id: deal.id, kind, author: 'agent', h2o_client: v.c, h2o_owner: v.o, h2o_process: v.p,
       result: kind === 't14' ? v.result : null, changes: v.changes || null, complaints: v.complaints, complaints_text: v.complaints_text || null, comment: v.comment || null,
     }),
-    onSuccess: () => { toast(kind === 't14' ? 'День 14 сохранён' : 'День 0 сохранён'); onDone(); },
+    onSuccess: () => { toast(kind === 't14' ? 'T14 сохранён' : 'T0 сохранён'); onDone(); },
     onError: (e) => toast(errText(e), true),
   });
   return (
@@ -78,7 +78,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
       <KV items={[
         ['Агент', nameOf(d.agent_id, d.agent?.name)], ['Тип', `${d.deal_type === 'sale' ? 'Продажа' : 'Аренда'}${d.sub_type ? ` · ${d.sub_type}` : ''}`], ['Адрес', d.address],
         ['Клиент', [d.client_name, d.client_phone, d.client_tg].filter(Boolean).join(' · ') || '—'], ['Собственник', [d.owner_name, d.owner_phone].filter(Boolean).join(' · ') || '—'],
-        ['Аренда', d.rent_from ? `${fmtDate(d.rent_from)} — ${fmtDate(d.rent_to)}` : '—'], ['День 14', d.t14_date ? `${fmtDate(d.t14_date)} · ${d.t14_status || ''}` : '—'],
+        ['Аренда', d.rent_from ? `${fmtDate(d.rent_from)} — ${fmtDate(d.rent_to)}` : '—'], ['T14', d.t14_date ? `${fmtDate(d.t14_date)} · ${d.t14_status || ''}` : '—'],
         ['Создана', fmtDateTime(d.created_at)], ['Заявка', d.lead_id ? `#${d.lead_id}` : '—'],
       ]} />
       <Link to={`${loc.pathname.startsWith('/m/') ? '/m' : ''}/contracts?deal_id=${d.id}`} className="btn btn-secondary"><FileText size={16} />Подготовить договор</Link>
@@ -88,9 +88,9 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
           <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate()}><XCircle size={16} />Отменить</Button>
         </div>
       )}
-      <Card label="Оценки" title="День 0 / День 14" actions={<>
-        <Button size="sm" variant="secondary" onClick={() => setEvalKind('t0')}>День 0</Button>
-        <Button size="sm" variant="secondary" onClick={() => setEvalKind('t14')}>День 14</Button>
+      <Card label="Оценки" title="T0 / T14" actions={<>
+        <Button size="sm" variant="secondary" onClick={() => setEvalKind('t0')}>T0</Button>
+        <Button size="sm" variant="secondary" onClick={() => setEvalKind('t14')}>T14</Button>
       </>}>
         {itemsOf(evals.data).length === 0 ? <div className="muted">Оценок пока нет</div> : itemsOf(evals.data).map((e) => (
           <div key={e.id} className="list-row">
@@ -198,7 +198,7 @@ export function DealsPage({ newDeal }: { newDeal?: boolean }) {
   }
   return (
     <>
-      <PageHead title="Сделки" actions={<Button onClick={() => navigate('/deals/new')}><Plus size={16} />Новая сделка</Button>} />
+      <PageHead label="Воронка 2" title="Сделки" actions={<Button onClick={() => navigate('/deals/new')}><Plus size={16} />Новая сделка</Button>} />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'list', label: 'Сделки' }, { value: 'expiring', label: 'Истекают договоры' }, { value: 'analytics', label: 'Аналитика' }]} />
       {tab === 'list' ? <DealsList onOpen={setOpen} /> : tab === 'expiring' ? <Expiring onOpen={setOpen} /> : <DealsAnalytics />}
       <Drawer open={!!open} onClose={() => setOpen(null)} title={`Сделка #${open}`}>{open && <DealView id={open} onClose={() => setOpen(null)} />}</Drawer>

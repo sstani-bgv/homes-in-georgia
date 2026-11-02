@@ -42,13 +42,6 @@ def map_kb(lang):
                                 [KeyboardButton(core.t(lang, "here_btn"), request_location=True)]], resize_keyboard=True)
 
 
-LANGS = [("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English")]  # core.T languages
-
-
-def lang_kb():
-    return Kb([[Btn(label, callback_data=f"lang:{code}") for code, label in LANGS]])
-
-
 def bind_agent(user):
     """An agent added in the admin by @username gets its Telegram id on the first message to the bot."""
     return core.agent(user.id, user.full_name, user.username)
@@ -312,26 +305,6 @@ async def on_start(update: Update, ctx):
     await sync_menu(ctx.bot, update.effective_chat.id)
     cl = await asyncio.to_thread(client_of, update.effective_user, update.effective_chat.id)
     await asyncio.to_thread(core.reset, cl, lang_hint=update.effective_user.language_code)
-    if not cl["state"].get("lang_set"):  # first contact: the language first, then the questionnaire (on_lang_button)
-        await on_lang(update, ctx)
-        return
-    await journey.on_start(update, ctx, cl)
-
-
-async def on_lang(update: Update, ctx):
-    """/lang (and the first /start): pick the client language."""
-    await ctx.bot.send_message(update.effective_chat.id, "Выберите язык / Choose your language", reply_markup=lang_kb())
-
-
-async def on_lang_button(update: Update, ctx):
-    q = update.callback_query
-    lang = q.data.split(":", 1)[1]
-    if lang not in core.T or not journey.first_tap(q, "lang"):  # a double tap must not start the questionnaire twice
-        return await journey.answer(q)
-    cl = await asyncio.to_thread(client_of, q.from_user, update.effective_chat.id)
-    await asyncio.to_thread(core.set_lang, cl, lang)
-    await journey.answer(q)
-    await journey.edit_text(q, dict(LANGS)[lang])
     await journey.on_start(update, ctx, cl)
 
 
@@ -418,9 +391,8 @@ async def send_reviews(bot, chats=None, limit=None):
 
 async def review_loop(app):
     while True:
-        try:  # clients see only agency/photographed objects -> nothing to approve, so no review cards
-            if db.get_setting("client_catalog") not in ("properties", "published_only"):
-                await send_reviews(app.bot)
+        try:
+            await send_reviews(app.bot)
         except Exception as e:  # never kill the loop
             print("review loop:", e)
         try:  # agency videos of posts found by the refresh (details.video_msg) -> file_id; a no-op when all are done
@@ -468,8 +440,6 @@ async def on_button(update: Update, ctx):
     elif q.data == "more":
         await journey.answer(q)
         schedule(update, ctx, delay=0)
-    elif q.data.startswith("lang:"):
-        await on_lang_button(update, ctx)
     elif q.data.startswith("mod:"):
         await on_staff_button(update, ctx, q.data)
     elif await journey.on_callback(update, ctx, lambda: client_of(q.from_user, update.effective_chat.id)):
@@ -566,7 +536,6 @@ def build(token):
     app.add_handler(CommandHandler("agent", on_agent, filters=private))
     app.add_handler(CommandHandler("panel", on_panel, filters=private))
     app.add_handler(CommandHandler("cancel", on_cancel, filters=private))
-    app.add_handler(CommandHandler("lang", on_lang, filters=private))
     app.add_handler(CommandHandler(["leads_here", "leads_private", "moderate_all", "review"], on_staff_cmd, filters=new))
     app.add_handler(CallbackQueryHandler(on_button))
     # the agency channel (the bot is its admin): videos of new posts by file_id

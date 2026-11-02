@@ -101,12 +101,12 @@ class LoginIn(BaseModel):
 
 
 @router.post("/telegram-webapp")
-def telegram_webapp(body: WebAppIn, db: Session = Depends(get_db, scope="function")):
+def telegram_webapp(body: WebAppIn, db: Session = Depends(get_db)):
     return _session(db, _tg_user(db, verify_webapp_init_data(body.init_data, settings.BOT_TOKEN)))
 
 
 @router.post("/telegram-login")
-def telegram_login(body: LoginWidgetIn, db: Session = Depends(get_db, scope="function")):
+def telegram_login(body: LoginWidgetIn, db: Session = Depends(get_db)):
     data = verify_login_widget(body.model_dump(), settings.BOT_TOKEN)
     return _session(db, _tg_user(db, {**data, "id": int(data["id"])}))
 
@@ -123,7 +123,7 @@ def _throttled(*keys: str) -> bool:
 
 
 @router.post("/login")
-def login(body: LoginIn, request: Request, db: Session = Depends(get_db, scope="function")):
+def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     keys = (f"ip:{request.client.host if request.client else '-'}", f"login:{body.login.strip().lower()}")
     if _throttled(*keys):
         raise DomainError("too_many_attempts", "too many attempts, try again in 15 minutes", 429)

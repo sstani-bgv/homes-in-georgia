@@ -182,7 +182,7 @@ class BotWiringTest(unittest.TestCase):
         import bot
         app = bot.build("123456:TEST")
         callbacks = {h.callback.__name__ for hs in app.handlers.values() for h in hs}
-        self.assertEqual(callbacks, {"on_start", "on_agent", "on_panel", "on_cancel", "on_lang", "on_staff_cmd", "on_button", "on_message",
+        self.assertEqual(callbacks, {"on_start", "on_agent", "on_panel", "on_cancel", "on_staff_cmd", "on_button", "on_message",
                                      "on_channel_post", "on_forwarded_deal", "on_group_or_channel"})
         names = [h.callback.__name__ for h in app.handlers[0]]  # the forward handler is checked before the client journey
         self.assertLess(names.index("on_forwarded_deal"), names.index("on_message"))
@@ -200,14 +200,6 @@ class StartLangTest(Base):
         self.assertEqual(core.client("tg", 77)["lang"], "ru")
         core.reset(cl, lang_hint="en")
         self.assertEqual(core.client("tg", 77)["lang"], "en")
-
-    def test_picked_language_sticks(self):
-        cl = core.client("tg", 78, lang_hint="ru")
-        core.set_lang(cl, "en")
-        core.reset(cl, lang_hint="ru")  # /start from a Russian Telegram keeps the picked language
-        core.add_input(cl, text="2 спальни в Ваке")  # so does writing in Russian
-        cl = core.client("tg", 78)
-        self.assertEqual((cl["lang"], cl["state"]["lang_set"]), ("en", True))
 
 if __name__ == "__main__":
     unittest.main()

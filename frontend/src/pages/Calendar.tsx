@@ -14,7 +14,7 @@ type Kind = 'showing' | 'shoot' | 'call' | 't14' | 'expiry';
 interface Ev { id: string; at: Date; allDay: boolean; kind: Kind; title: string; meta?: string; to: string }
 const KIND: Record<Kind, { label: string; icon: LucideIcon }> = {
   showing: { label: 'Показ', icon: Eye }, shoot: { label: 'Съёмка', icon: Camera }, call: { label: 'Перезвон', icon: PhoneCall },
-  t14: { label: 'День 14', icon: ClipboardCheck }, expiry: { label: 'Конец договора', icon: FileClock },
+  t14: { label: 'Контроль T14', icon: ClipboardCheck }, expiry: { label: 'Конец договора', icon: FileClock },
 };
 const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -48,51 +48,42 @@ export function useCalendarEvents() {
   return { events, isLoading: leads.isLoading || props.isLoading || deals.isLoading, error: leads.error || props.error || deals.error };
 }
 
-const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-
 export function CalendarView({ base = '' }: { base?: string }) {
   const { events, isLoading, error } = useCalendarEvents();
-  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [week, setWeek] = useState(() => startOfWeek(new Date()));
   const [sel, setSel] = useState(() => dayKey(new Date()));
   const [filter, setFilter] = useState<'all' | Kind>('all');
-  // 6 weeks from the Monday on/before the 1st: a fixed-height month grid
-  const first = startOfWeek(month);
-  const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(first); d.setDate(d.getDate() + i); return d; });
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(week); d.setDate(d.getDate() + i); return d; });
   const byDay = useMemo(() => {
     const m = new Map<string, Ev[]>();
     for (const e of events) { if (filter !== 'all' && e.kind !== filter) continue; const k = dayKey(e.at); m.set(k, [...(m.get(k) || []), e]); }
     return m;
   }, [events, filter]);
   const today = dayKey(new Date());
-  const shift = (n: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+  const shift = (n: number) => { const d = new Date(week); d.setDate(d.getDate() + n * 7); setWeek(d); setSel(dayKey(d)); };
   const selDate = parseDay(sel);
   const list = byDay.get(sel) || [];
   const upcoming = events.filter((e) => (filter === 'all' || e.kind === filter) && e.at >= new Date(new Date().setHours(0, 0, 0, 0))).slice(0, 8);
   const link = (to: string) => (base && to.startsWith('/leads') ? `${base}${to}` : base && to.startsWith('/objects') ? to.replace('/objects', `${base}/properties`) : to);
-  const time = (e: Ev) => (e.allDay ? '' : `${pad(e.at.getHours())}:${pad(e.at.getMinutes())} `);
 
   return (
     <div className="col gap-lg">
       <div className="row row-between row-wrap">
-        <div className="row gap-sm">
-          <button className="btn btn-secondary icon-btn" onClick={() => shift(-1)} aria-label="Предыдущий месяц"><ChevronLeft size={18} /></button>
-          <h2 style={{ minWidth: 170, textAlign: 'center' }}>{MONTHS[month.getMonth()]} {month.getFullYear()}</h2>
-          <button className="btn btn-secondary icon-btn" onClick={() => shift(1)} aria-label="Следующий месяц"><ChevronRight size={18} /></button>
-          <button className="btn btn-secondary btn-sm" onClick={() => { setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setSel(today); }}>Сегодня</button>
-        </div>
         <Seg value={filter} onChange={setFilter} options={[{ value: 'all', label: 'Все' }, ...(Object.keys(KIND) as Kind[]).map((k) => ({ value: k, label: KIND[k].label }))]} />
+        <div className="row gap-sm">
+          <button className="btn btn-secondary icon-btn" onClick={() => shift(-1)} aria-label="Предыдущая неделя"><ChevronLeft size={18} /></button>
+          <button className="btn btn-secondary btn-sm" onClick={() => { setWeek(startOfWeek(new Date())); setSel(today); }}>Сегодня</button>
+          <button className="btn btn-secondary icon-btn" onClick={() => shift(1)} aria-label="Следующая неделя"><ChevronRight size={18} /></button>
+        </div>
       </div>
-      <div className="card cal-month">
-        {WD.map((w) => <div key={w} className="cal-head">{w}</div>)}
-        {days.map((d) => {
+      <div className="cal-week" role="tablist" aria-label="Дни недели">
+        {days.map((d, i) => {
           const k = dayKey(d);
-          const evs = byDay.get(k) || [];
+          const n = byDay.get(k)?.length || 0;
           return (
-            <button key={k} className={`cal-cell ${k === sel ? 'on' : ''} ${k === today ? 'today' : ''} ${d.getMonth() !== month.getMonth() ? 'out' : ''}`} onClick={() => setSel(k)}>
-              <span className="cal-num">{d.getDate()}</span>
-              {evs.slice(0, 3).map((e) => <span key={e.id} className={`cal-ev ev-${e.kind}`}>{time(e)}{e.title}</span>)}
-              {evs.length > 3 && <span className="cal-more">ещё {evs.length - 3}</span>}
-              {evs.length > 0 && <span className="cal-dots-m">{evs.slice(0, 3).map((e) => <i key={e.id} className={`ev-${e.kind}`} />)}</span>}
+            <button key={k} role="tab" aria-selected={k === sel} className={`cal-day ${k === sel ? 'on' : ''} ${k === today ? 'today' : ''}`} onClick={() => setSel(k)}>
+              <span className="cal-wd">{WD[i]}</span><span className="cal-dn">{d.getDate()}</span>
+              <span className="cal-dots">{n > 0 ? Array.from({ length: Math.min(n, 3) }, (_, j) => <i key={j} />) : null}</span>
             </button>
           );
         })}
@@ -107,7 +98,7 @@ export function CalendarView({ base = '' }: { base?: string }) {
           </Card>
         </div>
       )}
-      <div className="faint" style={{ fontSize: 12 }}>Показы появляются, когда клиент выбирает время в заявке. Съёмка — из карточки объекта, День 14 и конец договора — из сделок.</div>
+      <div className="faint" style={{ fontSize: 12 }}>Показы появляются, когда клиент выбирает время в заявке. Съёмка — из карточки объекта, T14 и конец договора — из сделок.</div>
     </div>
   );
 }
@@ -118,7 +109,7 @@ function EvRow({ e, to, withDate }: { e: Ev; to: string; withDate?: boolean }) {
   return (
     <Link to={to} className="list-row" style={{ color: 'inherit', textDecoration: 'none' }}>
       <span className="cal-time">{withDate ? <>{pad(e.at.getDate())}.{pad(e.at.getMonth() + 1)}<br /></> : null}<b>{time}</b></span>
-      <span className={`avatar ev-${e.kind}`} aria-hidden><K.icon size={16} /></span>
+      <span className="avatar" aria-hidden><K.icon size={16} /></span>
       <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{e.title}</b><span className="muted" style={{ fontSize: 12 }}>{K.label}{e.meta ? ` · ${e.meta}` : ''}</span></span>
     </Link>
   );

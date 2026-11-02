@@ -302,8 +302,7 @@ class Importer:
         f.pop("recruit", None)
         created_at = f.pop("created_at", None)
         rf = f.get("rent_from")
-        if not f.get("month"):  # Reports_Deals passes month=None when its cell is not "m/yyyy"
-            f["month"] = f"{rf.month}/{rf.year}" if rf else (f"{created_at.month}/{created_at.year}" if created_at else None)
+        f.setdefault("month", f"{rf.month}/{rf.year}" if rf else (f"{created_at.month}/{created_at.year}" if created_at else None))
         if not f.get("month"):
             f.pop("month", None)
         # the same deal is often written to several sheets: merge by agent + price + object + month (+ rent start),
@@ -325,10 +324,6 @@ class Importer:
             raw.setdefault("_merged", []).append(key)
             twin.raw = raw
             return "merged"
-        if f.get("commission_total") is None and f.get("price") and f.get("deal_type", "rent") == "rent" and not f.get("is_rerented"):
-            # forms without a commission column (Reports_Rental since April 2026): the CRM's own rule, 50% of the rent
-            c = deals_svc.calc(price=f["price"], agent_level=f.get("agent_level") or 50)
-            f["commission_total"], f["platform_amount"] = c["commission_total"], f.get("platform_amount") or c["platform_amount"]
         comm = f.get("commission_total")
         if comm is not None and f.get("agent_amount") is None:
             f["agent_amount"] = comm - (f.get("platform_amount") or 0) - (f.get("recruit_amount") or 0)
@@ -355,8 +350,6 @@ class Importer:
         self.each("Reports_Deals", reports_deals, positional_width=21)
 
         def rental(r, rec):
-            if len(r) > 8 and (r[6] or "").strip().lower() in ("эксклюзив", "неэксклюзив"):
-                return rental_v2(r)
             g = rec.get
             return self._deal("Reports_Rental", r, created_at=dt(g("timestamp")), agent=self.user_by_name(g("agent")),
                               recruit=self.user_by_name(g("recruit")), ad_link=s(g("ad_link_advertising")),
@@ -369,25 +362,6 @@ class Importer:
                               t14_date=day(g("t14_date")),
                               t14_status=(g("t14_status") or "").strip().lower() if (g("t14_status") or "").strip().lower()
                               in ("pending", "sent", "done") else None)
-        def rental_v2(r):
-            # the form changed in April 2026, header kept: 0 ts, 1 agent ("David (90%)"), 2 recruit, 3 -, 4 ad link,
-            # 5 cadastral, 6 exclusive, 7 deal type, 8 price, 9 agent share (0.9), 10 client, 11 client contact,
-            # 12 owner, 13 owner phone, 14 rent from, 15 rent to, 16 counter, 17 t14 date, 18 t14 status. No commission column.
-            r = r + [""] * (19 - len(r))
-            share = num(r[9])
-            lvl = int(share * 100) if share is not None and share <= 1 else None
-            contact = s(r[11]) or ""
-            t14 = (r[18] or "").strip().lower()
-            return self._deal("Reports_Rental", r, created_at=dt(r[0]), agent=self.user_by_name(re.sub(r"\s*\(.*\)", "", r[1] or "")),
-                              recruit=self.user_by_name(r[2]), ad_link=s(r[4]) or s(r[3]), cadastral=s(r[5]),
-                              is_exclusive=(r[6] or "").strip().lower() == "эксклюзив",
-                              deal_type="sale" if (r[7] or "").strip().lower() in ("sale", "продажа") else "rent",
-                              price=num(r[8]), agent_level=lvl if lvl in (50, 70, 90) else None, client_name=s(r[10]),
-                              client_tg=contact if contact.startswith("@") else None,
-                              client_phone=contact if contact and not contact.startswith("@") else None,
-                              owner_name=s(r[12]), owner_phone=None if (r[13] or "").startswith("#") else s(r[13]),
-                              rent_from=day(r[14]), rent_to=day(r[15]), t14_date=day(r[17]),
-                              t14_status=t14 if t14 in ("pending", "sent", "done") else None)
         self.each("Reports_Rental", rental)
 
         def rent_out(r, _):

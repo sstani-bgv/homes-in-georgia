@@ -34,7 +34,7 @@ def ticker_out(t: TickerMessage) -> dict:
 
 
 @router.get("/ticker")
-def ticker_list(all: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):  # noqa: A002
+def ticker_list(all: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)):  # noqa: A002
     stmt = select(TickerMessage)
     if not all:
         stmt = stmt.where(TickerMessage.status == "active")
@@ -42,7 +42,7 @@ def ticker_list(all: int = 0, db: Session = Depends(get_db, scope="function"), u
 
 
 @router.post("/ticker")
-def ticker_add(body: TickerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def ticker_add(body: TickerIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     t = TickerMessage(text=body.text.strip(), status="active")
     db.add(t)
     db.commit()
@@ -50,7 +50,7 @@ def ticker_add(body: TickerIn, db: Session = Depends(get_db, scope="function"), 
 
 
 @router.delete("/ticker/{tid}")
-def ticker_delete(tid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def ticker_delete(tid: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     t = get_or_404(db, TickerMessage, tid, "ticker message")
     t.status = "deleted"
     db.commit()
@@ -58,7 +58,7 @@ def ticker_delete(tid: int, db: Session = Depends(get_db, scope="function"), use
 
 
 @router.get("/news")
-def news_list(limit: int = Query(30, ge=0, le=500), db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def news_list(limit: int = Query(30, ge=0, le=500), db: Session = Depends(get_db), user: User = Depends(current_user)):
     rows = db.scalars(select(News).order_by(News.date.desc().nullslast(), News.id.desc()).limit(limit))
     return [{"id": n.id, "date": n.date.isoformat() if n.date else None, "text": n.text, "message_id": n.message_id}
             for n in rows]
@@ -75,7 +75,7 @@ def channel_post_out(p: ChannelPost) -> dict:
 def channel_posts(hashtag: str | None = None, district: str | None = None, status: str | None = None, q: str | None = None,
                   agent_id: int | None = None, source: str | None = None, rooms: str | None = None,
                   exclusive: bool | None = None, price_min: float | None = None, price_max: float | None = None,
-                  limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                  limit: int = 50, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Agency listings parsed from the channel / work-group Listings topic (services/inbound.py). Filters: hashtag
     (#Vake or Vake, matched in the post text), district, status (active|rented|archived, comma list), q (text, agent,
     district), agent_id, source (channel|topic), rooms (2Bed|Studio), exclusive, price range."""
@@ -109,7 +109,7 @@ def channel_posts(hashtag: str | None = None, district: str | None = None, statu
 
 
 @router.get("/addresses")
-def addresses_list(active: int = 1, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def addresses_list(active: int = 1, db: Session = Depends(get_db), user: User = Depends(current_user)):
     stmt = select(Address)
     if active:
         stmt = stmt.where(Address.is_active.is_(True))
@@ -120,12 +120,12 @@ def addresses_list(active: int = 1, db: Session = Depends(get_db, scope="functio
 # ---------------------------------------------------------------- settings / sources
 
 @router.get("/settings")
-def settings_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def settings_get(db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return settings.all(db)
 
 
 @router.put("/settings")
-def settings_put(body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def settings_put(body: dict, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     settings.validate(body)
     for k, v in body.items():
         settings.set(db, k, json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v, commit=False)
@@ -151,7 +151,7 @@ def source_out(s: Source) -> dict:
 
 
 @router.get("/sources")
-def sources_list(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def sources_list(db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return [source_out(s) for s in db.scalars(select(Source).order_by(Source.position, Source.id))]
 
 
@@ -165,7 +165,7 @@ def _apply_source(s: Source, data: dict):
 
 
 @router.post("/sources")
-def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def sources_create(body: SourceIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     data = body.model_dump(exclude_none=True)
     if data.get("kind") not in ("tg_agency", "tg_competitor", "fb_group") or not data.get("key"):
         raise DomainError("bad_source", "kind (tg_agency|tg_competitor|fb_group) and key are required")
@@ -179,7 +179,7 @@ def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function
 
 
 @router.patch("/sources/{sid}")
-def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db), user: User = Depends(require_roles(*ADMIN_ROLES))):
     s = get_or_404(db, Source, sid, "source")
     _apply_source(s, body.model_dump(exclude_unset=True))
     db.commit()
@@ -193,14 +193,14 @@ class ModerationIn(BaseModel):
 
 
 @router.get("/moderation")
-def moderation_list(limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+def moderation_list(limit: int = 50, offset: int = 0, db: Session = Depends(get_db),
                     user: User = Depends(require_roles(*STAFF_ROLES))):
     stmt = select(Listing).where(Listing.status == "pending_review").order_by(Listing.first_seen.desc())
     return paginate(db, stmt, lambda x: listing_out(x, full=True), limit, offset)
 
 
 @router.post("/moderation/{listing_id}")
-def moderation_decide(listing_id: str, body: ModerationIn, db: Session = Depends(get_db, scope="function"),
+def moderation_decide(listing_id: str, body: ModerationIn, db: Session = Depends(get_db),
                       user: User = Depends(require_roles(*STAFF_ROLES))):
     x = get_or_404(db, Listing, listing_id, "listing")
     x.decision = "approved" if body.approve else "rejected"
@@ -244,7 +244,7 @@ def public_config():
 
 
 @public.get("/listing-photos/{listing_id}/{n}")
-def listing_photo(listing_id: str, n: int, db: Session = Depends(get_db, scope="function")):
+def listing_photo(listing_id: str, n: int, db: Session = Depends(get_db)):
     """Photos of catalog listings (paths written by the bot's ingest, relative to bot/). Public like the channel."""
     x = get_or_404(db, Listing, listing_id, "listing")
     photos = jload(x.photos, []) or []
@@ -259,13 +259,12 @@ def listing_photo(listing_id: str, n: int, db: Session = Depends(get_db, scope="
         except DomainError:
             continue
         if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4"):
-            return FileResponse(p, media_type=mimetypes.guess_type(p.name)[0] or "image/jpeg",
-                                headers={"Cache-Control": "public, max-age=86400"})
+            return FileResponse(p, media_type=mimetypes.guess_type(p.name)[0] or "image/jpeg")
     raise DomainError("not_found", "photo file missing")
 
 
 @public.get("/public/ics/{token}")
-def public_ics(token: str, db: Session = Depends(get_db, scope="function")):
+def public_ics(token: str, db: Session = Depends(get_db)):
     lead = get_or_404(db, Lead, ics.lead_from_token(token), "lead")
     return Response(ics.build(db, lead), media_type="text/calendar; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="viewing-{lead.id}.ics"'})

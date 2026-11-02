@@ -69,7 +69,7 @@ class EvaluationIn(BaseModel):
 
 
 @router.post("/deals/calc")
-def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_calc(body: DealIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     data = body.model_dump()
     if not data.get("agent_level"):
         agent = db.get(User, data["agent_id"]) if data.get("agent_id") else user
@@ -79,17 +79,17 @@ def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), us
 
 @router.get("/deals")
 def deals_list(month: str | None = None, agent_id: int | None = None, status: str | None = None, limit: int = 50,
-               offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+               offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return paginate(db, deals.query(db, user, month, agent_id, status), lambda d: deals.out(d, user), limit, offset)
 
 
 @router.get("/deals/expiring")
-def deals_expiring(days: int = 30, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_expiring(days: int = 30, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return [deals.out(d, user) for d in deals.expiring(db, user, days)]
 
 
 @router.get("/deals/find")
-def deals_find(cadastral: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_find(cadastral: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     rows = deals.find(db, cadastral)
     if user.role in STAFF:
         return [deals.out(d, user) for d in rows]
@@ -100,13 +100,13 @@ def deals_find(cadastral: str, db: Session = Depends(get_db, scope="function"), 
 
 
 @router.post("/deals")
-def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_create(body: DealIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     d = deals.create(db, body.model_dump(exclude_none=True), user)
     return deals.out(d, user)
 
 
 @router.get("/deals/{deal_id}")
-def deals_get(deal_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_get(deal_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     d = get_or_404(db, Deal, deal_id, "deal")
     if user.role not in STAFF and user.id not in (d.agent_id, d.recruit_id):
         raise forbidden("not your deal")
@@ -117,24 +117,24 @@ def deals_get(deal_id: int, db: Session = Depends(get_db, scope="function"), use
 
 
 @router.post("/deals/{deal_id}/confirm")
-def deals_confirm(deal_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def deals_confirm(deal_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles(*STAFF_ROLES))):
     return deals.out(deals.confirm(db, deal_id, user), user)
 
 
 @router.post("/deals/{deal_id}/cancel")
-def deals_cancel(deal_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
+def deals_cancel(deal_id: int, body: ReasonIn, db: Session = Depends(get_db),
                  user: User = Depends(require_roles(*STAFF_ROLES))):
     return deals.out(deals.cancel(db, deal_id, user, body.reason), user)
 
 
 @router.post("/evaluations")
-def evaluations_create(body: EvaluationIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def evaluations_create(body: EvaluationIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return evaluations.out(evaluations.create(db, body.model_dump(), user))
 
 
 @router.get("/evaluations")
 def evaluations_list(deal_id: int | None = None, kind: str | None = None, limit: int = 50, offset: int = 0,
-                     db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                     db: Session = Depends(get_db), user: User = Depends(current_user)):
     stmt = evaluations.query(db, deal_id, kind)
     if user.role not in STAFF_ROLES:
         stmt = stmt.where(Evaluation.deal_id.in_(
@@ -143,37 +143,37 @@ def evaluations_list(deal_id: int | None = None, kind: str | None = None, limit:
 
 
 @router.post("/reports/{kind}")
-def reports_create(kind: str, body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def reports_create(kind: str, body: dict, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return reports.out(reports.save(db, kind, body, user))
 
 
 @router.get("/reports")
 def reports_list(kind: str | None = None, author_id: int | None = None, month: str | None = None, limit: int = 50,
-                 offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                 offset: int = 0, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return paginate(db, reports.query(db, user, kind, author_id, month), reports.out, limit, offset)
 
 
 @router.get("/counters")
-def counters(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def counters(month: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return reports.counters(db, month, user)
 
 
 @router.get("/analytics/dashboard")
-def analytics_dashboard(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def analytics_dashboard(month: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return analytics.dashboard(db, month)
 
 
 @router.get("/analytics/funnel")
-def analytics_funnel(date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"), db: Session = Depends(get_db, scope="function"),
+def analytics_funnel(date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"), db: Session = Depends(get_db),
                      user: User = Depends(require_roles(*STAFF_ROLES))):
     return analytics.funnel(db, date_from, date_to)
 
 
 @router.get("/analytics/listings")
-def analytics_listings(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def analytics_listings(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return {**analytics.listings_stats(db), "weekly": analytics.weekly_listings(db)}
 
 
 @router.get("/analytics/agents")
-def analytics_agents(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def analytics_agents(month: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return analytics.agents(db, month)

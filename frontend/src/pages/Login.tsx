@@ -6,9 +6,6 @@ import { useAuth } from '../auth/AuthContext';
 import { Button, Field, Input } from '../components/ui';
 import { BrandMark } from '../layout/AppLayout';
 
-// Telegram's login widget only works on the domain set in BotFather (/setdomain), never on localhost
-const LOCAL = !IS_MOCK && ['localhost', '127.0.0.1'].includes(window.location.hostname);
-
 function TelegramWidget({ onAuth }: { onAuth: (u: Record<string, unknown>) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [bot, setBot] = useState<string | undefined>(import.meta.env.VITE_BOT_USERNAME || undefined);
@@ -74,12 +71,10 @@ export function LoginPage() {
             <h2 style={{ fontWeight: 900 }}>Вход в CRM</h2>
           </div>
         </div>
-        {!LOCAL && <>
-          <TelegramWidget onAuth={(u) => done(api.auth.telegramLogin(u))} />
-          <div className="row" style={{ margin: '18px 0' }}>
-            <div className="divider grow" style={{ margin: 0 }} /><span className="label">или</span><div className="divider grow" style={{ margin: 0 }} />
-          </div>
-        </>}
+        <TelegramWidget onAuth={(u) => done(api.auth.telegramLogin(u))} />
+        <div className="row" style={{ margin: '18px 0' }}>
+          <div className="divider grow" style={{ margin: 0 }} /><span className="label">или</span><div className="divider grow" style={{ margin: 0 }} />
+        </div>
         <form onSubmit={submit} className="col">
           <Field label="Логин"><Input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required /></Field>
           <Field label="Пароль"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></Field>

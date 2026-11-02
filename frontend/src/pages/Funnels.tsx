@@ -48,9 +48,9 @@ export function ObjectsPage() {
   const [manual, setManual] = useState(false);
   return (
     <>
-      <PageHead title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
+      <PageHead label="Воронка 1" title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'Доска' }, { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База' }, { value: 'channel', label: 'Публикации в канале' },
+        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'Воронка' }, { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База' }, { value: 'channel', label: 'Публикации в канале' },
       ]} />
       {tab === 'new' && <NewListings />}
       {tab === 'board' && <PropertyBoard />}
@@ -77,7 +77,7 @@ export function LeadsPage() {
   const [tab, setTab] = useState<'board' | 'mine'>(isStaff ? 'board' : 'mine');
   return (
     <>
-      <PageHead title="Заявки" />
+      <PageHead label="Воронка 2 · B2" title="Заявки" />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'board', label: 'Доска' }, { value: 'mine', label: isStaff ? 'Списком' : 'Мои заявки' }]} />
       {tab === 'board' ? <LeadBoard /> : <div style={{ maxWidth: 640 }}><MyLeadsList /></div>}
     </>

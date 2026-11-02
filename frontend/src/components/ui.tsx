@@ -136,16 +136,6 @@ export function PageHead({ label, title, actions }: { label?: string; title: Rea
   );
 }
 
-/** No page scroll under an open modal/drawer. */
-function useLockScroll(open: boolean) {
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [open]);
-}
-
 function useEsc(onClose: () => void) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -156,7 +146,6 @@ function useEsc(onClose: () => void) {
 
 export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
   useEsc(onClose);
-  useLockScroll(open);
   if (!open) return null;
   return createPortal(
     <>
@@ -172,7 +161,6 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
 
 export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
   useEsc(onClose);
-  useLockScroll(open);
   if (!open) return null;
   return createPortal(
     <>

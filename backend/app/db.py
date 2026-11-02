@@ -13,8 +13,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def get_db():
-    # used as Depends(get_db, scope="function"): closed when the endpoint returns, not after the response is sent,
-    # so a slow download (photos over a tunnel/mobile) never holds a pool connection
     db = SessionLocal()
     try:
         yield db

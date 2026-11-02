@@ -160,7 +160,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
             <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => upd('owner_phone', e.target.value)} inputMode="tel" /></Field>
           </div>
         </Card>
-        <Card label="День 0" title="Оценка сделки при заключении · H2O 0–3">
+        <Card label="T0" title="Оценка сделки при заключении · H2O 0–3">
           <div className="col">
             <H2O label="Клиент" value={t0.c} onChange={(v) => setT0({ ...t0, c: v })} />
             <H2O label="Собственник" value={t0.o} onChange={(v) => setT0({ ...t0, o: v })} />
@@ -182,7 +182,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
           {calcBusy && <div style={{ fontSize: 11, opacity: .6, marginTop: 6 }}>пересчёт…</div>}
         </div>
         <Button size="lg" variant="ok" block disabled={!valid || calcBusy} loading={save.isPending} onClick={() => save.mutate()}><CheckCircle2 size={18} />Отправить на подтверждение</Button>
-        <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором бот опубликует #Rented, поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>
+        <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором бот опубликует #Rented, поставит T14 и напоминания о конце договора за 30, 7 и 1 день.</div>
       </div>
     </div>
   );

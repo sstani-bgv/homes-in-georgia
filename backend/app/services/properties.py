@@ -1,7 +1,6 @@
 """Funnel 1: new listing → take → call → owner/agent → shoot → media → review → publish (§4.2, §5)."""
 import logging
 import os
-import re
 import uuid
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -88,10 +87,8 @@ def listing_flags(listing: Listing) -> dict:
     reasons = jload(listing.agent_reasons, []) or []
     dups = jload(listing.dup_sources, []) or []
     suspect = bool(listing.agent_suspect) or bool(reasons)
-    # "duplicate" = the agency channel already has this flat; the same flat on several other sites is merged, not a dup
-    in_channel = "agency" in dups
-    return {"owner": not suspect, "agent_suspect": suspect, "duplicate": in_channel,
-            "reasons": reasons + (["уже есть в канале агентства"] if in_channel else [])}
+    return {"owner": not suspect, "agent_suspect": suspect, "duplicate": bool(dups),
+            "reasons": reasons + ([f"дубль: {', '.join(map(str, dups))}"] if dups else [])}
 
 
 # ---------------------------------------------------------------- listings (C1)
@@ -128,7 +125,7 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     elif flag == "agent_suspect":
         stmt = stmt.where(or_(Listing.agent_suspect == 1, Listing.agent_reasons != "[]"))
     elif flag == "duplicate":
-        stmt = stmt.where(Listing.dup_sources.contains('"agency"'))
+        stmt = stmt.where(Listing.dup_sources != "[]")
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset))
     return {"items": [listing_out(r) for r in rows], "total": total}
@@ -408,46 +405,26 @@ def review(db: Session, pid: int, operator: User, approve: bool, comment: str | 
     return p
 
 
-# CRM district -> the channel's hashtag (static/tools/post-generator.html, buildRentPost)
-DISTRICT_TAG = {"Ваке": "#Vake", "Ваке-Багеби": "#Vake", "Сабуртало": "#Saburtalo", "Мтацминда": "#Mtatsminda", "Вере": "#Vera",
-                "Ортачала": "#Ortachala", "Дидубе": "#Didube", "Чугурети": "#Chugureti", "Исани": "#Isani", "Самгори": "#Samgori",
-                "Глдани": "#Gldani", "Надзаладеви": "#Nadzaladevi", "Дигоми": "#Digomi", "Сололаки": "#Sololaki",
-                "Авлабари": "#Avlabari", "Нахаловка": "#Naxalovka", "Ваке-Сабуртало": "#Vake"}
-PRICE_TAGS = ((300, "#Price0to300"), (500, "#Price300to500"), (700, "#Price500to700"), (900, "#Price700to900"),
-              (1200, "#Price900to1200"))
-
-
 def post_text(db: Session, p: Property) -> str:
-    """Channel caption in the agency's own format: a port of buildRentPost() from the agency post generator.
-    Fields the object doesn't have (metro, amenities, pets, terms) are left out, as the generator does when empty."""
+    """Channel caption in the agency format (B7b); the legacy generator can still restyle it."""
     agent = db.get(User, p.agent_id) if p.agent_id else None
-    district = DISTRICT_TAG.get((p.district or "").strip(), f"#{(p.district or 'Tbilisi').replace(' ', '')}")
-    lines = [district]
-    if p.address:
-        lines.append(f"📍{p.address}")
-    lines.append("")
-    if p.is_exclusive:
-        lines += ["❗️#Exclusive", ""]
-    beds = "#Studio " if p.bedrooms == 0 else (f"#{p.bedrooms}Bed " if p.bedrooms else "")
-    lines.append(f"🏢 {beds}#Apartment for #Rent")
-    spec = []
+    price = f"{int(p.price):,}".replace(",", " ") if p.price is not None else "—"
+    lines = [f"🏠 {p.district or 'Тбилиси'}" + (f" · {p.address}" if p.address else "")]
+    facts = []
+    if p.bedrooms is not None:
+        facts.append(f"🛏 {p.bedrooms} спальн.")
     if p.area:
-        spec.append(f"{float(p.area):g} sq.m")
+        facts.append(f"📐 {float(p.area):g} м²")
     if p.floor:
-        spec.append(f"{p.floor}/{p.total_floors} Floor" if p.total_floors else f"{p.floor} Floor")
-    if spec:
-        lines.append("🏠 " + " | ".join(spec))
-    lines.append("")
-    if p.price is not None:
-        price = int(p.price)
-        lines.append(f"💰 {price}$ + Deposit {price}$")
-    lines.append("0% Commission")
-    if p.price is not None:
-        lines.append(next((t for top, t in PRICE_TAGS if int(p.price) <= top), "#Price1200plus"))
-    agent_tag = f"#{agent.name.split()[0]}" if agent and agent.name else "#???"
-    lines += ["", f"📲 @David_Tibelashvili | \n+995 599 20 67 16 {agent_tag}", "", "🌟 Check all listings | Reviews", "",
-              "📍APARTMENTS ON MAP📍", "", "📱 Instagram 🗳 FB 🎥 YouTube"]
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+        facts.append(f"🏢 {p.floor}" + (f"/{p.total_floors}" if p.total_floors else "") + " этаж")
+    if facts:
+        lines.append(" · ".join(facts))
+    lines.append(f"💰 {price} {'$' if (p.currency or 'USD') == 'USD' else p.currency}")
+    if p.description:
+        lines += ["", p.description.strip()]
+    tags = ["#Эксклюзив" if p.is_exclusive else None, f"#{agent.name.replace(' ', '_')}" if agent else None]
+    lines += ["", " ".join(t for t in tags if t), f"@{env.AGENCY_CHANNEL}"]
+    return "\n".join(lines).strip()
 
 
 def publish(db: Session, pid: int, actor: User) -> Property:

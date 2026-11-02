@@ -58,7 +58,7 @@ export function ClientsPage() {
   const items = itemsOf(data);
   return (
     <>
-      <PageHead title="Клиенты" />
+      <PageHead label="Воронка 2" title="Клиенты" />
       <SearchBox value={q} onChange={setQ} placeholder="Имя, @username, телефон" />
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Клиентов не найдено" /> : (
         <div className="card table-wrap">
@@ -116,7 +116,7 @@ export function OwnersPage() {
   const cur = open && open !== 'new' ? open : null;
   return (
     <>
-      <PageHead title="Собственники" actions={<Button onClick={() => setOpen('new')}><Plus size={16} />Добавить</Button>} />
+      <PageHead label="Воронка 1" title="Собственники" actions={<Button onClick={() => setOpen('new')}><Plus size={16} />Добавить</Button>} />
       <SearchBox value={q} onChange={setQ} placeholder="Имя, телефон, адрес" />
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Собственников не найдено" /> : (
         <div className="card table-wrap">

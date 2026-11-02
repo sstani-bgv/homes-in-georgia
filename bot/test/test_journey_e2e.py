@@ -142,9 +142,7 @@ class JourneyE2E(unittest.TestCase):
 
     def test_client_journey(self):
         f, cid = self.fake, CLIENT["id"]
-        m = self.say(CLIENT, "/start")                                # first contact: the language first
-        picked = self.press(CLIENT, cid, "🇷🇺 Русский", since=m)
-        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["seq"] <= picked and "1 из 6" in (c.get("text") or "")])
+        m = self.say(CLIENT, "/start")
         self.with_text(cid, "Ответьте на 6 коротких вопросов", m)
         self.press(CLIENT, cid, "2", since=m)                         # A1a: 1 of 6
         m = self.press(CLIENT, cid, "🐕 Собака")                      # 2 of 6, multi

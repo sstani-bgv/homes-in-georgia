@@ -42,7 +42,7 @@ function useLeadMut() {
   return { done, toast, qc };
 }
 
-export function AssignModal({ lead, open, onClose }: { lead: Lead; open: boolean; onClose: () => void }) {
+function AssignModal({ lead, open, onClose }: { lead: Lead; open: boolean; onClose: () => void }) {
   const { done, toast } = useLeadMut();
   const { data, isLoading, error } = useQuery({ queryKey: ['recommend', lead.id], queryFn: () => api.leads.recommend(lead.id), enabled: open });
   const assign = useMutation({

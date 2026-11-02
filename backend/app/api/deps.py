@@ -25,7 +25,7 @@ def decode_token(token: str) -> dict:
         raise DomainError("unauthorized", "invalid or expired token", 401)
 
 
-def current_user(db: Session = Depends(get_db, scope="function"), authorization: str | None = Header(None),
+def current_user(db: Session = Depends(get_db), authorization: str | None = Header(None),
                  token: str | None = Query(None, include_in_schema=False)) -> User:
     raw = None
     if authorization and authorization.lower().startswith("bearer "):

@@ -94,7 +94,7 @@ p { margin: 0; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
   position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px;
-  padding: 12px var(--gutter); background: #F3F5F9;
+  padding: 12px var(--gutter); background: rgba(243,245,249,.86); backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
 }
 .content { padding: 20px var(--gutter) 40px; max-width: 1440px; width: 100%; margin: 0 auto; }
@@ -102,7 +102,7 @@ p { margin: 0; }
 .page-head .label { margin-bottom: 4px; display: block; }
 
 .ticker { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; position: relative; mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
-.ticker-track { display: inline-block; animation: ticker 45s linear infinite; will-change: transform; }
+.ticker-track { display: inline-block; animation: ticker 45s linear infinite; }
 .ticker:hover .ticker-track { animation-play-state: paused; }
 .ticker-item { display: inline-flex; align-items: center; gap: 8px; margin-right: 48px; font-weight: 600; color: var(--ink-2); }
 .ticker-item::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
@@ -269,8 +269,6 @@ p { margin: 0; }
 .kcard:hover { box-shadow: var(--shadow); transform: translateY(-1px); text-decoration: none; }
 .kcard-title { font-weight: 700; font-size: 13px; }
 .kcard-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
-.kanban-col.drop-over { outline: 2px dashed var(--brand); outline-offset: -2px; background: #DDE4F0; }
-.kcard[draggable] { cursor: grab; }
 @media (max-width: 767px) { .kanban-col { flex-basis: 84vw; max-height: none; } }
 
 /* ---------- listing card ---------- */
@@ -449,29 +447,6 @@ details > summary::-webkit-details-marker { display: none; }
 .cal-dots { display: flex; gap: 3px; height: 6px; }
 .cal-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--brand); }
 .cal-day.on .cal-dots i { background: #fff; }
-.cal-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); overflow: hidden; padding: 0; }
-.cal-head { padding: 10px 12px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
-.cal-cell { min-height: 112px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; align-items: stretch; text-align: left; background: #fff; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; font: inherit; color: var(--ink); min-width: 0; }
-.cal-cell:nth-child(7n) { border-right: 0; }
-.cal-cell:hover { background: #F7F9FC; }
-.cal-cell.out { background: #FAFBFD; color: var(--faint, #9AA3B2); }
-.cal-cell.on { box-shadow: inset 0 0 0 2px var(--brand); }
-.cal-num { font-weight: 800; font-size: 13px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; }
-.cal-cell.today .cal-num { background: var(--accent); color: #fff; }
-.cal-ev { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-more { font-size: 11px; color: var(--muted); padding-left: 6px; }
-.cal-dots-m { display: none; gap: 3px; }
-.cal-dots-m i { width: 6px; height: 6px; border-radius: 50%; }
-.ev-showing { background: #E3EBFA; color: #123A8C; } .cal-dots-m i.ev-showing { background: #2F5BD3; }
-.ev-shoot { background: #EEE5FB; color: #5B2A9E; } .cal-dots-m i.ev-shoot { background: #8A4FD8; }
-.ev-call { background: #FDF0DC; color: #8A5300; } .cal-dots-m i.ev-call { background: #E59A1A; }
-.ev-t14 { background: #E1F4EA; color: #17663E; } .cal-dots-m i.ev-t14 { background: #2E9E62; }
-.ev-expiry { background: #FCE4E6; color: #A3121F; } .cal-dots-m i.ev-expiry { background: #E3172D; }
-@media (max-width: 767px) {
-  .cal-cell { min-height: 54px; align-items: center; padding: 4px; }
-  .cal-ev, .cal-more { display: none; }
-  .cal-dots-m { display: flex; }
-}
 .cal-time { width: 64px; flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cal-time b { color: var(--ink); font-size: 13px; }
 

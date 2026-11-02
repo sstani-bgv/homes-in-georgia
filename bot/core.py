@@ -132,18 +132,10 @@ def reset(cl, lang_hint=None):
     """New conversation (/start): forget the request; likes and leads stay.
     lang_hint (Telegram language_code): the greeting follows the app language until the client writes something."""
     def fn(st, r):
-        # card texts (A3 edits), T14 answers and the language picked by the client outlive a /start
-        keep = {k: st[k] for k in ("cards", "t14", "lang_set") if k in st}
+        keep = {k: st[k] for k in ("cards", "t14") if k in st}  # card texts (A3 edits) and T14 answers outlive a /start
         st.clear(), st.update(json.loads(json.dumps(NEW_STATE)), **keep)
-        if lang_hint and not st.get("lang_set"):
+        if lang_hint:
             r["lang"] = detect_lang(None, hint=lang_hint)
-    update(cl, fn)
-
-
-def set_lang(cl, lang):
-    """The client picked a language (/start picker or /lang): it sticks, no more guessing from texts or Telegram."""
-    def fn(st, r):
-        st["lang_set"], r["lang"] = True, lang
     update(cl, fn)
 
 
@@ -152,8 +144,7 @@ def add_input(cl, text=None, image=None, pin=None, pin_label=None, radius=None):
     def fn(st, r):
         if text:
             st["msgs"].append(text)
-            if not st.get("lang_set"):
-                r["lang"] = detect_lang(text, r["lang"])
+            r["lang"] = detect_lang(text, r["lang"])
         if image:
             st["images"].append(image)
         if pin:

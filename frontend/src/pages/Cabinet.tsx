@@ -94,7 +94,7 @@ export function CabinetView({ base = '' }: { base?: string }) {
       </div>
 
       <div className="grid g2">
-        <Card title="Мои объекты">
+        <Card label="Воронка 1" title="Мои объекты">
           {(data.properties || []).length === 0 ? <Empty text="Объектов нет" /> : (data.properties || []).slice(0, 8).map((p) => (
             <Link key={p.id} to={propLink(p.id)} className="list-row" style={{ color: 'inherit', textDecoration: 'none' }}>
               <span className="grow ellipsis"><b>{p.address}</b> <span className="muted">{p.district}</span></span><PropertyStatusBadge status={p.status} />

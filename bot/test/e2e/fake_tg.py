@@ -29,7 +29,6 @@ class FakeTelegram:
         self.files = {}             # file_id -> local path (photos clients send)
         self.server = None
         self.polls = 0              # getUpdates calls: a (re)started bot is polling once this grows
-        self.usernames = {}         # "@channel" chat ids the bot used -> fake numeric chat id
 
     # ---------- driver side ----------
 
@@ -161,24 +160,20 @@ class FakeTelegram:
         if method in ("deleteWebhook", "setMyCommands", "sendChatAction", "answerCallbackQuery", "deleteMessage", "close", "logOut"):
             self.record(method, p, files)
             return True
-        if str(p.get("chat_id", "")).startswith("@"):  # a public channel by @username: a stable fake numeric id
-            uname = p["chat_id"][1:]
-            p["chat_id"] = str(self.usernames.setdefault(uname, -1009000 - len(self.usernames)))
         chat = int(p["chat_id"]) if "chat_id" in p else None
-        named = {"username": u for u, i in self.usernames.items() if i == chat}
         if method == "sendMediaGroup":
             out = []
             for m in p["media"]:
                 mid = self.next_msg_id(chat)
                 kind = {"video": {"file_id": f"fidv{mid}", "file_unique_id": f"v{mid}", "width": 640, "height": 360, "duration": 5}} \
                     if m.get("type") == "video" else {"photo": [{"file_id": f"out{mid}", "file_unique_id": f"o{mid}", "width": 640, "height": 480}]}
-                out.append({"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private", **named}, **kind})
+                out.append({"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private"}, **kind})
             self.record(method, p, files, message_id=out[0]["message_id"], message_ids=[m["message_id"] for m in out])
             return out
         if method in ("sendMessage", "sendPhoto", "sendLocation"):
             mid = self.next_msg_id(chat)
             self.record(method, p, files, message_id=mid)
-            return {"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private", **named}, "from": BOT_USER,
+            return {"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private"}, "from": BOT_USER,
                     **({"text": p["text"]} if "text" in p else {})}
         if method.startswith("edit"):
             self.record(method, p, files, message_id=int(p.get("message_id") or 0))

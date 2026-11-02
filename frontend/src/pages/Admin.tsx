@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { Check, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Role, Settings, User } from '../api/types';
+import { ListingCard } from '../components/domain';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
 import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime } from '../lib/format';
@@ -109,52 +110,46 @@ function Users() {
   );
 }
 
-/** t.me/<channel> → Telegram channel, facebook.com/groups/<id> → FB group (the parser reads them on the next run). */
-function sourceFromUrl(url: string): { kind: string; key: string } | null {
-  const tg = url.match(/t\.me\/(?:s\/)?([\w]+)/i);
-  if (tg) return { kind: 'tg_competitor', key: tg[1] };
-  const fb = url.match(/facebook\.com\/groups\/([\w.]+)/i);
-  return fb ? { kind: 'fb_group', key: fb[1] } : null;
-}
-
 function Sources() {
   const qc = useQueryClient();
-  const toast = useToast();
-  const [url, setUrl] = useState('');
-  const [name, setName] = useState('');
   const { data, isLoading, error } = useQuery({ queryKey: ['sources'], queryFn: api.sources.list });
   const upd = useMutation({ mutationFn: ({ id, enabled }: { id: number | string; enabled: boolean }) => api.sources.update(id, { enabled }), onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }) });
-  const parsed = sourceFromUrl(url.trim());
-  const add = useMutation({
-    mutationFn: () => api.sources.create({ ...parsed!, url: url.trim(), name: name.trim() || undefined, enabled: true } as never),
-    onSuccess: () => { setUrl(''); setName(''); qc.invalidateQueries({ queryKey: ['sources'] }); toast('Источник добавлен, парсер заберёт его при следующем запуске'); },
-    onError: (e) => toast(errText(e), true),
-  });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   const items = itemsOf(data);
+  if (!items.length) return <Empty text="Источников нет" />;
   return (
-    <div className="col gap-lg">
-      <Card title="Добавить источник">
-        <div className="row row-wrap" style={{ alignItems: 'flex-end' }}>
-          <Field label="Ссылка на Telegram-канал или группу Facebook" className="grow"><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://t.me/channel или https://facebook.com/groups/123" /></Field>
-          <Field label="Название (необязательно)"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Button disabled={!parsed} loading={add.isPending} onClick={() => add.mutate()}><Plus size={16} />Добавить</Button>
+    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+      {items.map((s) => (
+        <div key={s.id} className="card card-pad col">
+          <div className="row row-between"><h3>{s.name}</h3><Switch checked={s.enabled} onChange={(v) => upd.mutate({ id: s.id, enabled: v })} /></div>
+          <div className="muted" style={{ fontSize: 13 }}>{s.url || s.kind}</div>
+          <div className="row gap-sm">{s.count !== undefined && <Badge tone="grey">{s.count} объявлений</Badge>}{s.last_run_at && <Badge tone="grey">{ago(s.last_run_at)}</Badge>}</div>
         </div>
-        {url.trim() && !parsed && <div className="muted mt" style={{ fontSize: 12 }}>Нужна ссылка вида t.me/… или facebook.com/groups/…</div>}
-        {parsed && <div className="muted mt" style={{ fontSize: 12 }}>{parsed.kind === 'fb_group' ? 'Группа Facebook' : 'Telegram-канал'}: {parsed.key}</div>}
-      </Card>
-      {!items.length ? <Empty text="Источников нет" /> : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {items.map((s) => (
-            <div key={s.id} className="card card-pad col">
-              <div className="row row-between"><h3>{s.name || (s as { key?: string }).key || s.kind}</h3><Switch checked={s.enabled} onChange={(v) => upd.mutate({ id: s.id, enabled: v })} /></div>
-              <div className="muted ellipsis" style={{ fontSize: 13 }}>{s.url || s.kind}</div>
-              <div className="row gap-sm">{s.count !== undefined && <Badge tone="grey">{s.count} объявлений</Badge>}{s.last_run_at && <Badge tone="grey">{ago(s.last_run_at)}</Badge>}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      ))}
+    </div>
+  );
+}
+
+function Moderation() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data, isLoading, error } = useQuery({ queryKey: ['moderation'], queryFn: api.moderation.list });
+  const decide = useMutation({ mutationFn: ({ id, approve }: { id: string; approve: boolean }) => api.moderation.decide(id, approve), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['moderation'] }); toast(v.approve ? 'Одобрено' : 'Отклонено'); } });
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorBox error={error} />;
+  const items = itemsOf(data);
+  if (!items.length) return <Empty text="Очередь проверки пуста" />;
+  return (
+    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+      {items.map((l) => (
+        <ListingCard key={l.id} listing={l} footer={
+          <div className="row">
+            <Button variant="ok" block onClick={() => decide.mutate({ id: l.id, approve: true })}><Check size={16} />Одобрить</Button>
+            <Button variant="danger" block onClick={() => decide.mutate({ id: l.id, approve: false })}><X size={16} />Отклонить</Button>
+          </div>
+        } />
+      ))}
     </div>
   );
 }
@@ -182,7 +177,7 @@ function TickerAdmin() {
 }
 
 const METRICS: [string, string][] = [['deals', 'Сделки'], ['platform', 'Комиссия платформы'], ['active_objects', 'Активные объекты'], ['reposts', 'Репосты'],
-  ['leaderboard', 'Топ-5 агентов'], ['telegram_top', 'Telegram топ-10'], ['funnel', 'Объекты и заявки по этапам'], ['response_times', 'Время реакции']];
+  ['leaderboard', 'Топ-5 агентов'], ['telegram_top', 'Telegram топ-10'], ['funnel', 'Воронки'], ['response_times', 'Время реакции']];
 
 function SettingsAdmin() {
   const qc = useQueryClient();
@@ -210,7 +205,7 @@ function SettingsAdmin() {
   const flag = (k: string) => ['1', 'true', 'on', 'yes'].includes(str(k).toLowerCase());
   return (
     <div className="grid g2">
-      <Card label="Заявки" title="Сроки (SLA), минуты">
+      <Card label="Воронка 2" title="Сроки (SLA), минуты">
         <div className="form-grid">
           <Field label="Оператор берёт заявку"><Input type="number" value={str('sla_operator_take_min')} onChange={(e) => setK('sla_operator_take_min', e.target.value)} /></Field>
           <Field label="Агент вводит время"><Input type="number" value={str('sla_agent_slots_min')} onChange={(e) => setK('sla_agent_slots_min', e.target.value)} /></Field>
@@ -218,7 +213,7 @@ function SettingsAdmin() {
           <Field label="Обещание клиенту"><Input type="number" value={str('client_promise_min')} onChange={(e) => setK('client_promise_min', e.target.value)} /></Field>
           <Field label="Куда идут заявки (lead_target)"><Input value={str('lead_target')} onChange={(e) => setK('lead_target', e.target.value)} placeholder="group" /></Field>
           <Field label="План сделок в месяц"><Input type="number" value={str('deals_plan')} onChange={(e) => setK('deals_plan', e.target.value)} /></Field>
-          <Field label="Каталог для клиентов" className="span2"><Select value={str('client_catalog') || 'listings'} onChange={(e) => setK('client_catalog', e.target.value)} options={[{ value: 'listings', label: 'Весь опубликованный каталог бота' }, { value: 'properties', label: 'Только объекты в работе' }]} /></Field>
+          <Field label="Каталог для клиентов" className="span2"><Select value={str('client_catalog') || 'listings'} onChange={(e) => setK('client_catalog', e.target.value)} options={[{ value: 'listings', label: 'Весь опубликованный каталог бота' }, { value: 'properties', label: 'Только объекты из воронки 1' }]} /></Field>
         </div>
         <div className="mt-lg"><Switch checked={flag('moderate_all')} onChange={(v) => setK('moderate_all', v ? '1' : '0')} label="Проверять вручную все новые объявления" /></div>
       </Card>
@@ -246,16 +241,17 @@ function SettingsAdmin() {
 }
 
 export function AdminPage() {
-  const [tab, setTab] = useState<'users' | 'sources' | 'ticker' | 'settings'>('users');
+  const [tab, setTab] = useState<'users' | 'sources' | 'moderation' | 'ticker' | 'settings'>('users');
   return (
     <>
       <PageHead label="Только для администраторов" title="Управление" />
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'users', label: 'Пользователи' }, { value: 'sources', label: 'Источники' },
+        { value: 'users', label: 'Пользователи' }, { value: 'sources', label: 'Источники' }, { value: 'moderation', label: 'Проверка объявлений' },
         { value: 'ticker', label: 'Бегущая строка' }, { value: 'settings', label: 'Настройки' },
       ]} />
       {tab === 'users' && <Users />}
       {tab === 'sources' && <Sources />}
+      {tab === 'moderation' && <Moderation />}
       {tab === 'ticker' && <TickerAdmin />}
       {tab === 'settings' && <SettingsAdmin />}
     </>

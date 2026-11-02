@@ -6,8 +6,7 @@ import { ArrowLeft, Building2, CircleUser, ClipboardList, Handshake, Inbox, Spar
 import type { ReportKind } from '../api/types';
 import { Card, Empty, Seg } from '../components/ui';
 import { DealForm } from '../features/deals/DealForm';
-import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
-import { BrandMark } from '../layout/AppLayout';
+import { MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { NewListings, PropertyList } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
@@ -24,7 +23,7 @@ const TABS = [
   { to: '/m/reports', label: 'Отчёты', icon: ClipboardList },
 ];
 const TITLES: [RegExp, string][] = [
-  [/^\/m\/leads\/\d+/, 'Заявка'], [/^\/m\/leads/, 'Заявки'], [/^\/m\/properties\/\d+/, 'Объект'], [/^\/m\/properties/, 'Мои объекты'],
+  [/^\/m\/leads\/\d+/, 'Заявка'], [/^\/m\/leads/, 'Мои заявки'], [/^\/m\/properties\/\d+/, 'Объект'], [/^\/m\/properties/, 'Мои объекты'],
   [/^\/m\/new/, 'Новые объявления'], [/^\/m\/deals\/\d+/, 'Сделка'], [/^\/m\/deals\/new/, 'Новая сделка'], [/^\/m\/deal/, 'Сделка'], [/^\/m\/reports/, 'Отчёты'], [/^\/m\/me/, 'Кабинет'], [/^\/m\/contracts/, 'Договор'], [/^\/m\/calendar/, 'Календарь'],
 ];
 
@@ -38,7 +37,7 @@ export function MobileLayout() {
       <header className="mobile-top">
         {isDetail ? (
           <button className="btn btn-ghost icon-btn" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate(loc.pathname.replace(/\/\d+$/, '')))} aria-label="Назад"><ArrowLeft size={20} /></button>
-        ) : <span style={{ width: 32, height: 32, borderRadius: 9, background: '#fff', display: 'grid', placeItems: 'center', flex: 'none' }}><BrandMark size={20} /></span>}
+        ) : <span className="label" style={{ color: 'rgba(255,255,255,.6)' }}>HiG</span>}
         <h2 className="grow">{title}</h2>
         <NavLink to="/m/me" className="btn btn-ghost icon-btn" aria-label="Кабинет"><CircleUser size={20} /></NavLink>
       </header>
@@ -52,15 +51,7 @@ export function MobileLayout() {
   );
 }
 
-export function MLeads() {
-  const [view, setView] = useState<'board' | 'list'>('board');
-  return (
-    <div className="col">
-      <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
-      {view === 'board' ? <LeadBoard base="/m" /> : <MyLeadsList base="/m" />}
-    </div>
-  );
-}
+export function MLeads() { return <MyLeadsList base="/m" />; }
 export function MLead() { const { id } = useParams(); return <LeadDetail id={Number(id)} compact />; }
 export function MProperties() { return <PropertyList mine base="/m" />; }
 export function MProperty() { const { id } = useParams(); return <PropertyDetail id={Number(id)} compact />; }

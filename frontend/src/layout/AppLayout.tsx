@@ -35,7 +35,7 @@ export const NAV: NavItem[] = [
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
 const QUICK: { to: string; title: string; sub: string; icon: LucideIcon }[] = [
   { to: '/posts', title: 'Объект', sub: 'Создать публикацию', icon: Plus },
-  { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },
+  { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и T0', icon: Handshake },
   { to: '/contracts', title: 'Договор', sub: 'Создать договор', icon: FileText },
   { to: '/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
   { to: '/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
@@ -143,6 +143,7 @@ export function AppLayout() {
               <n.icon size={20} color="var(--brand)" />{n.label}
             </NavLink>
           ))}
+          <a href="/m" className="card card-pad row" style={{ color: 'var(--ink)', fontWeight: 700 }}>Панель агента (Mini App)</a>
           <button className="btn btn-danger btn-block mt" onClick={logout}><LogOut size={16} />Выйти</button>
         </div>
       </Drawer>
