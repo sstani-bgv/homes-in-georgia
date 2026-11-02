@@ -466,6 +466,24 @@ def publish(db: Session, pid: int, actor: User) -> Property:
     return p
 
 
+def published_by_generator(db: Session, pid: int, actor: User, post_url: str | None, message_id: str | None) -> Property:
+    """The agency post generator (/tools/post-generator?property_id=) published the object itself (watermark, topics,
+    owner info) and reports the post back: approve if still in review, save the link, notify the agent."""
+    p = _prop(db, pid, lock=True)
+    if actor.role not in STAFF:
+        raise forbidden("only operators publish")
+    _require_status(p, "review", "published")
+    if p.status == "review":
+        p.reviewed_by, p.reviewed_at = actor.id, now()
+        log_event(db, "property", p.id, "approved", actor, via="post_generator")
+    p.post_url, p.post_message_id = post_url or p.post_url, message_id or p.post_message_id
+    p.published_at = now()
+    _status(db, p, "published", actor, post_url=p.post_url)
+    db.commit()
+    _notify("property_published", p)
+    return p
+
+
 def mark_rented(db: Session, pid: int, actor: User | None) -> None:
     p = db.get(Property, pid)
     if p and p.status != "rented":

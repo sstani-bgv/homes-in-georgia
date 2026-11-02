@@ -207,7 +207,7 @@ function ReviewStep({ p }: { p: Property }) {
   const missing = ROOMS.slice(0, 6).filter((r) => !(p.checklist || {})[r] && !(p.media || []).some((m) => m.room === r));
   const review = useMutation({
     mutationFn: (approve: boolean) => api.properties.review(p.id, approve, comment),
-    onSuccess: (r, approve) => { set(r); toast(approve ? 'Одобрено и опубликовано' : 'Возвращено агенту'); },
+    onSuccess: (r) => { set(r); toast('Возвращено агенту'); },
     onError: (e) => toast(errText(e), true),
   });
   return (
@@ -220,10 +220,12 @@ function ReviewStep({ p }: { p: Property }) {
         {p.owner?.is_agent && <div className="alert alert-warn">Телефон собственника отмечен как агентский</div>}
       </div>
       <MediaGrid p={p} />
+      <div className="muted" style={{ fontSize: 12 }}>Генератор откроется с полями, фото и видео объекта. После «Опубликовать в канал» объект сам станет «Опубликован», агенту придёт ссылка.</div>
       <Field label="Комментарий агенту"><Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что переснять или поправить" /></Field>
       <div className="row row-wrap">
-        <Button variant="ok" size="lg" loading={review.isPending && review.variables === true} onClick={() => review.mutate(true)}><CheckCircle2 size={18} />Одобрить и опубликовать</Button>
-        <Button variant="danger" size="lg" disabled={!comment.trim()} loading={review.isPending && review.variables === false} onClick={() => review.mutate(false)}>Вернуть агенту</Button>
+        {/* publishing goes through the agency generator (watermark, topics, owner info); it reports the post back */}
+        <a className="btn btn-ok btn-lg" href={`/tools/post-generator?property_id=${p.id}`} target="_blank" rel="noreferrer"><CheckCircle2 size={18} />Одобрить → генератор постов</a>
+        <Button variant="danger" size="lg" disabled={!comment.trim()} loading={review.isPending} onClick={() => review.mutate(false)}>Вернуть агенту</Button>
       </div>
     </div>
   );

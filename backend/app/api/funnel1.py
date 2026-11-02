@@ -176,6 +176,17 @@ def properties_publish(pid: int, db: Session = Depends(get_db, scope="function")
     return P.out(db, P.publish(db, pid, user), user, full=True)
 
 
+class GeneratorPostIn(BaseModel):
+    post_url: str | None = None
+    message_id: str | None = None
+
+
+@router.post("/properties/{pid}/published")
+def properties_published(pid: int, body: GeneratorPostIn, db: Session = Depends(get_db, scope="function"),
+                         user: User = Depends(require_roles(*STAFF_ROLES))):
+    return P.out(db, P.published_by_generator(db, pid, user, body.post_url, body.message_id), user, full=True)
+
+
 @router.post("/properties/{pid}/archive")
 def properties_archive(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return P.out(db, P.archive(db, pid, user), user, full=True)

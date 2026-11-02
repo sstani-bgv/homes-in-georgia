@@ -175,7 +175,7 @@ class FakeTelegram:
                 out.append({"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private", **named}, **kind})
             self.record(method, p, files, message_id=out[0]["message_id"], message_ids=[m["message_id"] for m in out])
             return out
-        if method in ("sendMessage", "sendPhoto", "sendLocation"):
+        if method in ("sendMessage", "sendPhoto", "sendLocation", "sendDocument", "sendVideo"):
             mid = self.next_msg_id(chat)
             self.record(method, p, files, message_id=mid)
             return {"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private", **named}, "from": BOT_USER,
@@ -190,18 +190,22 @@ class FakeTelegram:
     def record(self, method, p, files, **extra):
         saved = {}
         for name, (fname, data) in files.items():
-            path = os.path.join(self.files_dir, f"{len(self.log)}_{name}.jpg")  # videos renamed to .mp4 below
+            ext = os.path.splitext(fname or "")[1].lower()
+            ext = ext if ext in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov") else ".jpg"
+            if method == "sendVideo" and ext not in (".mp4", ".mov"):
+                ext = ".mp4"
+            path = os.path.join(self.files_dir, f"{len(self.log)}_{name}{ext}")  # media-group videos renamed to .mp4 below
             with open(path, "wb") as f:
                 f.write(data)
             saved[name] = path
         if method == "sendMediaGroup":
             for m in p["media"]:
                 m["file"] = saved.get(m["media"].removeprefix("attach://"))
-                if m["file"] and m.get("type") == "video":  # keep the extension: the gallery shows it as a video
+                if m["file"] and m.get("type") == "video" and m["file"].endswith(".jpg"):  # keep the extension: the gallery shows it as a video
                     os.replace(m["file"], m["file"].removesuffix(".jpg") + ".mp4")
                     m["file"] = m["file"].removesuffix(".jpg") + ".mp4"
-        if method == "sendPhoto":
-            p["file"] = saved.get("photo")
+        if method in ("sendPhoto", "sendVideo", "sendDocument"):  # the uploaded file (or None for a file_id / URL)
+            p["file"] = saved.get({"sendPhoto": "photo", "sendVideo": "video", "sendDocument": "document"}[method])
         with self.lock:
             entry = {"seq": next(self.seq), "dir": "out", "method": method, "t": time.time(), **p, **extra}
             if "chat_id" in p:

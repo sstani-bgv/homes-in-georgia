@@ -55,8 +55,9 @@ def buttons(markup):
     return ""
 
 
-def transcript(log, chat, since=0, until=None, users=None):
-    """-> list of HTML blocks for one chat. Incoming (user) messages on the right, bot on the left; edits applied in place."""
+def transcript(log, chat, since=0, until=None, users=None, thread=None):
+    """-> list of HTML blocks for one chat (thread: only that forum topic). Incoming (user) messages on the right, bot on
+    the left; edits applied in place."""
     users = users or {}
     blocks, by_mid = [], {}
     presses = {x["cq"] for x in log if x["dir"] == "in" and x["kind"] == "press" and x.get("chat") == chat}
@@ -66,6 +67,8 @@ def transcript(log, chat, since=0, until=None, users=None):
         if x["dir"] == "out" and x["method"] == "answerCallbackQuery" and x.get("callback_query_id") in presses and x.get("text"):
             blocks.append(f'<div class="toast">💬 {esc(x["text"])}</div>')
         if x.get("chat") != chat:
+            continue
+        if thread is not None and x["dir"] == "out" and str(x.get("message_thread_id")) != str(thread):
             continue
         tm = time.strftime("%H:%M", time.localtime(x["t"]))
         if x["dir"] == "in":
@@ -105,6 +108,23 @@ def transcript(log, chat, since=0, until=None, users=None):
             cap = x.get("caption") or ""
             blk = {"img": img, "body": img + (tg_html(cap) if x.get("parse_mode") == "HTML" else esc(cap)),
                    "markup": x.get("reply_markup"), "tm": tm, "edited": False}
+            by_mid[x["message_id"]] = blk
+            blocks.append(blk)
+        elif m in ("sendVideo", "sendDocument"):
+            fpath, cap = x.get("file"), x.get("caption") or ""
+            if m == "sendVideo":
+                media_html = (f'<div class="vid" style="position:relative"><video class="single" src="file://{fpath}#t=1" muted '
+                              f'preload="auto" style="width:100%;max-width:320px;border-radius:10px;display:block"></video></div>'
+                              if fpath else "")
+                body = media_html + "🎬 видео" + ("<br>" if cap else "")
+            else:
+                name = os.path.basename(fpath or "файл")
+                img = f'<img src="file://{fpath}" style="width:56px;height:56px;object-fit:cover;border-radius:8px">' \
+                    if fpath and fpath.lower().endswith((".jpg", ".jpeg", ".png", ".webp")) else "📄"
+                body = f'<div style="display:flex;gap:10px;align-items:center">{img}<span>📎 {esc(name)}<br>' \
+                       f'<small style="color:#888">файл без сжатия (оригинал)</small></span></div>' + ("<br>" if cap else "")
+            body += tg_html(cap) if x.get("parse_mode") == "HTML" else esc(cap)
+            blk = {"body": body, "markup": x.get("reply_markup"), "tm": tm, "edited": False}
             by_mid[x["message_id"]] = blk
             blocks.append(blk)
         elif m in ("editMessageText", "editMessageReplyMarkup", "editMessageCaption"):
@@ -162,8 +182,8 @@ class Shooter:
         self.pw.stop()
 
 
-def chat_png(shooter, log, chat, png, title, subtitle, note=None, since=0, until=None):
-    blocks = transcript(log, chat, since, until)
+def chat_png(shooter, log, chat, png, title, subtitle, note=None, since=0, until=None, thread=None):
+    blocks = transcript(log, chat, since, until, thread=thread)
     return shooter.html(page(title, subtitle, note, blocks), png)
 
 

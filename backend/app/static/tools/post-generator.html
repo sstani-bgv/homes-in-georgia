@@ -1148,7 +1148,8 @@ async function publishPost() {
 
       for (let i = 0; i < watermarkedPhotos.length; i++) {
         setBtns(`⏳ Альбом фото ${i+1}/${watermarkedPhotos.length}...`, '#888', true);
-        const caption = i === 0 ? plainText.substring(0, 1024) : undefined;
+        // sent with parse_mode=HTML: escape the plain text, or a '<' / '&' in the address makes Telegram reject the photo
+        const caption = i === 0 ? plainText.substring(0, 1024).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : undefined;
         const d = await gasSendPhoto(CHANNEL_ID, watermarkedPhotos[i], caption, TOPIC_ALBUM);
         if (!d.ok) { alert('Ошибка альбом фото ' + (i+1) + ': ' + d.description); setBtns('✈️ Опубликовать в канал', '#2196F3', false); return; }
       }
@@ -1178,7 +1179,15 @@ async function publishPost() {
       await gasSendMessage(CHANNEL_ID, ownerText, TOPIC_OWNER);
     }
 
-        setBtns('✅ Опубликовано!', 'var(--green)', false);
+    // opened from a CRM object: report the post back, the object becomes "published" and the agent is notified
+    const pid = new URLSearchParams(location.search).get('property_id');
+    if (pid) {
+      const r = await fetch(`${API_BASE}/properties/${encodeURIComponent(pid)}/published`, {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_url: postLink, message_id: String(msgId) }) });
+      if (!r.ok) alert('Пост опубликован, но объект в CRM не обновился (HTTP ' + r.status + '). Отметьте его вручную.');
+    }
+    setBtns('✅ Опубликовано!', 'var(--green)', false);
     setTimeout(() => setBtns('✈️ Опубликовать в канал', '#2196F3', false), 3000);
 
   } catch(e) {
@@ -1224,6 +1233,24 @@ async function prefillFromProperty() {
     if (p.price) { set('priceInput', Math.round(p.price)); if (typeof onPriceInput === 'function') onPriceInput(); }
     if (p.owner) { set('ownerName', p.owner.name); set('ownerPhone', p.owner.phone); }
     const ex = document.getElementById('exclusiveToggle'); if (ex) ex.checked = !!p.is_exclusive;
+    // the agent's photos and video from the object card (up to 9 photos + 1 video, the generator's own limits)
+    const items = (p.media || []).filter(m => m.url);
+    const photos = items.filter(m => m.kind === 'photo').slice(0, 9), video = items.find(m => m.kind === 'video');
+    for (const m of [...photos, ...(video ? [video] : [])]) {
+      const r = await fetch(m.url, { headers: authHeaders() });
+      if (!r.ok) continue;
+      const blob = await r.blob();
+      const file = new File([blob], m.url.split('/').pop(), { type: blob.type });
+      media.push({ file, url: URL.createObjectURL(file), type: m.kind === 'video' ? 'video' : 'photo', id: Date.now() + Math.random() });
+    }
+    if (items.length) renderGrid();
+    // district and bedroom tags from the object (CRM districts are Russian; tags as in the generator's own lists)
+    const DISTRICT_TAG = { 'Ваке': '#Vake', 'Ваке-Багеби': '#Vake', 'Сабуртало': '#Saburtalo', 'Мтацминда': '#Mtatsminda', 'Вере': '#Vera',
+      'Ортачала': '#Ortachala', 'Дидубе': '#Didube', 'Чугурети': '#Chugureti', 'Исани': '#Isani', 'Самгори': '#Samgori',
+      'Глдани': '#Gldani', 'Надзаладеви': '#Nadzaladevi', 'Дигоми': '#Digomi', 'Сололаки': '#Sololaki', 'Авлабари': '#Avlabari' };
+    const pick = (group, v) => { const t = v && document.querySelector(`.tag[data-group="${group}"][data-val="${v}"]`); if (t && !t.classList.contains('selected')) pickTag(t); };
+    pick('district', DISTRICT_TAG[(p.district || '').trim()]);
+    if (p.bedrooms) pick('beds', `#${p.bedrooms}Bed`);
     if (p.agent && p.agent.name) {
       const v = '#' + p.agent.name.trim().replace(/\s+/g, '_');
       setTimeout(() => { const t = [...document.querySelectorAll('#agentTags .tag')].find(x => x.dataset.val === v); if (t) pickTag(t); }, 800);
