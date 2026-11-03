@@ -39,11 +39,11 @@ def korter_page(state):
 
 
 KORTER_DETAIL = korter_page({"layoutLandingStore": {
-    "layout": {"description": "A brand-new apartment in Modern City Lisi", "bedroomCount": 1, "bathroomCount": 1,
+    "layout": {"description": "A brand-new apartment near Lisi lake", "bedroomCount": 1, "bathroomCount": 1,
                "hasBalcony": True, "hasTerrace": False, "videoLink": None,
                "images": [{"mediaSrc": {"default": {"x1": "https://storage.googleapis.com/bd-ge-01/realty/1280x960/2.jpg"}}},
                           {"mediaSrc": {"default": {"x1": "https://storage.googleapis.com/bd-ge-01/realty/1280x960/3.jpg"}}}]},
-    "seller": {"sellerType": "owner", "name": "Mariam", "phones": [{"displayNumber": "+995 500 00 00 00"}]}}})
+    "seller": {"sellerType": "owner", "name": "Test Owner", "phones": [{"displayNumber": "+995 500 00 00 00"}]}}})
 
 
 class Livo(unittest.TestCase):
