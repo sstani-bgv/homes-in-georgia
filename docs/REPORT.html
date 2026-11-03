@@ -104,8 +104,8 @@ pre{font:.85rem/1.55 var(--mono);background:var(--surface);border:1px solid var(
     <ul>
       <li><b>Подборка квартир в боте и всё после неё</b>: карточки, ❤️, заявка в группу операторов, кнопки оператора и агента вживую. Без ключа нейронки поиск не работает; путь проверен только автотестами.</li>
       <li><b>Разбор объявлений нейронкой</b> для Livo и Korter: в проверке конвейера модель была подменена.</li>
-      <li><b>Запуск через docker-compose</b> и работа на сервере с доменом: на машине разработчика нет Docker.</li>
-      <li><b>Мини-апп и вход в CRM через Telegram</b>: нужен публичный HTTPS-адрес.</li>
+      <li><b>Запуск через docker-compose</b> на сервере: на машине разработчика нет Docker, доступа к Dokploy нет.</li>
+      <li><b>Мини-апп и вход в CRM через Telegram</b>: проверятся после выкладки на домен.</li>
       <li><b>Импорт настоящих данных</b> из Google Sheets: в архиве были только тестовые строки.</li>
     </ul>
   </div>
@@ -122,12 +122,22 @@ pre{font:.85rem/1.55 var(--mono);background:var(--surface);border:1px solid var(
 </section>
 
 <section>
+  <h2>Что уже есть в материалах</h2>
+  <div class="checks">
+    <div class="check"><h3>Сервер и домен</h3><p>Dokploy Стаса (<code>dokploy.bugaev.tech</code>), проект «Homes in Georgia», домен <code>homes.37-27-206-154.sslip.io</code> с HTTPS. Сейчас там работает прототип бота: админка, <code>/journey</code>, <code>/map</code>. Новую систему туда ещё не выкладывали.</p></div>
+    <div class="check"><h3>Боевой бот</h3><p>@HomesinGeorgia_bot, токен лежит в env Dokploy. Один токен нельзя запускать в двух местах: прототип надо остановить, когда поднимется новая система.</p></div>
+    <div class="check"><h3>Telegram-настройки агентства</h3><p>Из старой CRM, Apps Script и генератора постов: рабочая группа и топик новостей, топики сделок, Make Foto и объявлений, чат и топики публикации, Telegram ID суперадминов, хэштеги ~30 агентов. Готовый блок для env собран. Номера топиков сделок, фото и объявлений нужно подтвердить: ID чата в выгрузке Apps Script был замаскирован.</p></div>
+    <div class="check"><h3>Аккаунты сотрудников</h3><p>В выгрузке Sheets только тестовые строки (<code>DEMO_…</code>), настоящих логинов нет. Это не мешает: суперадмины входят через Telegram по ID из env и заводят сотрудников в CRM (Управление → Пользователи), агенты подключаются в боте.</p></div>
+  </div>
+</section>
+
+<section>
   <h2>Что нужно от заказчика</h2>
   <div class="asks">
     <div class="ask"><span class="pill urgent">Срочно</span><h3>Отозвать утёкший токен бота</h3><p>Токен <code>8724734832:…</code> генератора постов лежит открытым текстом в публичных репозиториях: @BotFather → /revoke. Архивировать деплойменты Apps Script, убрать у таблицы доступ «по ссылке».</p></div>
     <div class="ask"><span class="pill part">Для запуска</span><h3>Ключ нейронки</h3><p><code>OPENAI_API_KEY</code> (подойдёт ProxyAPI с <code>OPENAI_BASE_URL</code>). Без него подборка квартир и разбор новых объявлений не работают.</p></div>
-    <div class="ask"><span class="pill part">Для запуска</span><h3>Боевой бот вместо тестового</h3><p><code>BOT_TOKEN</code> и <code>BOT_USERNAME</code> в <code>.env</code>. В @BotFather: <code>/setprivacy</code> → Disable, <code>/setdomain</code> → домен сервера. Бота добавить админом в группу операторов, её ID в <code>OPERATORS_CHAT_ID</code>, ID админов в <code>SUPERADMIN_TG_IDS</code>.</p></div>
-    <div class="ask"><span class="pill part">Для запуска</span><h3>Сервер с доменом</h3><p>Машина с Docker и HTTPS-доменом для <code>PUBLIC_URL</code>.</p></div>
+    <div class="ask"><span class="pill part">Для запуска</span><h3>Выкладка на Dokploy</h3><p>Сервер, домен и бот уже есть. Нужен доступ к Dokploy либо выкладка силами Стаса: приложение из <code>deploy/docker-compose.yml</code>, env дополнить строками из готового блока, не затирая токен. В @BotFather для @HomesinGeorgia_bot: <code>/setprivacy</code> → Disable, <code>/setdomain</code> → домен. Бот должен быть админом рабочей группы.</p></div>
+    <div class="ask"><span class="pill part">Для запуска</span><h3>Группа операторов</h3><p>Куда приходят заявки клиентов: отдельная группа или топик в рабочей. Её ID в <code>OPERATORS_CHAT_ID</code>, топик в <code>OPERATORS_TOPIC_ID</code>.</p></div>
     <div class="ask"><span class="pill part">Нужно</span><h3>Настоящая выгрузка Sheets и тексты договоров</h3><p>CSV с реальными данными (импорт одной командой) и юридические тексты договоров из их Google Docs: сейчас текст пунктов написан нами, он лежит в <code>frontend/src/features/contracts/templates.ts</code>.</p></div>
     <div class="ask"><span class="pill part">Нужно</span><h3>Хэштеги агентов и ответы Давида по journey</h3><p>Кто есть кто по хэштегам (#GioCH → агент), заполняется в настройках CRM. 8 открытых вопросов по пути клиента сейчас закрыты значениями по умолчанию.</p></div>
     <div class="ask"><span class="pill res">Для Instagram</span><h3>Доступ Meta</h3><p>Instagram агентства в режиме Business, привязанный к странице Facebook, приложение в Meta for Developers и одобрение доступа Instagram Public Content Access.</p></div>
