@@ -1,10 +1,12 @@
 """Public Facebook groups (sources.json -> facebook_groups) -> raw/facebook.json (+ photos in raw/img/).
 
 Scraped through the Apify actor thedoor~facebook-group-post-scraper (no cookies, ~$0.0015 per post + $0.005 per run).
-Token: $APIFY_TOKEN or ~/.config/apify/token. The raw dataset is kept in raw/facebook_apify.json,
-so `--reuse` rebuilds raw/facebook.json without paying again.
+Incremental: each run asks only for posts newer than the previous successful run (raw/facebook_state.json, +15 min
+overlap), so a run pays for new posts only; they are merged into raw/facebook_apify.json, which keeps the last
+`days_back` days. --full refetches the whole window. Token: $APIFY_TOKEN or ~/.config/apify/token.
+`--reuse` rebuilds raw/facebook.json from the kept dataset without paying.
 
-Usage: python fetch_facebook.py [--posts 30] [--days 7] [--only <key>,<key>] [--reuse]
+Usage: python fetch_facebook.py [--posts 30] [--days 7] [--only <key>,<key>] [--full | --reuse]
 """
 import argparse
 import json
@@ -18,7 +20,8 @@ from imgutil import VIDEO_DIR, download_video, to_jpeg
 
 ACTOR = "thedoor~facebook-group-post-scraper"
 API = "https://api.apify.com/v2"
-RAW, IMG = "raw/facebook_apify.json", "raw/img"
+RAW, IMG, STATE = "raw/facebook_apify.json", "raw/img", "raw/facebook_state.json"
+OVERLAP_H = 0.25  # re-ask the last 15 min: a post published while the previous run was going is not lost
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
 
 # Facebook groups mix rentals with seekers, sales, daily flats and ads: keep only long-term rental offers
@@ -63,10 +66,10 @@ def author_key(p):
     return u.get("profileUrl") or p.get("user_url") or name
 
 
-def apify_run(groups, posts, days):
+def apify_run(groups, posts, hours):
     tok = os.environ.get("APIFY_TOKEN") or open(os.path.expanduser("~/.config/apify/token")).read().strip()
     h = {"Authorization": f"Bearer {tok}"}
-    inp = {"url": [g["url"] for g in groups], "maxPosts": posts, "postsNewerThanDays": days,
+    inp = {"url": [g["url"] for g in groups], "maxPosts": posts, "postsNewerThanHours": round(hours, 2),
            "sortingOrder": "newest_posts", "includeTopComment": False}
     with httpx.Client(headers=h, timeout=60) as c:
         run = c.post(f"{API}/acts/{ACTOR}/runs", params={"memory": 1024}, json=inp).raise_for_status().json()["data"]
@@ -109,17 +112,28 @@ def main():
     ap.add_argument("--days", type=float, help="only posts newer than N days")
     ap.add_argument("--only", help="comma-separated group keys from sources.json")
     ap.add_argument("--reuse", action="store_true", help=f"rebuild from {RAW}, no Apify call")
+    ap.add_argument("--full", action="store_true", help="ignore the last run, refetch the whole days_back window")
     a = ap.parse_args()
     cfg = json.load(open("sources.json"))
     d = cfg.get("facebook_defaults", {})
     groups = [g for g in cfg["facebook_groups"] if not a.only or g["key"] in a.only.split(",")]
     photos = d.get("photos", 3)
 
+    days = a.days or d.get("days_back", 7)
+    kept = json.load(open(RAW)) if os.path.exists(RAW) else []
     if a.reuse:
-        data = json.load(open(RAW))
+        data = kept
     else:
-        data = apify_run(groups, a.posts or d.get("posts_per_group", 30), a.days or d.get("days_back", 7))
+        started = time.time()
+        last = None if a.full or not os.path.exists(STATE) else json.load(open(STATE)).get("last_run")
+        hours = days * 24 if last is None else min(days * 24, (started - last) / 3600 + OVERLAP_H)
+        new = apify_run(groups, a.posts or d.get("posts_per_group", 30), hours)
+        cut = started - days * 86400  # merge by post id, keep the rolling window
+        by_id = {x.get("post_id"): x for x in kept + new if x.get("post_id")}
+        data = [x for x in by_id.values() if (x.get("creation_timestamp") or started) >= cut]
         json.dump(data, open(RAW, "w"), ensure_ascii=False)
+        json.dump({"last_run": started}, open(STATE, "w"))
+        print(f"facebook: {len(new)} posts from the last {hours:.2f} h, {len(data)} kept for {days} days")
     key_by_id = {}
     for g in cfg["facebook_groups"]:
         key_by_id[g.get("id") or g["url"].rstrip("/").split("/")[-1]] = g["key"]

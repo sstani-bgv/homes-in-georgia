@@ -4,7 +4,7 @@
 # agents marked as "agent" (owners.is_agent) make a listing agent-suspect on sync.
 # Run by hand or on a schedule (not installed, see docs/README.md "Автообновление"), e.g. cron every 6 hours:
 #   0 */6 * * * /path/to/rent-tbilisi-ai/refresh.sh >> /path/to/rent-tbilisi-ai/data/refresh.log 2>&1
-# Env: PY (python, default .venv/bin/python), TG (telegram-user-session runtime), SKIP_FACEBOOK=1 (Apify costs money), FB_EVERY_HOURS (48),
+# Env: PY (python, default .venv/bin/python), TG (telegram-user-session runtime), SKIP_FACEBOOK=1 (Apify costs money), FB_EVERY_HOURS (0 = every run),
 #      TG_FETCH=session (default: Telethon via TG) | web (public channels via t.me/s, fetch_channel_web.py; the server).
 # A failed fetcher keeps its previous raw/*.json; a failed ingest skips the sync (the base stays as it was).
 cd "$(dirname "$0")" || exit 1
@@ -26,11 +26,12 @@ elif [ -x "$TG" ]; then
 else
   echo "no tg runtime at $TG, skipping Telegram channels"
 fi
-# Facebook goes through Apify (~$0.26 a run): only every FB_EVERY_HOURS (48 -> ~15 runs, ~$4 a month)
-FB_MIN=$(( ${FB_EVERY_HOURS:-48} * 60 - 30 ))
+# Facebook goes through Apify and is incremental (only posts since the last run are paid for), so it runs every time;
+# FB_EVERY_HOURS>0 throttles it anyway
+FB_MIN=$(( ${FB_EVERY_HOURS:-0} * 60 ))
 if [ "${SKIP_FACEBOOK:-0}" = 1 ]; then :
-elif [ -f raw/facebook.json ] && [ -n "$(find raw/facebook.json -mmin -"$FB_MIN")" ]; then
-  echo "facebook: fresh (< ${FB_EVERY_HOURS:-48}h), skipping Apify"
+elif [ "$FB_MIN" -gt 0 ] && [ -f raw/facebook.json ] && [ -n "$(find raw/facebook.json -mmin -"$FB_MIN")" ]; then
+  echo "facebook: fresh (< ${FB_EVERY_HOURS}h), skipping Apify"
 else "$PY" fetch_facebook.py || echo "fetch_facebook failed, keeping old raw/facebook.json"; fi
 "$PY" ingest.py || { echo "ingest failed"; exit 1; }
 # video links (ss.ge HLS, YouTube...) -> mp4 in the album with yt-dlp, only listings without a local video; failures are
