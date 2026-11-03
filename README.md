@@ -6,7 +6,7 @@
 - **frontend/**: CRM на React в дизайн-системе агентства и мини-апп для агентов в Telegram (`/m/*`).
 - **bot/**: бот-подборщик, работает на общей базе. Анкета клиента, ❤️ → заявка, группа операторов, слоты времени, контакты, итог просмотра, T14.
 - **deploy/**: `docker-compose.yml` (db, api, worker, bot, refresh). Все ключи берутся только из `.env`.
-- **docs/**: [ARCHITECTURE.md](docs/ARCHITECTURE.md) (схема, API, Telegram-контракт), [SECURITY.md](docs/SECURITY.md) (что утекло в старых репо), [user-journey.txt](docs/user-journey.txt).
+- **docs/**: [ARCHITECTURE.md](docs/ARCHITECTURE.md) (схема, API, Telegram-контракт), [SECURITY.md](docs/SECURITY.md) (что утекло в старых репо), [SOURCES.md](docs/SOURCES.md) (Livo, Korter, Facebook, Instagram), [user-journey.txt](docs/user-journey.txt).
 
 ## Запуск на сервере
 

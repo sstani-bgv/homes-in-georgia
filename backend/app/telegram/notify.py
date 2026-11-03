@@ -140,7 +140,8 @@ def now_hm():
     return datetime.now(timezone.utc).astimezone(texts.tz()).strftime("%H:%M")
 
 
-SOURCE_RU = {"agency": "канал агентства", "ss.ge": "ss.ge", "myhome.ge": "myhome.ge"}
+SOURCE_RU = {"agency": "канал агентства", "ss.ge": "ss.ge", "myhome.ge": "myhome.ge", "livo.ge": "livo.ge",
+             "korter.ge": "korter.ge"}
 
 
 def group_text(lead, timer=True):

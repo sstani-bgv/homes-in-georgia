@@ -28,7 +28,7 @@ def _details(path):
     return json.load(open(path)) if os.path.exists(path) else {}
 
 
-SS_DETAILS, MH_DETAILS = {}, {}  # raw/ss_details.json, raw/myhome_details.json (fetchers), loaded in main()
+SS_DETAILS, MH_DETAILS, KR_DETAILS = {}, {}, {}  # raw/{ss,myhome,korter}_details.json (fetchers), loaded in main()
 
 
 def from_ss(i):
@@ -60,6 +60,48 @@ def from_myhome(i):
         "geo_queries": [i.get("address"), re.sub(r"\s*\d+\w?\s*$", "", i.get("address") or ""), i.get("urban_name")],
         "parsed": {**parsed, **({"address_en": i["address"]} if re.search(r"\d", i.get("address") or "")
                                 and not re.search("[\u10a0-\u10ff]", i["address"]) else {})}, "point": point,
+    }
+
+
+BASE_KORTER = "https://korter.ge"
+
+
+def from_livo(i):
+    """livo.ge item: the myhome statement shape (fetch_livo.py), only the source and link differ."""
+    it = from_myhome(i)
+    it.update(id=f"lv{i['id']}", source="livo.ge",
+              urls=[f"https://livo.ge/en/udzravi-qoneba/{i.get('middle_slug') or 'for-rent-apartment'}/"
+                    f"{i.get('dynamic_slug') or 'apartment'}-{i['id']}"])
+    return it
+
+
+def from_korter(i):
+    """korter.ge listing item + its detail page fields (fetch_korter.py)."""
+    det = KR_DETAILS.get(str(i["objectId"])) or {}
+    b = i.get("building") or {}
+    pos = b.get("position") or {}
+    price = i.get("price")
+    if price and i.get("currency") == "GEL":
+        price = round(price / GEL_PER_USD)
+    bedrooms = det.get("bedroomCount")
+    if bedrooms is None and i.get("roomCount"):
+        bedrooms = max(i["roomCount"] - 1, 0)  # Korter counts rooms with the living room, like myhome's "room"
+    floors = (i.get("house") or {}).get("floorCount")
+    d = {"floors": floors, "bathrooms": det.get("bathroomCount"),
+         "yes": [k for k, v in (("balcony", det.get("hasBalcony")), ("terrace", det.get("hasTerrace"))) if v]}
+    if k := facts.video_link(det.get("videoLink")):
+        d["video_url" if k[0] == "url" else "video_file"] = k[1]
+    district = i.get("subLocalityNominative")
+    return {
+        "id": f"kr{i['objectId']}", "source": "korter.ge", "owner_id": f"kr:{i.get('userId')}",
+        "urls": [BASE_KORTER + i["link"]], "price_usd": price, "area": i.get("area"),
+        "floor": _int((i.get("floorNumbers") or [None])[0]), "bedrooms": bedrooms,
+        "address": ", ".join(filter(None, [district, i.get("address")])),
+        "text": det.get("description") or "",
+        "photo_urls": [u for u in det.get("images") or [(i.get("mediaSrc") or {}).get("default", {}).get("x1")] if u][:PHOTOS],
+        "geo_queries": [i.get("address"), re.sub(r",?\s*\d+\w?(\s*\(.*\))?\s*$", "", i.get("address") or ""), district],
+        "parsed": {k: v for k, v in d.items() if v not in (None, [], "")},
+        "point": ((pos["lat"], pos["lng"]), "улица") if pos.get("lat") and pos.get("lng") else None,
     }
 
 
@@ -505,9 +547,11 @@ def main():
     os.makedirs(IMG, exist_ok=True)
     SS_DETAILS.update(_details("raw/ss_details.json"))
     MH_DETAILS.update(_details("raw/myhome_details.json"))
+    KR_DETAILS.update(_details("raw/korter_details.json"))
     # agency first, competitor channels last: dedupe keeps the first copy of a flat, the rest become extra urls
     items = channel_items("agency") + [conv(i) for path, conv in [("raw/ss.json", from_ss),
-                                         ("raw/myhome.json", from_myhome), ("raw/facebook.json", from_facebook)]
+                                         ("raw/myhome.json", from_myhome), ("raw/livo.json", from_livo),
+                                         ("raw/korter.json", from_korter), ("raw/facebook.json", from_facebook)]
              if os.path.exists(path) for i in json.load(open(path))]
     items += channel_items("competitor")
     counts = Counter(i["source"] for i in items)
