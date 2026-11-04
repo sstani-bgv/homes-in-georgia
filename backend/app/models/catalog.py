@@ -16,7 +16,7 @@ class Setting(Base):
 
 class Source(Base):
     __tablename__ = "sources"
-    __table_args__ = (CheckConstraint("kind IN ('tg_agency', 'tg_competitor', 'fb_group')", name="sources_kind_check"),)
+    __table_args__ = (CheckConstraint("kind IN ('tg_agency', 'tg_competitor', 'fb_group', 'ig_account')", name="sources_kind_check"),)
     id = Column(Integer, primary_key=True)
     kind = Column(Text, nullable=False)
     key = Column(Text, nullable=False, unique=True)

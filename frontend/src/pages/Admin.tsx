@@ -109,12 +109,14 @@ function Users() {
   );
 }
 
-/** t.me/<channel> → Telegram channel, facebook.com/groups/<id> → FB group (the parser reads them on the next run). */
+/** t.me/<channel> → Telegram channel, facebook.com/groups/<id> → FB group, instagram.com/<user> → Instagram account (the parser reads them on the next run). */
 function sourceFromUrl(url: string): { kind: string; key: string } | null {
   const tg = url.match(/t\.me\/(?:s\/)?([\w]+)/i);
   if (tg) return { kind: 'tg_competitor', key: tg[1] };
   const fb = url.match(/facebook\.com\/groups\/([\w.]+)/i);
-  return fb ? { kind: 'fb_group', key: fb[1] } : null;
+  if (fb) return { kind: 'fb_group', key: fb[1] };
+  const ig = url.match(/instagram\.com\/([\w.]+)/i);
+  return ig ? { kind: 'ig_account', key: ig[1] } : null;
 }
 
 function Sources() {
@@ -137,12 +139,12 @@ function Sources() {
     <div className="col gap-lg">
       <Card title="Добавить источник">
         <div className="row row-wrap" style={{ alignItems: 'flex-end' }}>
-          <Field label="Ссылка на Telegram-канал или группу Facebook" className="grow"><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://t.me/channel или https://facebook.com/groups/123" /></Field>
+          <Field label="Ссылка на Telegram-канал, группу Facebook или Instagram-аккаунт" className="grow"><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://t.me/channel, https://facebook.com/groups/123 или https://instagram.com/user" /></Field>
           <Field label="Название (необязательно)"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Button disabled={!parsed} loading={add.isPending} onClick={() => add.mutate()}><Plus size={16} />Добавить</Button>
         </div>
         {url.trim() && !parsed && <div className="muted mt" style={{ fontSize: 12 }}>Нужна ссылка вида t.me/… или facebook.com/groups/…</div>}
-        {parsed && <div className="muted mt" style={{ fontSize: 12 }}>{parsed.kind === 'fb_group' ? 'Группа Facebook' : 'Telegram-канал'}: {parsed.key}</div>}
+        {parsed && <div className="muted mt" style={{ fontSize: 12 }}>{({ fb_group: 'Группа Facebook', ig_account: 'Instagram-аккаунт' } as Record<string, string>)[parsed.kind] || 'Telegram-канал'}: {parsed.key}</div>}
       </Card>
       {!items.length ? <Empty text="Источников нет" /> : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>

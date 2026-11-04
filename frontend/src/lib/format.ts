@@ -27,7 +27,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
 export const REFUSAL_LABEL: Record<string, string> = { price: 'Цена', location: 'Расположение', condition: 'Состояние', other: 'Другое' };
 
 export const SOURCE_LABEL: Record<string, string> = {
-  ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',
+  ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', instagram: 'Instagram', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',
   referral: 'Рекомендация', import: 'Импорт', other: 'Другое',
 };
 

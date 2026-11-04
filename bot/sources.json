@@ -17,5 +17,15 @@
     {"key": "snimu_sdayu_tbilisi", "url": "https://www.facebook.com/groups/918131402810112/", "lang": "ru", "name": "Тбилиси сниму /сдаю/ продам жильё"},
     {"key": "snyat_kvartiru_tbilisi", "url": "https://www.facebook.com/groups/361958447581372/", "lang": "ru", "name": "Снять квартиру в Тбилиси"},
     {"key": "tbilisi_obyavleniya", "url": "https://www.facebook.com/groups/2138972052801792/", "lang": "ru/en", "name": "Тбилиси Объявления Аренда жилья, апартаменты, квартиры"}
+  ],
+  "instagram_defaults": {"posts_per_account": 20, "days_back": 7, "photos": 5},
+  "instagram_accounts": [
+    {"key": "7realestateagency", "name": "7 Real Estate Agency"},
+    {"key": "rental_revolution_tbilisi", "name": "Rental Revolution Tbilisi"},
+    {"key": "apex_rentaltbilisi", "name": "Apex Rental Tbilisi"},
+    {"key": "grand_rental_tbilisi", "name": "Grand Rental Tbilisi"},
+    {"key": "roombloom_ge", "name": "RoomBloom"},
+    {"key": "ttflat.tbilisi", "name": "TTFlat"},
+    {"key": "anabelspace.tb", "name": "Anabel Space"}
   ]
 }

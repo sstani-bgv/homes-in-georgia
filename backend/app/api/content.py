@@ -167,8 +167,8 @@ def _apply_source(s: Source, data: dict):
 @router.post("/sources")
 def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
     data = body.model_dump(exclude_none=True)
-    if data.get("kind") not in ("tg_agency", "tg_competitor", "fb_group") or not data.get("key"):
-        raise DomainError("bad_source", "kind (tg_agency|tg_competitor|fb_group) and key are required")
+    if data.get("kind") not in ("tg_agency", "tg_competitor", "fb_group", "ig_account") or not data.get("key"):
+        raise DomainError("bad_source", "kind (tg_agency|tg_competitor|fb_group|ig_account) and key are required")
     if db.scalar(select(Source).where(Source.key == data["key"])):
         raise DomainError("conflict", "source key exists")
     s = Source(options="{}")

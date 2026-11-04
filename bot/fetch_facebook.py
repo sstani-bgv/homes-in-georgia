@@ -3,7 +3,7 @@
 Scraped through the Apify actor thedoor~facebook-group-post-scraper (no cookies, ~$0.0015 per post + $0.005 per run).
 Incremental: each run asks only for posts newer than the previous successful run (raw/facebook_state.json, +15 min
 overlap), so a run pays for new posts only; they are merged into raw/facebook_apify.json, which keeps the last
-`days_back` days. --full refetches the whole window. Token: $APIFY_TOKEN or ~/.config/apify/token.
+`days_back` days. --full refetches the whole window. Token: $APIFY_TOKEN (.env) or ~/.config/apify/token.
 `--reuse` rebuilds raw/facebook.json from the kept dataset without paying.
 
 Usage: python fetch_facebook.py [--posts 30] [--days 7] [--only <key>,<key>] [--full | --reuse]
@@ -16,6 +16,7 @@ import time
 
 import httpx
 
+import db
 from imgutil import VIDEO_DIR, download_video, to_jpeg
 
 ACTOR = "thedoor~facebook-group-post-scraper"
@@ -66,24 +67,28 @@ def author_key(p):
     return u.get("profileUrl") or p.get("user_url") or name
 
 
-def apify_run(groups, posts, hours):
+def run_actor(actor, inp):
+    """One Apify run, waited for -> dataset items. Token: $APIFY_TOKEN (also from .env) or ~/.config/apify/token."""
+    db.load_env()
     tok = os.environ.get("APIFY_TOKEN") or open(os.path.expanduser("~/.config/apify/token")).read().strip()
-    h = {"Authorization": f"Bearer {tok}"}
-    inp = {"url": [g["url"] for g in groups], "maxPosts": posts, "postsNewerThanHours": round(hours, 2),
-           "sortingOrder": "newest_posts", "includeTopComment": False}
-    with httpx.Client(headers=h, timeout=60) as c:
-        run = c.post(f"{API}/acts/{ACTOR}/runs", params={"memory": 1024}, json=inp).raise_for_status().json()["data"]
+    with httpx.Client(headers={"Authorization": f"Bearer {tok}"}, timeout=60) as c:
+        run = c.post(f"{API}/acts/{actor}/runs", params={"memory": 1024}, json=inp).raise_for_status().json()["data"]
         while run["status"] in ("READY", "RUNNING"):
             time.sleep(5)
             run = c.get(f"{API}/actor-runs/{run['id']}").raise_for_status().json()["data"]
-        print("apify:", run["status"], f"${run.get('usageTotalUsd') or 0:.3f}", run.get("chargedEventCounts"))
+        print("apify:", actor, run["status"], f"${run.get('usageTotalUsd') or 0:.3f}", run.get("chargedEventCounts"))
         return c.get(f"{API}/datasets/{run['defaultDatasetId']}/items", params={"clean": "true"}).raise_for_status().json()
 
 
-def download(post_id, urls):
+def apify_run(groups, posts, hours):
+    return run_actor(ACTOR, {"url": [g["url"] for g in groups], "maxPosts": posts, "postsNewerThanHours": round(hours, 2),
+                             "sortingOrder": "newest_posts", "includeTopComment": False})
+
+
+def download(post_id, urls, prefix="fb"):
     paths = []
     for n, url in enumerate(urls):
-        path = f"{IMG}/fb{post_id}_{n}.jpg"  # same name ingest.download_photos would use for id fb<post_id>
+        path = f"{IMG}/{prefix}{post_id}_{n}.jpg"  # same name ingest.download_photos would use for id fb<post_id>
         if not os.path.exists(path):
             try:
                 r = httpx.get(url, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
@@ -98,10 +103,10 @@ def download(post_id, urls):
     return paths
 
 
-def video(post_id, urls):
+def video(post_id, urls, prefix="fb"):
     """At most one video per post under VIDEO_MAX_MB -> {"video": {"path"}} or {}."""
     for url in urls:
-        if path := download_video(url, f"{VIDEO_DIR}/fb{post_id}.mp4"):
+        if path := download_video(url, f"{VIDEO_DIR}/{prefix}{post_id}.mp4"):
             return {"video": {"path": path}}
     return {}
 

@@ -146,6 +146,11 @@ def from_facebook(i):
     }
 
 
+def from_instagram(i):
+    """Instagram post of an agency account (fetch_instagram.py): the same free text as Facebook posts."""
+    return {**from_facebook(i), "id": f"ig{i['id']}", "source": f"ig:{i['group']}", "owner_id": f"ig:{i['author']}"}
+
+
 def _video(i):
     """raw post's video (fetchers download it under the size cap) -> {"videos": [...]} if the file is there."""
     v = i.get("video")
@@ -305,8 +310,8 @@ def phones(text):
 
 def agent_signals(items):
     """Owner listings that look like an agent: same phone / account / text across several flats."""
-    # agency and competitor channels (source "tg:<username>") are agencies by design: only dedupe them
-    owners = [i for i in items if i["source"] != "agency" and not i["source"].startswith("tg:")]
+    # agency and competitor channels / Instagram accounts (source "tg:<username>", "ig:<username>") are agencies by design: only dedupe them
+    owners = [i for i in items if i["source"] != "agency" and not i["source"].startswith(("tg:", "ig:"))]
     by_phone = Counter(p for i in owners for p in phones(i["text"]))
     by_owner = Counter(i["owner_id"] for i in owners)
     by_text = Counter(re.sub(r"\W", "", i["text"].lower())[:200] for i in owners if len(i["text"]) > 60)
@@ -551,7 +556,8 @@ def main():
     # agency first, competitor channels last: dedupe keeps the first copy of a flat, the rest become extra urls
     items = channel_items("agency") + [conv(i) for path, conv in [("raw/ss.json", from_ss),
                                          ("raw/myhome.json", from_myhome), ("raw/livo.json", from_livo),
-                                         ("raw/korter.json", from_korter), ("raw/facebook.json", from_facebook)]
+                                         ("raw/korter.json", from_korter), ("raw/facebook.json", from_facebook),
+                                         ("raw/instagram.json", from_instagram)]
              if os.path.exists(path) for i in json.load(open(path))]
     items += channel_items("competitor")
     counts = Counter(i["source"] for i in items)

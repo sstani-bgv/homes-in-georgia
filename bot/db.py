@@ -238,6 +238,7 @@ def row(r):
 def import_sources(c, cfg):
     set_setting("telegram_defaults", json.dumps(cfg.get("telegram_defaults", {})), c)
     set_setting("facebook_defaults", json.dumps(cfg.get("facebook_defaults", {})), c)
+    set_setting("instagram_defaults", json.dumps(cfg.get("instagram_defaults", {})), c)
     n = 0
     for ch in cfg.get("telegram_channels", []):
         opts = {k: v for k, v in ch.items() if k not in ("username", "kind")}
@@ -249,16 +250,22 @@ def import_sources(c, cfg):
         c.execute("INSERT OR IGNORE INTO sources (kind, key, name, url, lang, options, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
                   ("fb_group", g["key"], g.get("name"), g.get("url"), g.get("lang"), json.dumps(opts, ensure_ascii=False), n))
         n += 1
+    for a in cfg.get("instagram_accounts", []):
+        c.execute("INSERT OR IGNORE INTO sources (kind, key, name, url, lang, options, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  ("ig_account", a["key"], a.get("name"), f"https://www.instagram.com/{a['key']}/", a.get("lang"), "{}", n))
+        n += 1
 
 
 def sources_config(c):
     """Enabled sources in the sources.json format the fetchers read."""
     rows = c.execute("SELECT * FROM sources WHERE enabled = 1 ORDER BY position, id").fetchall()
-    tg = [{"username": r["key"], "kind": r["kind"][3:], **json.loads(r["options"])} for r in rows if r["kind"] != "fb_group"]
+    tg = [{"username": r["key"], "kind": r["kind"][3:], **json.loads(r["options"])} for r in rows if r["kind"].startswith("tg_")]
     fb = [{"key": r["key"], **json.loads(r["options"]), "url": r["url"], "lang": r["lang"], "name": r["name"]}
           for r in rows if r["kind"] == "fb_group"]
+    ig = [{"key": r["key"], "name": r["name"]} for r in rows if r["kind"] == "ig_account"]
     return {"telegram_defaults": json.loads(get_setting("telegram_defaults", c) or "{}"), "telegram_channels": tg,
-            "facebook_defaults": json.loads(get_setting("facebook_defaults", c) or "{}"), "facebook_groups": fb}
+            "facebook_defaults": json.loads(get_setting("facebook_defaults", c) or "{}"), "facebook_groups": fb,
+            "instagram_defaults": json.loads(get_setting("instagram_defaults", c) or "{}"), "instagram_accounts": ig}
 
 
 def export_sources(path="sources.json"):
@@ -268,7 +275,9 @@ def export_sources(path="sources.json"):
     lines = ["{", f'  "telegram_defaults": {j(cfg["telegram_defaults"])},', '  "telegram_channels": [',
              ",\n".join(f"    {j(x)}" for x in cfg["telegram_channels"]), "  ],",
              f'  "facebook_defaults": {j(cfg["facebook_defaults"])},', '  "facebook_groups": [',
-             ",\n".join(f"    {j(x)}" for x in cfg["facebook_groups"]), "  ]", "}"]
+             ",\n".join(f"    {j(x)}" for x in cfg["facebook_groups"]), "  ],",
+             f'  "instagram_defaults": {j(cfg["instagram_defaults"])},', '  "instagram_accounts": [',
+             ",\n".join(f"    {j(x)}" for x in cfg["instagram_accounts"]), "  ]", "}"]
     Path(path).write_text("\n".join(lines) + "\n")
     return cfg
 
@@ -297,7 +306,7 @@ def classify(it, moderate_all):
         hard.append("в тексте прямо написано: объявление агента")
     if hard:
         return "rejected", "; ".join(hard)
-    competitor = src.startswith("tg:")  # competitor agencies: AI "agent" flag is expected there
+    competitor = src.startswith(("tg:", "ig:"))  # competitor agencies: AI "agent" flag is expected there
     if reasons or (it.get("agent_suspect") and not competitor):
         return "pending_review", "; ".join(reasons) or "ИИ: " + (it.get("agent_reason") or "похоже на агента")
     if moderate_all and (competitor or src.startswith("fb:")):

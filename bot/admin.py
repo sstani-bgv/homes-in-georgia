@@ -54,7 +54,8 @@ AGENT_STATUSES = ("in_work", "viewing", "rented", "refused")  # the same buttons
 JOURNEY_PAGE = ROOT / "docs" / "user-journey" / "index.html"
 JOURNEY_MAX_BYTES = 50_000
 JOURNEY_PER_HOUR = 20  # answers per sender (ip hash) per hour
-SOURCE_KINDS = {"tg_competitor": "Telegram-канал конкурента", "tg_agency": "Telegram-канал агентства", "fb_group": "Facebook-группа"}
+SOURCE_KINDS = {"tg_competitor": "Telegram-канал конкурента", "tg_agency": "Telegram-канал агентства", "fb_group": "Facebook-группа",
+                "ig_account": "Instagram-аккаунт"}
 
 
 def e(v):
@@ -733,7 +734,7 @@ def page_agents(q, v):
 def page_sources(q, v):
     with db.tx() as c:
         rows = c.execute("SELECT s.*, (SELECT COUNT(*) FROM listings WHERE status = 'published' AND source = "
-                         "CASE s.kind WHEN 'tg_agency' THEN 'agency' WHEN 'fb_group' THEN 'fb:' || s.key ELSE 'tg:' || s.key END) AS n "
+                         "CASE s.kind WHEN 'tg_agency' THEN 'agency' WHEN 'fb_group' THEN 'fb:' || s.key WHEN 'ig_account' THEN 'ig:' || s.key ELSE 'tg:' || s.key END) AS n "
                          "FROM sources s ORDER BY s.kind, s.position, s.id").fetchall()
     body = [[f"<span class='badge'>{e(SOURCE_KINDS[r['kind']])}</span>",
              (f"<b>{e(r['key'])}</b><div class='muted small'>{e(r['name'])}</div>", "wrapall"),
@@ -926,6 +927,11 @@ def parse_source(kind, link):
         if not m:
             raise ValueError("Нужна ссылка вида https://www.facebook.com/groups/…")
         return m[1], f"https://www.facebook.com/groups/{m[1]}/"
+    if kind == "ig_account":
+        key = re.sub(r"^(https?://)?(www\.)?instagram\.com/", "", link).lstrip("@").split("/")[0].split("?")[0]
+        if not re.fullmatch(r"[\w.]{1,30}", key):
+            raise ValueError("Нужен @username или ссылка instagram.com/…")
+        return key, f"https://www.instagram.com/{key}/"
     raise ValueError("Неизвестный тип источника")
 
 
