@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -112,23 +113,47 @@ def listing_out(listing: Listing, full: bool = False) -> dict:
          "status_reason": listing.status_reason}
     if full:  # agent-only fields: original links, text with phones
         d.update(urls=jload(listing.urls, []), text=listing.text, phones=extract_phones(listing.text or ""),
-                 details=jload(listing.details, {}), dup_sources=jload(listing.dup_sources, []))
+                 details=jload(listing.details, {}), dup_sources=jload(listing.dup_sources, []),
+                 telegram_contacts=list(dict.fromkeys(re.findall(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_]{4,31})\b", listing.text or ""))))
     return d
 
 
-def new_listings(db: Session, q: str | None = None, source: str | None = None, flag: str | None = None,
-                 limit: int = 50, offset: int = 0) -> dict:
-    """Listings not yet taken into work, owner-like first by default, newest first."""
+SOURCE_PREFIX = {"ss": "ss", "myhome": "mh", "livo": "lv", "korter": "kr", "facebook": "fb", "instagram": "ig", "telegram": "tg"}
+
+
+def _metro():
+    return cast(Listing.details, JSONB)["metro_ru"].astext
+
+
+def _untaken():
     taken = select(Property.listing_id).where(Property.listing_id.isnot(None), Property.status != "archived")
-    stmt = select(Listing).where(Listing.status.in_(("published", "pending_review")), Listing.source != "agency",
-                                 Listing.id.not_in(taken))
+    return (Listing.status.in_(("published", "pending_review")), Listing.source != "agency", Listing.id.not_in(taken))
+
+
+def new_listings(db: Session, q: str | None = None, source: str | None = None, flag: str | None = None,
+                 limit: int = 50, offset: int = 0, district: str | None = None, metro: str | None = None,
+                 price_min: int | None = None, price_max: int | None = None, bedrooms: str | None = None) -> dict:
+    """Listings not yet taken into work, newest first. `source` is a type (ss, facebook…) or an exact source (fb:group)."""
+    stmt = select(Listing).where(*_untaken())
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Listing.address.ilike(like), Listing.district.ilike(like), Listing.text.ilike(like),
                               Listing.id.ilike(like)))
     if source:
-        pref = {"ss": "ss", "myhome": "mh", "livo": "lv", "korter": "kr", "facebook": "fb", "instagram": "ig", "telegram": "tg"}.get(source)
-        stmt = stmt.where(Listing.id.ilike(f"{pref}%") if pref else Listing.source.ilike(f"{source}%"))
+        pref = SOURCE_PREFIX.get(source)
+        stmt = stmt.where(Listing.id.ilike(f"{pref}%") if pref else Listing.source == source)
+    if district:
+        stmt = stmt.where(Listing.district == district)
+    if metro:
+        stmt = stmt.where(_metro() == metro)
+    if price_min is not None:
+        stmt = stmt.where(Listing.price_usd >= price_min)
+    if price_max is not None:
+        stmt = stmt.where(Listing.price_usd <= price_max)
+    if bedrooms:  # "0,1,2,4": 0 = studio, 4 = 4 and more
+        picked = {int(b) for b in bedrooms.split(",") if b.strip().isdigit()}
+        conds = [Listing.bedrooms.in_(picked - {4})] + ([Listing.bedrooms >= 4] if 4 in picked else [])
+        stmt = stmt.where(or_(*conds))
     if flag == "owner":
         stmt = stmt.where(Listing.agent_suspect == 0, Listing.agent_reasons == "[]")
     elif flag == "agent_suspect":
@@ -138,6 +163,15 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset))
     return {"items": [listing_out(r) for r in rows], "total": total}
+
+
+def new_listing_facets(db: Session) -> dict:
+    """Filter options with counts over the same untaken listings: exact sources, districts, metro stations."""
+    def facet(col):
+        rows = db.execute(select(col, func.count()).where(*_untaken(), col.isnot(None), col != "")
+                          .group_by(col).order_by(func.count().desc()))
+        return [{"value": v, "count": n} for v, n in rows]
+    return {"sources": facet(Listing.source), "districts": facet(Listing.district), "metros": facet(_metro())}
 
 
 # ---------------------------------------------------------------- take (C1 → C2)

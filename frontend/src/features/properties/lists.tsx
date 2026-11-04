@@ -3,23 +3,33 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Search } from 'lucide-react';
-import { api } from '../../api';
+import { api, type ListingFilter } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Button, Empty, ErrorBox, Loading, Seg } from '../../components/ui';
+import { Button, Empty, ErrorBox, Loading, Select, Seg } from '../../components/ui';
 import { PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
 
+/** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
+const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', tg: 'Telegram' };
+const sourceName = (s: string) => { const [k, ...rest] = s.split(':'); return PREFIX_LABEL[k] && rest.length ? `${PREFIX_LABEL[k]} · ${rest.join(':')}` : s; };
+const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
+
 export function NewListings({ base = '' }: { base?: string }) {
-  const [q, setQ] = useState('');
-  const [flag, setFlag] = useState<string>('');
+  const [f, setF] = useState<ListingFilter>({ q: '', flag: '' });
+  const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
+  const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
+  const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); set('bedrooms')([...beds].sort().join(',')); };
   const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
-  const { data, isLoading, error } = useQuery({ queryKey: ['listings', 'new', q, flag], queryFn: () => api.listings.new({ q, flag }) });
+  const { data, isLoading, error } = useQuery({ queryKey: ['listings', 'new', f], queryFn: () => api.listings.new(f) });
+  const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
+  const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
+  const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q');
   const take = useMutation({
     mutationFn: (id: string) => api.properties.take(id),
     onSuccess: (p) => {
@@ -37,12 +47,24 @@ export function NewListings({ base = '' }: { base?: string }) {
       <div className="row row-wrap" style={{ marginBottom: 14 }}>
         <div className="input-icon grow" style={{ minWidth: 200, maxWidth: 380 }}>
           <Search size={16} />
-          <input className="input" placeholder="Район, адрес" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
         </div>
-        <Seg value={flag} onChange={setFlag} options={[
+        <Seg value={f.flag || ''} onChange={set('flag')} options={[
           { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
         ]} />
       </div>
+      <div className="row row-wrap gap-sm" style={{ marginBottom: 14 }}>
+        <Select aria-label="Источник" value={f.source || ''} onChange={(e) => set('source')(e.target.value)} placeholder="Все источники" options={opts(facets?.sources, sourceName)} style={{ maxWidth: 260 }} />
+        <Select aria-label="Район" value={f.district || ''} onChange={(e) => set('district')(e.target.value)} placeholder="Все районы" options={opts(facets?.districts)} style={{ maxWidth: 200 }} />
+        <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое метро" options={opts(facets?.metros)} style={{ maxWidth: 200 }} />
+        <input className="input" type="number" inputMode="numeric" min={0} placeholder="Цена от $" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} style={{ width: 110 }} />
+        <input className="input" type="number" inputMode="numeric" min={0} placeholder="до $" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} style={{ width: 90 }} />
+        <div className="row gap-sm" role="group" aria-label="Спальни">
+          {BEDS.map((b) => <Button key={b.value} size="sm" variant={beds.has(b.value) ? 'primary' : 'secondary'} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</Button>)}
+        </div>
+        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '' })}>Сбросить</Button>}
+      </div>
+      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {items.map((l) => {

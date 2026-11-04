@@ -611,12 +611,31 @@ def report_posted(report):
 
 
 @safe
-def client_message(client, text):
+def client_message(client, text, lead_id):
     """Operator -> client via the bot (CRM «Написать клиенту»)."""
     cl = client if isinstance(client, dict) else {k: g(client, k) for k in ("chat_id", "external_id", "channel", "lang")}
     if chat := chat_of(cl):
         head = "💬 Message from the operator:" if cl.get("lang") == "en" else "💬 Сообщение от оператора:"
-        tg.send(chat, f"{head}\n{e(text)}")
+        hint = "Use Reply below or reply to this message." if cl.get("lang") == "en" else "Нажмите «Ответить» или ответьте на это сообщение."
+        label = "💬 Reply" if cl.get("lang") == "en" else "💬 Ответить"
+        m = tg.send(chat, f"{head} #{lead_id}\n{e(text)}\n\n{hint}", kb([[cb(label, f"lm:reply:{lead_id}")]]))
+        if m:
+            store.remember("client_message", lead_id, m["chat"]["id"], m["message_id"])
+        return m
+
+
+@safe
+def lead_client_reply(lead, text):
+    """A client reply is saved in the lead and delivered to its operator, or the operators inbox."""
+    cl, _, _ = ctx(lead)
+    lid = g(lead, "id")
+    body = f"💬 <b>Ответ клиента · заявка #{lid}</b>\n\n{e(text)}"
+    op = store.user(g(lead, "operator_id")) or {}
+    ag = store.user(g(lead, "agent_id")) or {}
+    recipient = next((u for u in (op, ag) if u.get("is_active", True) and u.get("tg_id")), None)
+    if recipient:
+        return tg.send(recipient["tg_id"], body, kb([[app_btn("📋 Открыть заявку", links.lead_app(lid))]]))
+    to_operators(None, lid, body, lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]]))
 
 
 @safe

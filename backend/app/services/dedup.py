@@ -62,7 +62,7 @@ def address_match(a: str, b: str) -> bool:
     return bool(wa & wb) and bool(num_a & num_b)
 
 
-PHONE_RE = re.compile(r"(?:\+?995[ \-]?)?(?:5\d{2}|0\d{2,3})[ \-]?\d{2,3}[ \-]?\d{2}[ \-]?\d{2,3}")
+PHONE_RE = re.compile(r"(?<![\w+])(?:\+?995[ \-]?)?(?:5(?:[ .\-]?\d){8}|0\d{2,3}[ \-]?\d{2,3}[ \-]?\d{2}[ \-]?\d{2,3})(?!\d)")
 
 
 def extract_phones(text: str) -> list[str]:

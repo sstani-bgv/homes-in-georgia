@@ -36,7 +36,6 @@ DEFAULT_SETTINGS = {
     "review_batch": "5",        # pending cards sent per bot tick (every 10 min)
     "search_mode": "llm",       # llm: whole catalog to Codex | hybrid: filters + local embeddings, 20 lines to Codex
     "final_llm": "on",          # hybrid only. off: top 5 by score with templated reasons (one short Codex call)
-    "client_catalog": "listings",  # listings (= all): every published listing | properties (= published_only): agency + funnel 1
 }
 
 JSON_COLS = ("urls", "dup_sources", "photos", "features", "agent_reasons", "details")

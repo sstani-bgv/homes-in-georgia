@@ -145,3 +145,20 @@ def test_published_by_post_generator(db, client, sent):
     assert sent.of("property_published") and not sent.of("publish_post")  # the generator posted, not the server
     hist = [e["action"] for e in client.get(f"/api/properties/{p.id}/history", headers=auth(nino)).json()]
     assert "approved" in hist and hist[-1] == "published"
+
+
+def test_new_listing_filters(db, client):
+    georgiy = make_user(db, "agent", "Георгий")
+    make_listing(db, "ss1", source="ss.ge", price_usd=700, bedrooms=1, details='{"metro_ru": "Руставели"}')
+    make_listing(db, "fb2", source="fb:Tbilisi rent", district="Сабуртало", price_usd=1200, bedrooms=3)
+    make_listing(db, "fb3", source="fb:Other group", district="Сабуртало", price_usd=900, bedrooms=5)
+    ids = lambda qs: sorted(i["id"] for i in client.get(f"/api/listings/new?{qs}", headers=auth(georgiy)).json()["items"])
+    assert ids("source=facebook") == ["fb2", "fb3"]
+    assert ids("source=fb:Tbilisi rent") == ["fb2"]
+    assert ids("district=Сабуртало&price_max=1000") == ["fb3"]
+    assert ids("metro=Руставели") == ["ss1"]
+    assert ids("bedrooms=1,4") == ["fb3", "ss1"]
+    assert ids("price_min=800&bedrooms=3") == ["fb2"]
+    f = client.get("/api/listings/new/facets", headers=auth(georgiy)).json()
+    assert {"value": "Сабуртало", "count": 2} in f["districts"] and f["metros"] == [{"value": "Руставели", "count": 1}]
+    assert len(f["sources"]) == 3

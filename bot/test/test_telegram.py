@@ -50,7 +50,6 @@ class CompatTest(unittest.TestCase):
         self.assertIsNone(db.get_setting("rolled"))
         db.set_setting("a1", 9)
         self.assertEqual(db.get_setting("a1"), "9")
-        self.assertEqual(db.get_setting("client_catalog"), "listings")
 
 
 class ParseTest(unittest.TestCase):
@@ -164,6 +163,26 @@ class NotifyTest(unittest.TestCase):
 
     def buttons(self, call):
         return [(b["text"], b.get("callback_data") or b.get("url") or b.get("web_app", {}).get("url")) for row in self.fake.markup(call) for b in row]
+
+    def test_client_reply_recipient_fallback(self):
+        self.lead.update(operator_id=self.op, agent_id=self.ag)
+        mark = self.fake.mark()
+        notify.lead_client_reply(self.lead, "Завтра в 13:00")
+        self.assertIn("Завтра в 13:00", self.last("sendMessage", 500, mark)["text"])
+        self.assertFalse(self.fake.calls(chat=600, since=mark))
+        with db.tx() as c:
+            c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.op,))
+        mark = self.fake.mark()
+        notify.lead_client_reply(self.lead, "В 14:00")
+        delivered = self.last("sendMessage", 600, mark)["text"]
+        self.assertIn("В 14:00", delivered)
+        self.assertNotIn("Анна", delivered)
+        self.assertNotIn("anna", delivered)
+        with db.tx() as c:
+            c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.ag,))
+        mark = self.fake.mark()
+        notify.lead_client_reply(self.lead, "Уточнение")
+        self.assertIn("Уточнение", self.last("sendMessage", -100777, mark)["text"])
 
     def test_group_card_take_and_assign(self):
         m = self.fake.mark()

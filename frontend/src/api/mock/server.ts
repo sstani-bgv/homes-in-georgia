@@ -161,9 +161,15 @@ on('GET', '/listings/new', (_m, _b, q) => {
   const s = q.get('q')?.toLowerCase();
   if (s) ls = ls.filter((l) => `${l.title} ${l.address} ${l.district}`.toLowerCase().includes(s));
   if (q.get('source')) ls = ls.filter((l) => l.source === q.get('source'));
+  if (q.get('district')) ls = ls.filter((l) => l.district === q.get('district'));
   const flag = q.get('flag');
   if (flag) ls = ls.filter((l) => (l.ai_flags as Record<string, unknown> | null)?.[flag]);
   return page(ls);
+});
+on('GET', '/listings/new/facets', () => {
+  const count = (xs: (string | null | undefined)[]) => Object.entries(xs.filter(Boolean).reduce<Record<string, number>>((a, v) => ({ ...a, [v!]: (a[v!] || 0) + 1 }), {})).map(([value, n]) => ({ value, count: n }));
+  const ls = F.listings.filter((l) => !l.property_id);
+  return { sources: count(ls.map((l) => l.source)), districts: count(ls.map((l) => l.district)), metros: [] };
 });
 on('GET', '/listings/:id', (m) => F.listings.find((l) => l.id === m[1]));
 on('GET', '/properties/board', () => {

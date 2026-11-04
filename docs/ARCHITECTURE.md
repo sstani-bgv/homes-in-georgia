@@ -197,7 +197,7 @@ All functions take `db: Session` first, commit themselves, raise `app.services.e
 raise — it logs failures).
 
 `leads.py`
-- `create_from_like(db, client_id, listing_id) -> Lead` (idempotent per client+listing; status new; notify.lead_new_group; SLA operator_take)
+- `create_from_like(db, client_id, listing_id) -> Lead` (requires a published agency listing or a published listing linked to a published property, including repeat likes; idempotent per client+listing; status new; notify.lead_new_group; SLA operator_take)
 - `operator_take(db, lead_id, operator: User) -> Lead` (409 `already_taken` if someone else)
 - `assign_agent(db, lead_id, agent_id, actor: User) -> Lead` (notify.lead_assigned_agent; SLA agent_slots)
 - `recommend_agents(db, lead_id) -> list[dict]` (agent, score, reasons: owns property / district match / load)
@@ -274,7 +274,7 @@ Evaluations: `POST /evaluations` (t0/t14 by agent), `GET /evaluations?deal_id=`.
 Reports: `POST /reports/{kind}`, `GET /reports?kind=&author_id=&month=`, `GET /counters?month=` (per recruit vs plan).
 Analytics: `GET /analytics/dashboard`, `GET /analytics/funnel?from=&to=`, `GET /analytics/agents`, `GET /analytics/listings`.
 Content: `GET/POST/DELETE /ticker`, `GET /news`, `GET /channel-posts?hashtag=&district=&status=&q=&agent_id=&source=&rooms=&exclusive=&price_min=&price_max=`, `GET/PUT /settings` (admin: lead_target, moderation, SLA minutes,
-client_catalog, dashboard metrics toggles), `GET/POST/PATCH /sources` (listing sources), `GET /addresses`.
+dashboard metrics toggles), `GET/POST/PATCH /sources` (listing sources), `GET /addresses`.
 Catalog moderation (bot prototype "Проверка"): `GET /moderation`, `POST /moderation/{listing_id} {approve}`.
 Media: `GET /media/{path}` (auth), `GET /listing-photos/{listing_id}/{n}`.
 Tools: `POST /tools/telegram/{method}` — server-side proxy for the legacy post generator (allow-listed methods

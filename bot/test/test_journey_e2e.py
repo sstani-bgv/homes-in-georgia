@@ -302,12 +302,50 @@ class JourneyE2E(unittest.TestCase):
         m = self.press(u, u["id"], "🕐 Suggest my own time", since=m)
         self.with_text(u["id"], "Write a time that suits you", m)
         m = self.say(u, "Saturday after 3 pm")
-        self.with_text(u["id"], "Sent to the agent", m)
+        self.with_text(u["id"], "Your time was saved", m)
         again = self.with_text(AGENT["id"], "Клиент предложил своё время:</b> Saturday after 3 pm", m)
         self.assertIn(f"ls:quick:{lead.id}", [b.get("callback_data") for row in f.markup(again) for b in row])
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, client_note FROM leads WHERE id = ?", (lead.id,)).fetchone()[:],
                              ("slots_sent", "Saturday after 3 pm"))
+
+    def test_operator_message_replies(self):
+        """Explicit reply and Telegram reply-to stay on the correct lead; ordinary text stays a search."""
+        from app.services import leads
+        from app.telegram import notify
+        f, u = self.fake, {"id": 1010, "name": "Лера", "username": "lera_e2e", "lang": "ru"}
+        cl = core.client("tg", u["id"], chat_id=u["id"], name=u["name"], lang_hint="ru")
+        first = self.svc(leads.create_from_like, cl["id"], "tg1")
+        second = self.svc(leads.create_from_like, cl["id"], "tg2")
+        for lead in (first, second):
+            self.svc(lambda s: leads.operator_take(s, lead.id, self.user(s, OPERATOR["id"])))
+        m = f.mark()
+        self.svc(lambda s: leads.message_client(s, first.id, "Когда удобно?", self.user(s, OPERATOR["id"])))
+        original = self.with_text(u["id"], "Когда удобно?", m)
+        self.svc(lambda s: leads.message_client(s, second.id, "Другой объект", self.user(s, OPERATOR["id"])))
+        # A normal message must not silently attach to the latest of two leads.
+        before = len(self.prompts)
+        mark = self.say(u, "Ищу квартиру до 900")
+        self.find(u["id"], lambda c: any(b.get("callback_data") == "more" for row in f.markup(c) for b in row), mark)
+        self.assertGreater(len(self.prompts), before)
+        # The explicit callback chooses the original lead, not the most recent message.
+        mark = f.mark()
+        f.press(u, original, "💬 Ответить")
+        self.with_text(u["id"], f"Напишите ответ по заявке #{first.id}", mark)
+        mark = self.say(u, "Завтра в 13:00")
+        self.with_text(OPERATOR["id"], "Завтра в 13:00", mark)
+        self.with_text(u["id"], "Ответ сохранён", mark)
+        # Native Telegram reply-to also resolves the exact originating request.
+        mark = f.mark()
+        mid, incoming = f.message(u, text="Можно в 14:00?")
+        incoming["reply_to_message"] = {"message_id": original["message_id"], "date": int(time.time()),
+                                       "chat": incoming["chat"], "text": "Когда удобно?"}
+        f.push("text", {"message": incoming}, {"chat": u["id"], "message_id": mid})
+        self.with_text(OPERATOR["id"], "Можно в 14:00?", mark)
+        with db.tx() as c:
+            rows = c.execute("SELECT lead_id, note FROM lead_events WHERE kind = 'message_from_client' AND lead_id IN (?, ?) ORDER BY id",
+                             (first.id, second.id)).fetchall()
+        self.assertEqual([tuple(r) for r in rows], [(first.id, "Завтра в 13:00"), (first.id, "Можно в 14:00?")])
 
     def test_z_staff_robustness(self):
         """An operator added in the CRM by @username takes a lead from the group; «📤 Отправить» tapped twice sends the

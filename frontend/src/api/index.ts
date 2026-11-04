@@ -35,7 +35,8 @@ export const api = {
   cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
 
   listings: {
-    new: (q?: { q?: string; source?: string; flag?: string }) => then(http.get<L<Listing>>('/listings/new', { ...q, limit: LIMIT }), (d) => normPage(d, normListing)),
+    new: (q?: ListingFilter) => then(http.get<L<Listing>>('/listings/new', { ...q, limit: LIMIT }), (d) => normPage(d, normListing)),
+    facets: () => http.get<Record<'sources' | 'districts' | 'metros', { value: string; count: number }[]>>('/listings/new/facets'),
     get: (id: string) => then(http.get<Listing>(`/listings/${id}`), normListing),
   },
 
@@ -149,3 +150,5 @@ export const api = {
 
   addresses: () => http.get<L<{ id: number; district: string; address: string; ad_link?: string }>>('/addresses'),
 };
+
+export type ListingFilter = { q?: string; source?: string; flag?: string; district?: string; metro?: string; bedrooms?: string; price_min?: string; price_max?: string };

@@ -169,20 +169,26 @@ def listing(lid):
         return db.row(c.execute("SELECT * FROM listings WHERE id = ?", (lid,)).fetchone())
 
 
-def published():
-    """The client catalog. Setting client_catalog: listings | all (default) = every published listing (prototype);
-    properties | published_only = the agency channel + listings whose property passed funnel 1 (status published)."""
-    q = "SELECT * FROM listings WHERE status = 'published'"
+# Client access never depends on a setting: moderation of a scraped listing is not agency publication.
+CLIENT_ELIGIBLE = "l.status = 'published' AND (l.source = 'agency' OR EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL))"
+
+
+def client_listing(lid):
     with db.tx() as c:
-        if db.get_setting("client_catalog", c) in ("properties", "published_only"):
-            q += " AND (source = 'agency' OR id IN (SELECT listing_id FROM properties WHERE status = 'published' AND listing_id IS NOT NULL))"
-        return [db.row(r) for r in c.execute(q)]
+        return db.row(c.execute(f"SELECT l.* FROM listings l WHERE l.id = ? AND {CLIENT_ELIGIBLE}", (lid,)).fetchone())
+
+
+def published():
+    """Agency channel listings and objects published through the validated property workflow only."""
+    with db.tx() as c:
+        return [db.row(r) for r in c.execute(f"SELECT l.* FROM listings l WHERE {CLIENT_ELIGIBLE}")]
 
 
 def reactions(cl, kind):
     with db.tx() as c:
         return [db.row(r) for r in c.execute("SELECT l.* FROM reactions r JOIN listings l ON l.id = r.listing_id "
-                                             "WHERE r.client_id = ? AND r.reaction = ? ORDER BY r.created_at", (cl["id"], kind))]
+                                             f"WHERE r.client_id = ? AND r.reaction = ? AND {CLIENT_ELIGIBLE} ORDER BY r.created_at",
+                                             (cl["id"], kind))]
 
 
 # ---------- matching ----------
@@ -391,8 +397,8 @@ def understand(cl):
     if key:
         if not st.get("query") or st["query"][0] != key:
             with db.tx() as c:
-                ds = [r[0] for r in c.execute("SELECT district FROM listings WHERE status = 'published' AND district != '' "
-                                              "GROUP BY district ORDER BY COUNT(*) DESC LIMIT 40")]
+                ds = [r[0] for r in c.execute(f"SELECT l.district FROM listings l WHERE {CLIENT_ELIGIBLE} AND l.district != '' "
+                                              "GROUP BY l.district ORDER BY COUNT(*) DESC LIMIT 40")]
             res = ask(QUERY_PROMPT.format(msgs=key, lang=LANG_NAME[lang], districts=", ".join(ds)), QUERY, timeout=120)
             p = res.get("place") and geocode(res["place"])
             st["near"] = [key, [list(p), res.get("label") or res["place"], res.get("radius_km") or 2.0] if p else None]
@@ -672,8 +678,8 @@ def geo_line(i):
 def react(cl, lid, kind):
     """kind: like | dislike. -> None if the listing is no longer shown, else {"listing": ...}.
     The lead itself (❤️ -> заявка) is created by the backend: app.services.leads.create_from_like."""
-    i = listing(lid)
-    if not i or i["status"] != "published":
+    i = client_listing(lid)
+    if not i:
         return None
     with db.tx() as c:
         c.execute("INSERT INTO reactions (client_id, listing_id, reaction, created_at) VALUES (?, ?, ?, ?) "

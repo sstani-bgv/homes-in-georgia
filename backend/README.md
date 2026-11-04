@@ -113,8 +113,10 @@ deadline), `call_retry` (property), `viewing_reminder`, `post_viewing_survey` (â
 (ref `<deal_id>:<days>`, payload `{days}`). Stale jobs (entity moved on) finish with `last_error='stale'`; failures retry
 with backoff 2^n min, 5 attempts.
 
+Clients can request only published agency-channel listings or published listings linked to a published funnel-1 property.
+The same rule applies to old cards and reopening refused leads; there is no broad-catalog mode.
+
 ## Settings keys (table `settings`)
 bot keys (moderate_all, lead_target=`group`, group_chat_id, review_batch, search_mode, final_llm) +
-`client_catalog` (`listings` = whole bot catalog, `properties` = only funnel-1 published objects),
 `sla_operator_take_min`, `sla_agent_slots_min`, `sla_slots_to_client_min`, `client_promise_min` (override env),
 `dashboard_metrics` (JSON list). Imported Google Sheets settings are stored as `sheets.<key>`.

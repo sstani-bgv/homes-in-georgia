@@ -461,11 +461,11 @@ async def on_like(update: Update, ctx, cl, lid):
             lead, err = await svc(leads.create_from_like, cl["id"], lid, request_of(cl))
         finally:
             notify.tapped_card.reset(tok)
-        await answer(query, core.t(cl["lang"], "liked"))
+        await answer(query, core.t(cl["lang"], "gone" if err else "liked"))
     if err:
         log.warning("create_from_like %s/%s: %s", cl["id"], lid, err)
         try:
-            await query.edit_message_reply_markup(markup([[cb(core.t(cl["lang"], "sent"), "noop")]]))
+            await query.edit_message_reply_markup(None)
         except TelegramError:
             pass
 
@@ -775,12 +775,17 @@ async def on_client_journey(update: Update, ctx, cl):
         return
     if kind == "t14":
         return await on_t14(update, ctx, cl, parts)
-    lead_id = int(parts[2] if kind in ("ls", "lv", "lo") else parts[1])
+    lead_id = int(parts[2] if kind in ("ls", "lv", "lo", "lm") else parts[1])
     ld = await th(my_lead, cl, lead_id)
     if not ld:
         await answer(query, core.t(cl["lang"], "gone"))
         return
-    if kind == "ls":  # own time
+    if kind == "lm":
+        await th(set_await, cl, "lead_message", lead_id)
+        await answer(query)
+        await bot.send_message(chat, tr(cl, f"Напишите ответ по заявке #{lead_id}. /cancel — отменить.",
+                                        f"Write your reply for request #{lead_id}. /cancel to cancel."))
+    elif kind == "ls":  # own time
         await th(set_await, cl, "own_time", lead_id)
         await answer(query)
         await bot.send_message(chat, tr(cl, "Напишите удобное время, например «завтра после 18:00». Передам агенту.",
@@ -882,16 +887,40 @@ async def on_client_text(update: Update, ctx, cl):
     from app.services import evaluations, leads
     kind, ref = awaiting(cl)
     text = update.effective_message and update.effective_message.text
-    if not kind or not text:
+    if not text:
         return False
     bot, chat = ctx.bot, update.effective_chat.id
+    reply = update.effective_message.reply_to_message
+    if reply:
+        from app.telegram import store
+        row = await th(store.q, "SELECT ref FROM messages WHERE kind = %s AND chat_id = %s AND message_id = %s",
+                       ("client_message", chat, reply.message_id), one=True)
+        if row:
+            kind, ref = "lead_message", row["ref"]
+    if kind == "lead_message":
+        _, err = await svc(leads.message_from_client, int(ref), cl["id"], text)
+        if not err:
+            if awaiting(cl)[0] == "lead_message" and str(awaiting(cl)[1]) == str(ref):
+                await th(set_await, cl)
+            await bot.send_message(chat, tr(cl, "Ответ сохранён. Оператор увидит его в заявке 👌",
+                                            "Your reply was saved. The operator can see it in the request 👌"))
+        else:
+            await bot.send_message(chat, tr(cl, "Не удалось сохранить ответ. Откройте сообщение оператора и попробуйте снова.",
+                                            "Couldn't save your reply. Open the operator's message and try again."))
+        return True
+    if not kind:
+        return False
     if kind == "budget":
         await on_budget_text(bot, cl, text)
     elif kind == "own_time":
+        _, err = await svc(leads.client_own_time, int(ref), text)
+        if err:
+            await bot.send_message(chat, tr(cl, "Не удалось сохранить время: заявка уже на другом шаге. Напишите оператору.",
+                                            "Couldn't save the time: this request has moved to another stage. Contact the operator."))
+            return True
         await th(set_await, cl)
-        await svc(leads.client_own_time, int(ref), text)  # notify: the agent gets the lead again with the client's time
-        await bot.send_message(chat, tr(cl, "Передал агенту, он согласует время с собственником 👌",
-                                        "Sent to the agent, they'll agree the time with the owner 👌"))
+        await bot.send_message(chat, tr(cl, "Время сохранено в заявке. Агент согласует его с собственником 👌",
+                                        "Your time was saved in the request. The agent will agree it with the owner 👌"))
     elif kind == "problem":
         await th(set_await, cl)
         await svc(evaluations.create, {"deal_id": int(ref), "kind": "t14", "author": "client", "complaints": True,
@@ -943,7 +972,7 @@ async def on_callback(update: Update, ctx, cl_of):
         await on_agent_outcome(update, ctx, parts)
     elif data.startswith("q:"):
         await on_q(update, ctx, await th(cl_of))
-    elif data.startswith(("ls:", "lv:", "lo:c:", "lr:", "t14:")):
+    elif data.startswith(("ls:", "lv:", "lo:c:", "lr:", "t14:", "lm:")):
         await on_client_journey(update, ctx, await th(cl_of))
     else:
         return False

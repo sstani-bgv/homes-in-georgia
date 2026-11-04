@@ -122,6 +122,10 @@ def make_listing(db, lid="ss1001", **kw):
     return x
 
 
+def make_client_listing(db, lid="tg1001", **kw):
+    return make_listing(db, lid, **{"source": "agency", **kw})
+
+
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient

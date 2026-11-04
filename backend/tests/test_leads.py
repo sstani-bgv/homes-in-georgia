@@ -7,7 +7,7 @@ from app import worker
 from app.models import Deal, Job, Lead, LeadEvent, LeadSlot
 from app.services import jobs, leads
 from app.services.errors import DomainError
-from tests.conftest import auth, make_client, make_listing, make_user
+from tests.conftest import auth, make_client, make_client_listing as make_listing, make_user
 
 
 def _due_now(db, kind, ref):
@@ -167,3 +167,25 @@ def test_reschedule_and_reassign(db, sent):
     with pytest.raises(DomainError) as e:
         leads.add_slots(db, lead.id, [datetime(2030, 1, 2, 12)], ag)
     assert e.value.status == 403
+
+
+def test_client_messages_preserve_history_and_reject_foreign_reply(db, sent, monkeypatch):
+    from app.telegram import notify
+    op = make_user(db, "operator")
+    cl = make_client(db)
+    other = make_client(db, external_id=5550002)
+    lead = leads.create_from_like(db, cl.id, make_listing(db).id)
+    monkeypatch.setattr(notify, "client_message", lambda *args: None)
+    with pytest.raises(DomainError) as ex:
+        leads.message_client(db, lead.id, "Когда удобно?", op)
+    assert ex.value.code == "delivery_failed"
+    assert db.query(LeadEvent).filter_by(lead_id=lead.id, kind="message_to_client").count() == 0
+    monkeypatch.setattr(notify, "client_message", lambda *args: {"message_id": 10})
+    leads.message_client(db, lead.id, "Когда удобно?", op)
+    assert db.query(LeadEvent).filter_by(lead_id=lead.id, kind="message_to_client").one().note == "Когда удобно?"
+    with pytest.raises(DomainError) as ex:
+        leads.message_from_client(db, lead.id, other.id, "Чужой ответ")
+    assert ex.value.code == "forbidden"
+    leads.message_from_client(db, lead.id, cl.id, "Завтра в 13:00")
+    assert db.query(LeadEvent).filter_by(lead_id=lead.id, kind="message_from_client").one().note == "Завтра в 13:00"
+    assert sent.of("lead_client_reply")[-1][1] == "Завтра в 13:00"

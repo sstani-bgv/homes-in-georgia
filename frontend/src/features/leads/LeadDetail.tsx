@@ -7,7 +7,7 @@ import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { LeadStatusBadge, Place, SlaChip, Timeline } from '../../components/domain';
+import { LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Avatar, Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Textarea } from '../../components/ui';
 import { OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, localToIso, money } from '../../lib/format';
@@ -180,6 +180,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const { data: lead, isLoading, error } = useQuery({ queryKey: ['lead', id], queryFn: () => api.leads.get(id), refetchInterval: 20_000 });
   const { done, toast } = useLeadMut();
   const [assignOpen, setAssignOpen] = useState(false);
+  const [listingOpen, setListingOpen] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -249,12 +250,13 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
         <div className="col gap-lg">
           {l && (
             <div className="card lcard">
-              {l.photos?.[0] && <div className="lcard-photo"><img src={mediaUrl(l.photos[0])} alt="" /></div>}
+              {l.photos?.[0] && <button type="button" className="lcard-photo" onClick={() => setListingOpen(true)} aria-label="Открыть объявление и контакты" style={{ border: 0, padding: 0, width: '100%', cursor: 'pointer' }}><img src={mediaUrl(l.photos[0])} alt="" /></button>}
               <div className="lcard-body">
                 <div className="label">Объект{lead.property_id ? ` #${lead.property_id}` : ''}</div>
                 <div className="price">{money(l.price, l.currency || 'USD')}<span className="muted" style={{ fontSize: 12 }}>/мес</span></div>
                 <div className="muted">{[l.district, bedroomsLabel(l.bedrooms), l.area ? `${l.area} м²` : null].filter(Boolean).join(' · ')}</div>
                 <Place address={l.address} />
+                <Button variant="secondary" onClick={() => setListingOpen(true)}>Объявление и контакты</Button>
                 {lead.property_id && <Link to={compact ? `/m/properties/${lead.property_id}` : `/objects/${lead.property_id}`} className="label">Открыть объект</Link>}
               </div>
             </div>
@@ -275,6 +277,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
         </div>
       </div>
 
+      {listingOpen && l && <ListingModal id={l.id} onClose={() => setListingOpen(false)} />}
       <AssignModal lead={lead} open={assignOpen} onClose={() => setAssignOpen(false)} />
       <Modal open={msgOpen} onClose={() => setMsgOpen(false)} title="Сообщение клиенту">
         <Field label="Текст · бот отправит от имени агентства"><Textarea value={msg} onChange={(e) => setMsg(e.target.value)} /></Field>

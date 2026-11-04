@@ -60,9 +60,9 @@ export function AiFlagBadges({ flags }: { flags?: AiFlags | null }) {
 }
 
 /** Full listing: photos, text, all source links. A merged duplicate keeps every copy's link in `urls`. */
-function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
+export function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['listing', id], queryFn: () => api.listings.get(id) });
-  const l = data as (Listing & { urls?: string[]; dup_sources?: string[]; phones?: string[]; floor?: number | null; description?: string | null }) | undefined;
+  const l = data as (Listing & { urls?: string[]; dup_sources?: string[]; phones?: string[]; telegram_contacts?: string[]; floor?: number | null; description?: string | null; contacts_visible?: boolean; owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } }) | undefined;
   return (
     <Modal open onClose={onClose} title={l?.address || 'Объявление'}>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : l && (
@@ -75,8 +75,30 @@ function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="row row-wrap gap-sm"><AiFlagBadges flags={l.ai_flags} /></div>
           <KV items={[
             ['Цена', money(l.price, l.currency || 'USD')], ['Район', l.district || '—'], ['Спальни', bedroomsLabel(l.bedrooms) || '—'],
-            ['Площадь', l.area ? `${l.area} м²` : '—'], ['Этаж', l.floor ?? '—'], ['Телефон', l.phones?.join(', ') || '—'],
+            ['Площадь', l.area ? `${l.area} м²` : '—'], ['Этаж', l.floor ?? '—'],
           ]} />
+          {l.owner && (
+            <div className="col gap-sm">
+              <span className="label">{l.owner.is_agent ? 'Контакт агента' : 'Собственник'}{l.owner.name ? ` · ${l.owner.name}` : ''}</span>
+              {l.owner.phone && <a className="btn btn-secondary" href={`tel:${l.owner.phone.replace(/[^+\d]/g, '')}`}>Позвонить · {l.owner.phone}</a>}
+            </div>
+          )}
+          {!!l.phones?.length && (
+            <div className="col gap-sm">
+              <span className="label">Контакты из объявления</span>
+              {l.phones.map((phone) => <a key={phone} className="btn btn-secondary" href={`tel:${phone.replace(/[^+\d]/g, '')}`}>Позвонить · {phone}</a>)}
+            </div>
+          )}
+          {!!l.telegram_contacts?.length && (
+            <div className="col gap-sm">
+              <span className="label">Telegram из объявления</span>
+              {l.telegram_contacts.map((username) => <a key={username} className="btn btn-secondary" href={`https://t.me/${username}`} target="_blank" rel="noreferrer">Написать @{username}</a>)}
+            </div>
+          )}
+          {l.contacts_visible && !l.owner?.phone && !l.phones?.length && !l.telegram_contacts?.length && (
+            <div className="alert alert-info">Телефон не указан. {l.urls?.length ? 'Откройте источник ниже, чтобы связаться с автором объявления.' : 'Уточните контакт у оператора.'}</div>
+          )}
+          {l.contacts_visible === false && <div className="alert alert-info">Контакты доступны ответственному агенту и оператору.</div>}
           {l.ai_flags?.duplicate && (
             <div className="alert alert-warn">Дубль: эта квартира уже опубликована в канале агентства. Ссылка на пост — в списке ниже.</div>
           )}
@@ -156,7 +178,7 @@ const ACTION_TEXT: Record<string, string> = {
   // backend lead event names (services/leads.py _event): outcome_<by>, deal_*, rented, reschedule ...
   outcome_agent: 'Итог агента', outcome_client: 'Ответ клиента', deal_created: 'Заполнена форма сделки', deal_cancelled: 'Сделка отменена',
   rented: 'Сделка подтверждена · сдано', reopened: 'Заявка снова открыта', reschedule: 'Перенос просмотра', client_late: 'Клиент опаздывает',
-  client_own_time: 'Клиент предложил своё время', message_to_client: 'Сообщение клиенту', sla_overdue: 'Срок шага истёк',
+  client_own_time: 'Клиент предложил своё время', message_to_client: 'Сообщение клиенту', message_from_client: 'Сообщение от клиента', sla_overdue: 'Срок шага истёк',
   taken: 'Беру в работу', call: 'Звонок', call_failed: 'Не дозвонился', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',
   approved: 'Одобрено', returned: 'Возвращено агенту', published: 'Опубликовано в канале', archived: 'В архив', status: 'Смена статуса',

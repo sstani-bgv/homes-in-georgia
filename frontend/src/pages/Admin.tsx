@@ -220,7 +220,6 @@ function SettingsAdmin() {
           <Field label="Обещание клиенту"><Input type="number" value={str('client_promise_min')} onChange={(e) => setK('client_promise_min', e.target.value)} /></Field>
           <Field label="Куда идут заявки (lead_target)"><Input value={str('lead_target')} onChange={(e) => setK('lead_target', e.target.value)} placeholder="group" /></Field>
           <Field label="План сделок в месяц"><Input type="number" value={str('deals_plan')} onChange={(e) => setK('deals_plan', e.target.value)} /></Field>
-          <Field label="Каталог для клиентов" className="span2"><Select value={str('client_catalog') || 'listings'} onChange={(e) => setK('client_catalog', e.target.value)} options={[{ value: 'listings', label: 'Весь опубликованный каталог бота' }, { value: 'properties', label: 'Только объекты в работе' }]} /></Field>
         </div>
         <div className="mt-lg"><Switch checked={flag('moderate_all')} onChange={(v) => setK('moderate_all', v ? '1' : '0')} label="Проверять вручную все новые объявления" /></div>
       </Card>

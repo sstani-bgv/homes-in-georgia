@@ -294,7 +294,6 @@ export const settings: Record<string, unknown> = {
   client_promise_min: 30,
   lead_target: 'group',
   deals_plan: 40,
-  client_catalog: 'listings',
   moderate_all: '0',
   dashboard_metrics: JSON.stringify(['deals', 'platform', 'active_objects', 'reposts', 'leaderboard', 'telegram_top', 'funnel', 'response_times']),
 };

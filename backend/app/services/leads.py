@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import Text, cast, func, select
+from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -90,8 +90,19 @@ def _require_status(lead: Lead, *allowed: str):
 
 # ---------------------------------------------------------------- client side (bot)
 
+def client_listing_eligible(db: Session, listing_id: str) -> bool:
+    """Clients can request only published agency listings or properties published through funnel 1."""
+    published_property = select(Property.id).where(Property.listing_id == Listing.id, Property.status == "published",
+                                                  func.trim(func.coalesce(Property.post_url, "")) != "",
+                                                  func.trim(func.coalesce(Property.post_message_id, "")) != "").exists()
+    return db.scalar(select(Listing.id).where(Listing.id == listing_id, Listing.status == "published",
+                                              or_(Listing.source == "agency", published_property))) is not None
+
+
 def create_from_like(db: Session, client_id: int, listing_id: str, request: str | None = None) -> Lead:
     """A3: ❤️ on a card. Idempotent per (client, listing)."""
+    if not client_listing_eligible(db, listing_id):
+        raise DomainError("listing_unavailable", "Объект ещё не опубликован агентством или уже недоступен")
     existing = db.scalar(select(Lead).where(Lead.client_id == client_id, Lead.listing_id == listing_id))
     if existing:
         if existing.status == "refused":
@@ -333,9 +344,25 @@ def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) ->
 def message_client(db: Session, lead_id: int, text: str, actor: User) -> Lead:
     lead = _lead(db, lead_id)
     client = db.get(Client, lead.client_id)
+    if not _notify("client_message", client, text, lead.id):
+        raise DomainError("delivery_failed", "Не удалось доставить сообщение клиенту в Telegram. Попробуйте ещё раз.", status=502)
     _event(db, lead, "message_to_client", actor, note=text)
+    _touch(lead)
     db.commit()
-    _notify("client_message", client, text)
+    return lead
+
+
+def message_from_client(db: Session, lead_id: int, client_id: int, text: str) -> Lead:
+    lead = _lead(db, lead_id, lock=True)
+    if lead.client_id != client_id:
+        raise forbidden("not your lead")
+    text = text.strip()
+    if not text:
+        raise DomainError("empty_message", "message is empty")
+    _event(db, lead, "message_from_client", label="client", note=text)
+    _touch(lead)
+    db.commit()
+    _notify("lead_client_reply", lead, text)
     return lead
 
 

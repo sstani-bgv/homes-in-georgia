@@ -8,12 +8,11 @@ from app.models import Setting
 
 DEFAULTS = {
     "moderate_all": "0", "lead_target": "group", "group_chat_id": "", "review_batch": "5", "search_mode": "llm",
-    "final_llm": "on", "client_catalog": "listings",
+    "final_llm": "on",
     "sla_operator_take_min": str(env.SLA_OPERATOR_TAKE_MIN), "sla_agent_slots_min": str(env.SLA_AGENT_SLOTS_MIN),
     "sla_slots_to_client_min": str(env.SLA_SLOTS_TO_CLIENT_MIN), "client_promise_min": str(env.CLIENT_PROMISE_MIN),
     "dashboard_metrics": '["deals","platform","active_objects","leaderboard","funnel","response_times"]',
 }
-# client_catalog: "listings" = whole published bot catalog; "properties" = only objects published through funnel 1
 
 
 NUMERIC_MINUTES = ("sla_operator_take_min", "sla_agent_slots_min", "sla_slots_to_client_min", "client_promise_min")
@@ -44,6 +43,8 @@ def get(db: Session, key: str, default: str | None = None) -> str | None:
 def validate(body: dict) -> None:
     """Numeric SLA/promise keys must be whole minutes in 1..1440."""
     from app.services.errors import DomainError
+    if "client_catalog" in body:
+        raise DomainError("bad_setting", "Client catalog is limited to published agency objects and cannot be switched")
     for k in NUMERIC_MINUTES:
         if k not in body:
             continue
@@ -66,7 +67,7 @@ def set(db: Session, key: str, value, commit: bool = True) -> None:  # noqa: A00
 
 def all(db: Session) -> dict:  # noqa: A001
     out = dict(DEFAULTS)
-    out.update({r.key: r.value for r in db.query(Setting).all()})
+    out.update({r.key: r.value for r in db.query(Setting).all() if r.key != "client_catalog"})
     return out
 
 

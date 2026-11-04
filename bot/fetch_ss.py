@@ -31,7 +31,10 @@ def main(details_only=False):
         if details_only:  # --details-only: detail pages for the listings already in raw/ss.json
             return details(c, json.load(open("raw/ss.json")))
         html = c.get("https://home.ss.ge/en").text
-        token = re.search(r'"credentialsToken":"([^"]+)"', html).group(1)
+        # the bearer token moved from the page HTML to the ss-session-token cookie (Nov 2026); keep both
+        m = re.search(r'"credentialsToken":"([^"]+)"', html)
+        token = m.group(1) if m else c.cookies.get("ss-session-token")
+        assert token, "ss.ge: no credentialsToken in the page and no ss-session-token cookie"
         items = []
         for page in range(1, PAGES + 1):
             r = c.post("https://api-gateway.ss.ge/v1/RealEstate/LegendSearch",

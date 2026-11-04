@@ -39,6 +39,12 @@ class Base(unittest.TestCase):
         Path(self.dropped).write_text(json.dumps(list(dropped)))
         return db.sync(self.listings, self.dropped, full=full)
 
+    def publish_objects(self, *ids):
+        """Parser search fixtures become client-visible only after agency publication."""
+        with db.tx() as c:
+            for lid in ids:
+                c.execute("INSERT INTO properties (listing_id, status, post_url, post_message_id, created_at, updated_at) VALUES (?, 'published', 'https://t.me/rent_tbilisi_ge/10', '10', now(), now())", (lid,))
+
     def status(self, lid):
         return core.listing(lid)["status"]
 
@@ -101,6 +107,7 @@ class CoreTest(Base):
         super().setUp()
         self.sync([item("ss1"), item("ss2", price_usd=900), item("ss3", price_usd=5000), item("tg1", "agency")],
                   [item("ss9", reasons=["одинаковый текст у разных объявлений"])])
+        self.publish_objects("ss1", "ss2", "ss3")
         self.cl = core.client("tg", 42, username="anna", name="Anna", lang_hint="ru")
 
     def test_search_only_published_and_budget(self):
@@ -143,14 +150,33 @@ class CoreTest(Base):
         self.assertEqual([i["id"] for i in core.reactions(self.cl, "like")], ["ss1", "ss2"])
         self.assertEqual(core.reactions(self.cl, "dislike"), [])
 
-    def test_client_catalog_setting(self):
-        self.assertEqual(sorted(i["id"] for i in core.published()), ["ss1", "ss2", "ss3", "tg1"])
-        db.set_setting("client_catalog", "properties")  # agency channel + objects published through funnel 1
-        self.assertEqual([i["id"] for i in core.published()], ["tg1"])
+    def test_client_catalog_requires_agency_publication(self):
         with db.tx() as c:
-            c.execute("INSERT INTO properties (listing_id, status, created_at, updated_at) VALUES ('ss2', 'published', now(), now())")
+            c.execute("DELETE FROM properties")
+        self.assertEqual([i["id"] for i in core.published()], ["tg1"])
+        # Old settings and stale result cards cannot reopen the parser catalog.
+        db.set_setting("client_catalog", "listings")
+        self.assertIsNone(core.react(self.cl, "ss1", "like"))
+        self.assertIsNone(core.client_listing("ss1"))
+        with db.tx() as c:
+            c.execute("INSERT INTO reactions (client_id, listing_id, reaction, created_at) VALUES (?, 'ss1', 'like', ?)", (self.cl["id"], db.now()))
+        self.assertEqual(core.reactions(self.cl, "like"), [])
+        with db.tx() as c:
+            c.execute("INSERT INTO properties (listing_id, status, created_at, updated_at) VALUES ('ss3', 'published', now(), now())")
+        self.assertIsNone(core.client_listing("ss3"))  # status without successful channel publication is insufficient
+        self.publish_objects("ss2")
+        with db.tx() as c:
             c.execute("INSERT INTO properties (listing_id, status, created_at, updated_at) VALUES ('ss1', 'taken', now(), now())")
         self.assertEqual(sorted(i["id"] for i in core.published()), ["ss2", "tg1"])
+        self.assertTrue(core.react(self.cl, "ss2", "like"))
+        with db.tx() as c:
+            c.execute("UPDATE properties SET status = 'rented' WHERE listing_id = 'ss2'")
+        self.assertIsNone(core.client_listing("ss2"))
+        self.assertIsNone(core.react(self.cl, "ss2", "like"))
+        self.assertEqual(core.reactions(self.cl, "like"), [])
+        with db.tx() as c:
+            c.execute("UPDATE listings SET status = 'gone' WHERE id = 'tg1'")
+        self.assertEqual(core.published(), [])
 
     def test_staff_from_users(self):
         a = core.agent(100, "David", "david", create=True)
@@ -250,8 +276,9 @@ class ClientMapTest(unittest.TestCase):
         self.assertEqual(texts(core.card_keyboard(self.I, "ru", "")), ["❤️ Нравится", "👎 Не то"])  # no public URL
         self.assertEqual(texts(core.card_keyboard({**self.I, "lat": None}, "ru", self.BASE)), ["❤️ Нравится", "👎 Не то"])
         self.assertEqual(texts(core.card_keyboard(self.I, "ru", self.BASE, liked=True)), ["✅ Передано агенту", "📍 На карте"])
-        os.environ.pop("AGENT_APP_URL", None)
-        self.assertEqual(texts(core.card_keyboard(self.I, "ru")), ["❤️ Нравится", "👎 Не то"])  # env not set
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"PUBLIC_URL": "", "AGENT_APP_URL": ""}):
+            self.assertEqual(texts(core.card_keyboard(self.I, "ru")), ["❤️ Нравится", "👎 Не то"])
 
 
 class AgentMapTest(Base):

@@ -127,6 +127,7 @@ class SwitchTest(Base):
         super().setUp()
         self.sync([item("ss1", impression=5), item("ss2", price_usd=900), item("ss3", price_usd=5000),
                    item("ss4", bedrooms=3), item("ss5", district="Сабуртало"), item("tg1", "agency", impression=1)])
+        self.publish_objects("ss1", "ss2", "ss3", "ss4", "ss5")
         self.cl = core.client("tg", 42, name="Anna", lang_hint="ru")
         self.pick = ["ss3", "ss2", "ss1"]
 

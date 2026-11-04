@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
-from app.models import STAFF, Listing, Owner, Property, User
+from app.models import STAFF, Lead, Listing, Owner, Property, User
 from app.services import properties as P
+from app.services.leads import ACTIVE
 from app.services.common import get_or_404, log_event
 from app.services.dedup import norm_address, norm_phone
 
@@ -20,17 +21,31 @@ router = APIRouter(tags=["objects"])
 
 @router.get("/listings/new")
 def listings_new(q: str | None = None, source: str | None = None, flag: str | None = None,
+                 district: str | None = None, metro: str | None = None, bedrooms: str | None = None,
+                 price_min: int | None = Query(None, ge=0), price_max: int | None = Query(None, ge=0),
                  limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return P.new_listings(db, q, source, flag, limit, offset)
+    return P.new_listings(db, q, source, flag, limit, offset, district, metro, price_min, price_max, bedrooms)
+
+
+@router.get("/listings/new/facets")
+def listings_new_facets(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return P.new_listing_facets(db)
 
 
 @router.get("/listings/{listing_id}")
 def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     listing = get_or_404(db, Listing, listing_id, "listing")
     prop = db.scalar(select(Property).where(Property.listing_id == listing_id))
-    # original links / text with phones / dup sources: staff and the agent holding the object only
-    full = user.role in STAFF or (prop is not None and prop.agent_id == user.id and prop.status != "archived")
+    # The assigned viewing agent also needs the source contact to arrange the viewing.
+    assigned = db.scalar(select(Lead.id).where(Lead.listing_id == listing_id, Lead.agent_id == user.id,
+                                              Lead.status.in_(ACTIVE)).limit(1))
+    full = user.role in STAFF or assigned is not None or (prop is not None and prop.agent_id == user.id and prop.status != "archived")
     d = P.listing_out(listing, full=full)
+    d["contacts_visible"] = full
+    if full and prop and prop.owner_id:
+        owner = db.get(Owner, prop.owner_id)
+        if owner:
+            d["owner"] = {"name": owner.name, "phone": owner.phone, "is_agent": owner.is_agent}
     d["property"] = {"id": prop.id, "status": prop.status, "agent_id": prop.agent_id} if prop else None
     return d
 

@@ -82,6 +82,13 @@ class FakeBot:
 
 
 class Backfill(Base):
+    def test_disabled_does_not_forward_or_mark_history(self):
+        b = FakeBot()
+        with mock.patch.dict(os.environ, {"VIDEO_BACKFILL": "0"}):
+            self.assertEqual(self.run_bf(b), 0)
+        self.assertEqual(b.forwards, [])
+        self.assertEqual(len(bot.backfill_todo()), 3)
+
     def setUp(self):
         super().setUp()
         bot.warned.clear()
@@ -262,6 +269,7 @@ class CommercialLlm(Base):
     def setUp(self):
         super().setUp()
         self.sync([item("ss1"), item("tg2", "agency", details=COMMERCIAL), item("tg3", "agency", details={"property": "apartment"})])
+        self.publish_objects("ss1")
         self.cl = core.client("tg", 42, lang_hint="ru")
         self.pick = ["tg2", "ss1", "tg3"]
 
@@ -297,6 +305,7 @@ class CommercialHybrid(Base):
         super().setUp()
         self.cl = core.client("tg", 42, lang_hint="ru")
         self.sync([item("ss1"), item("ss2"), item("tg2", "agency", details=COMMERCIAL)])
+        self.publish_objects("ss1", "ss2")
         db.set_setting("search_mode", "hybrid")
         db.set_setting("final_llm", "off")
 

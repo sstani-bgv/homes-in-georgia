@@ -195,6 +195,8 @@ async def backfill_videos(bot, pause=1.0, limit=None):
     """Old agency posts: forward the video message into the store chat, keep message.video.file_id, delete the copy.
     Idempotent (done/failed messages are in channel_videos), ~1 forward per `pause` s, stops at the first access error
     (bot not an admin of the channel, store chat unavailable, flood limit) and logs it once. -> number of videos stored."""
+    if os.environ.get("VIDEO_BACKFILL", "1") == "0":
+        return 0  # Review deployments must not forward historic videos into staff chats.
     todo = backfill_todo()[:limit]
     if not todo:
         return 0
@@ -281,7 +283,9 @@ async def search(chat_id, user, ctx, delay=2.5):
     await ctx.bot.send_message(chat_id, core.t(lang, "found", understood=res["understood"], total=res["total"],
                                                base=res["base"], n=len(res["items"])))
     for x in res["items"]:
-        i = x["listing"]
+        i = await asyncio.to_thread(core.client_listing, x["listing"]["id"])
+        if not i:  # publication may have been withdrawn while the model was choosing cards
+            continue
         try:  # one broken album (file gone, Telegram refusing a photo) must not cost the other listings
             await send_album(ctx.bot, chat_id, i)
         except Exception as e:
@@ -418,11 +422,6 @@ async def send_reviews(bot, chats=None, limit=None):
 
 async def review_loop(app):
     while True:
-        try:  # clients see only agency/photographed objects -> nothing to approve, so no review cards
-            if db.get_setting("client_catalog") not in ("properties", "published_only"):
-                await send_reviews(app.bot)
-        except Exception as e:  # never kill the loop
-            print("review loop:", e)
         try:  # agency videos of posts found by the refresh (details.video_msg) -> file_id; a no-op when all are done
             await backfill_videos(app.bot)
         except Exception as e:
