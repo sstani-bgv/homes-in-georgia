@@ -591,7 +591,7 @@ def main():
         p = profiles.get(it["id"])
         if not p:
             continue
-        if p["agent_suspect"] and it["source"] != "agency" and not it["source"].startswith("tg:"):
+        if p["agent_suspect"] and it["source"] != "agency" and not it["source"].startswith(("tg:", "ig:")):
             it["agent_reasons"].append("ИИ: " + p["agent_reason"])
         apply_profile(it, p)
         it.pop("photo_urls", None)

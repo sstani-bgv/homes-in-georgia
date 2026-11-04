@@ -302,7 +302,7 @@ def classify(it, moderate_all):
         return "published", None
     reasons = it.get("agent_reasons") or []
     hard = [r for r in reasons if r.startswith(CONCLUSIVE)]
-    if src != "agency" and not src.startswith("tg:") and AGENT_TEXT.search(it.get("text") or ""):
+    if src != "agency" and not src.startswith(("tg:", "ig:")) and AGENT_TEXT.search(it.get("text") or ""):
         hard.append("в тексте прямо написано: объявление агента")
     if hard:
         return "rejected", "; ".join(hard)
@@ -328,7 +328,7 @@ def agent_phones(c):
 
 def mark_known_agent(it, known):
     """A listing whose text has a known agent phone -> agent-suspect (waits for review, flagged in the new-listings feed)."""
-    hit = sorted(phones(it.get("text")) & known) if known and it["source"] != "agency" and not it["source"].startswith("tg:") else []
+    hit = sorted(phones(it.get("text")) & known) if known and it["source"] != "agency" and not it["source"].startswith(("tg:", "ig:")) else []
     if not hit:
         return it
     return {**it, "agent_suspect": True, "agent_reasons": [*(it.get("agent_reasons") or []), f"телефон в базе агентов: {', '.join(hit)}"]}
