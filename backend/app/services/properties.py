@@ -77,6 +77,10 @@ def source_type_of(listing: Listing) -> str:
         return "ss"
     if lid.startswith("mh"):
         return "myhome"
+    if lid.startswith("lv"):
+        return "livo"
+    if lid.startswith("kr"):
+        return "korter"
     if lid.startswith("fb") or src.startswith("fb:"):
         return "facebook"
     if lid.startswith("tg") or src.startswith("tg:"):
@@ -121,7 +125,7 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
         stmt = stmt.where(or_(Listing.address.ilike(like), Listing.district.ilike(like), Listing.text.ilike(like),
                               Listing.id.ilike(like)))
     if source:
-        pref = {"ss": "ss", "myhome": "mh", "facebook": "fb", "telegram": "tg"}.get(source)
+        pref = {"ss": "ss", "myhome": "mh", "livo": "lv", "korter": "kr", "facebook": "fb", "telegram": "tg"}.get(source)
         stmt = stmt.where(Listing.id.ilike(f"{pref}%") if pref else Listing.source.ilike(f"{source}%"))
     if flag == "owner":
         stmt = stmt.where(Listing.agent_suspect == 0, Listing.agent_reasons == "[]")

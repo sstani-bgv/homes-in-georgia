@@ -6,7 +6,7 @@
 - **frontend/**: CRM на React в дизайн-системе агентства и мини-апп для агентов в Telegram (`/m/*`).
 - **bot/**: бот-подборщик, работает на общей базе. Анкета клиента, ❤️ → заявка, группа операторов, слоты времени, контакты, итог просмотра, T14.
 - **deploy/**: `docker-compose.yml` (db, api, worker, bot, refresh). Все ключи берутся только из `.env`.
-- **docs/**: [ARCHITECTURE.md](docs/ARCHITECTURE.md) (схема, API, Telegram-контракт), [SECURITY.md](docs/SECURITY.md) (что утекло в старых репо), [user-journey.txt](docs/user-journey.txt).
+- **docs/**: [ARCHITECTURE.md](docs/ARCHITECTURE.md) (схема, API, Telegram-контракт), [SECURITY.md](docs/SECURITY.md) (что утекло в старых репо), [SOURCES.md](docs/SOURCES.md) (Livo, Korter, Facebook, Instagram), [user-journey.txt](docs/user-journey.txt).
 
 ## Запуск на сервере
 
@@ -15,6 +15,21 @@ cp .env.example .env    # заполнить BOT_TOKEN, SECRET_KEY, POSTGRES_PAS
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 docker compose -f deploy/docker-compose.yml exec api sh -c "cd backend && python -m app.importers.sheets_csv /path/to/sheets-csv"
 ```
+
+### Бот и нейронка
+
+Бот подключается только через `.env`, код менять не нужно:
+
+| Переменная | Что это |
+|---|---|
+| `BOT_TOKEN`, `BOT_USERNAME` | токен и username бота из @BotFather |
+| `OPERATORS_CHAT_ID` | ID группы операторов, сюда приходят заявки |
+| `SUPERADMIN_TG_IDS` | Telegram ID суперадминов через запятую (применяется, пока в базе нет ни одного суперадмина) |
+| `OPENAI_API_KEY` | ключ для поиска квартир; без него анкета работает, а подборка нет |
+| `OPENAI_BASE_URL`, `LLM_MODEL` | для совместимого API (например ProxyAPI) и выбора модели, по умолчанию `gpt-4.1-mini` |
+
+В @BotFather: `/setprivacy` → Disable (иначе бот не видит сообщения в группе), `/setdomain` → домен из `PUBLIC_URL`
+(вход в CRM через Telegram). Бота добавить в группу операторов админом.
 
 ## Локальная разработка (без Docker)
 

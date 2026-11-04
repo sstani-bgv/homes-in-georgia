@@ -1,4 +1,4 @@
-<title>Homes in Georgia: отчёт 2 ноября</title>
+<title>Homes in Georgia: отчёт 3 ноября</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=PT+Sans:wght@400;700&family=JetBrains+Mono:wght@400&display=swap">
 <style>
@@ -6,14 +6,17 @@
 :root{
   --bg:#f7f8f6; --surface:#ffffff; --fg:#1d2420; --muted:#5d6a63; --line:#dde3df;
   --accent:#1f6f54; --accent-soft:#e3f1ea; --warn:#a4570f; --warn-soft:#fbefe1; --crit:#b3261e; --crit-soft:#fbe7e5;
+  --info:#2c5aa0; --info-soft:#e4ecf8;
   --display:"Montserrat",system-ui,sans-serif; --body:"PT Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#131816; --surface:#1b2220; --fg:#e6ece9; --muted:#9aa8a1; --line:#2c3632;
-  --accent:#5cc49b; --accent-soft:#1d3329; --warn:#e9a55a; --warn-soft:#3a2a17; --crit:#f08a80; --crit-soft:#3d1d1a; color-scheme:dark}}
+  --accent:#5cc49b; --accent-soft:#1d3329; --warn:#e9a55a; --warn-soft:#3a2a17; --crit:#f08a80; --crit-soft:#3d1d1a;
+  --info:#8db4f0; --info-soft:#1c2a40; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#131816; --surface:#1b2220; --fg:#e6ece9; --muted:#9aa8a1; --line:#2c3632;
-  --accent:#5cc49b; --accent-soft:#1d3329; --warn:#e9a55a; --warn-soft:#3a2a17; --crit:#f08a80; --crit-soft:#3d1d1a; color-scheme:dark}
+  --accent:#5cc49b; --accent-soft:#1d3329; --warn:#e9a55a; --warn-soft:#3a2a17; --crit:#f08a80; --crit-soft:#3d1d1a;
+  --info:#8db4f0; --info-soft:#1c2a40; color-scheme:dark}
 body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--body)}
 .wrap{max-width:820px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:40px}
 h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.25}
@@ -31,96 +34,122 @@ table{border-collapse:collapse;width:100%;min-width:560px}
 th,td{text-align:left;vertical-align:top;padding:12px 14px;border-bottom:1px solid var(--line)}
 tr:last-child td{border-bottom:0}
 th{font:600 .78rem var(--display);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-td:first-child{width:32%;font-weight:700}
+td:first-child{width:30%;font-weight:700}
 .pill{display:inline-block;font:600 .72rem var(--display);padding:2px 8px;border-radius:99px;white-space:nowrap}
 .ok{background:var(--accent-soft);color:var(--accent)}
 .part{background:var(--warn-soft);color:var(--warn)}
+.res{background:var(--info-soft);color:var(--info)}
+.urgent{background:var(--crit-soft);color:var(--crit)}
 ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
 .asks{display:flex;flex-direction:column;gap:12px}
 .ask{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
 .ask .pill{grid-row:span 2;align-self:start;margin-top:2px}
 .ask p{color:var(--muted);min-width:0}
-.urgent{background:var(--crit-soft);color:var(--crit)}
 code{font:.85em var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
 pre{font:.85rem/1.55 var(--mono);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:0}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px}
 .cols>div{min-width:0;display:flex;flex-direction:column;gap:10px}
 .note{font-size:.9rem;color:var(--muted)}
+.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.check{padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.check p{color:var(--muted);font-size:.92rem}
 @media (max-width:480px){h1{font-size:1.5rem}.ask{grid-template-columns:1fr}.ask .pill{grid-row:auto;justify-self:start}}
 </style>
 
 <div class="wrap">
 <header>
   <span class="eyebrow">Homes in Georgia · платформа</span>
-  <h1>Отчёт по переносу на 2 ноября</h1>
-  <p class="lead">Девять репозиториев PlatformDGE, бот-подборщик, CRM, Google Sheets и Apps Script собраны в одну систему: Python + PostgreSQL на бэкенде, React-CRM на дизайн-системе агентства, общий бот. Всё проверено локально на реальной PostgreSQL. Ниже что сделано, что нужно от заказчика и что осталось на следующий этап.</p>
+  <h1>Отчёт на 3 ноября</h1>
+  <p class="lead">Девять репозиториев PlatformDGE, бот-подборщик, CRM, Google Sheets и Apps Script собраны в одну систему: Python + PostgreSQL на бэкенде, React-CRM на дизайн-системе агентства, общий бот. Добавлены источники Livo и Korter, по Facebook и Instagram проведено исследование. Ниже: что готово, что проверено и как, что пока не проверено и что нужно от заказчика.</p>
   <div class="stats">
-    <span><b>57</b>тестов бэкенда</span>
-    <span><b>91</b>тест бота (e2e через фейковый Telegram)</span>
+    <span><b>58</b>тестов бэкенда</span>
+    <span><b>97</b>тестов бота</span>
     <span><b>31</b>лист Sheets в импорте</span>
     <span><b>0</b>ключей в коде, всё в .env</span>
   </div>
 </header>
 
 <section>
-  <h2>Что просил Стас и что сделано</h2>
+  <h2>Что готово</h2>
   <div class="tbl"><table>
     <thead><tr><th>Задача</th><th>Статус</th><th>Что сделано</th></tr></thead>
     <tbody>
-      <tr><td>Объединить репозитории в одну систему</td><td><span class="pill ok">Готово</span></td><td>Один монорепозиторий: <code>backend/</code> (FastAPI), <code>frontend/</code> (React), <code>bot/</code>, <code>deploy/</code> (docker-compose: база, API, worker, бот). Генератор постов, карта и journey отдаются тем же сервером.</td></tr>
-      <tr><td>Текущую CRM перевести на дизайн-систему</td><td><span class="pill ok">Готово</span></td><td>Каждая вкладка старой CRM сверена с новой. Обе воронки, сделки, команда, кабинет агента, отчёты, генератор договоров, календарь, калькулятор «Молекула 90/10», аналитика, лента постов канала, «Стандарты» и «Знания», проверка объекта, мини-апп для агентов в Telegram.</td></tr>
-      <tr><td>Бот с нейронкой соединить со всем</td><td><span class="pill ok">Готово</span></td><td>Бот работает на общей базе и общей логике. Кнопки и уведомления по journey: ❤️ → заявка → группа операторов → агент → слоты → контакты → итог показа → T14.</td></tr>
-      <tr><td>Python + PostgreSQL</td><td><span class="pill ok">Готово</span></td><td>Миграции Alembic, фоновый worker для сроков и напоминаний (очередь задач в базе).</td></tr>
-      <tr><td>CSV из Google Sheets импортировать как миграцию</td><td><span class="pill ok">Готово</span></td><td>Импорт всех 31 листа. Повторный запуск не плодит дубли. Пароли из <code>Platform_Desk_Users</code> хэшируются при импорте.</td></tr>
-      <tr><td>Логику Apps Script перенести</td><td><span class="pill ok">Готово</span></td><td>Комиссии и уровни агентов (50/70/90), T0/T14, напоминания о конце договора за 30/7/1 день, сроки SLA, счётчики, аналитика. Разбор сообщений из Telegram: посты канала → объекты, <code>#Rented</code> → сделки на подтверждение, Make Foto → база собственников с ответом «Добавлено / Уже есть», новости.</td></tr>
-      <tr><td>Ключи и доступы в .env</td><td><span class="pill ok">Готово</span></td><td>В коде и во фронтенде секретов нет. Токен бота в браузер не попадает: генератор постов публикует через серверный прокси.</td></tr>
-      <tr><td>Проверить и прогнать</td><td><span class="pill part">Локально</span></td><td>Тесты зелёные, CRM пройдена в браузере под оператором и агентом, на десктопе и в мобильной ширине. Боевой Telegram и docker-compose ещё не запускались (см. ниже).</td></tr>
+      <tr><td>Объединить репозитории в одну систему</td><td><span class="pill ok">Готово</span></td><td>Один репозиторий: <code>backend/</code> (FastAPI), <code>frontend/</code> (React), <code>bot/</code>, <code>deploy/</code> (docker-compose: база, API, worker, бот, автообновление объявлений).</td></tr>
+      <tr><td>Текущую CRM перевести на дизайн-систему</td><td><span class="pill ok">Готово</span></td><td>Все вкладки старой CRM перенесены: обе воронки, сделки, команда, кабинет, отчёты, договоры, календарь, калькулятор 90/10, аналитика, лента канала, «Стандарты» и «Знания», мини-апп для агентов. Цвета и шрифты по <code>design-system.png</code>.</td></tr>
+      <tr><td>Бот с нейронкой соединить со всем</td><td><span class="pill ok">Готово</span></td><td>Бот на общей базе и общей логике. Кнопки и уведомления по journey: ❤️ → заявка → операторы → агент → слоты → контакты → итог показа → T14.</td></tr>
+      <tr><td>Python + PostgreSQL, импорт CSV</td><td><span class="pill ok">Готово</span></td><td>Миграции Alembic, импорт всех 31 листа, повторный запуск не плодит дубли. Пароли из таблицы хэшируются.</td></tr>
+      <tr><td>Логику Apps Script перенести</td><td><span class="pill ok">Готово</span></td><td>Комиссии, уровни 50/70/90, T0/T14, напоминания по договорам, сроки SLA, счётчики, аналитика, разбор сообщений Telegram (посты канала, <code>#Rented</code>, Make Foto, новости).</td></tr>
+      <tr><td>Ключи и доступы в .env</td><td><span class="pill ok">Готово</span></td><td>Секретов в коде нет. Бот меняется двумя строками в <code>.env</code> (<code>BOT_TOKEN</code>, <code>BOT_USERNAME</code>), без правки кода.</td></tr>
+      <tr><td>Источники Livo и Korter</td><td><span class="pill ok">Готово</span></td><td><b>Livo</b>: та же база, что у myhome (TNET), но без Cloudflare; 3 627 объявлений от собственников. <b>Korter</b>: фильтр «собственник», 1 493 объявления с точкой дома на карте. Оба в автообновлении, видны в CRM как источники.</td></tr>
+      <tr><td>Instagram</td><td><span class="pill res">Исследовано</span></td><td>Бесплатно через официальный API: поиск по хэштегам и посты бизнес-аккаунтов. Нужен бизнес-аккаунт агентства и одобрение приложения в Meta. Сборщик напишем, когда будет токен.</td></tr>
+      <tr><td>Facebook</td><td><span class="pill res">Исследовано</span></td><td>Официального доступа к группам нет с апреля 2024. Работает сборщик через Apify (~$4 в месяц). Свой сборщик на Camoufox не рекомендуем: нарушает правила Facebook, аккаунты банят.</td></tr>
     </tbody>
   </table></div>
-  <p class="note" style="margin-top:10px">Дополнительно прошли код-ревью безопасности, бэкенда, бота и фронта: около 60 замечаний исправлены (права ролей, загрузка файлов, защита от двойных нажатий, ограничение попыток входа, скрытие контактов).</p>
+  <p class="note" style="margin-top:10px">Подробности по источникам: <code>docs/SOURCES.md</code>. Код в ветке <code>sources-livo-korter-social</code>, PR #1 в main.</p>
 </section>
 
 <section>
-  <h2>Что нужно от заказчика</h2>
-  <div class="asks">
-    <div class="ask"><span class="pill urgent">Срочно</span><h3>Отозвать токен бота генератора постов</h3><p>Токен <code>8724734832:…</code> лежит открытым текстом в публичных репозиториях. @BotFather → /revoke, новый токен положить только в <code>.env</code>.</p></div>
-    <div class="ask"><span class="pill urgent">Срочно</span><h3>Закрыть старые доступы к таблицам</h3><p>После переноса данных архивировать все деплойменты Apps Script (сейчас это открытый API к таблицам без авторизации), убрать доступ «по ссылке» у Google-таблицы, сменить пароль старой админки grishashvili.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Настоящая выгрузка Google Sheets</h3><p>В архиве были тестовые строки, поэтому в демо-аналитике есть мусор вроде средней цены $5. С реальным CSV импорт запускается одной командой.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Тексты договоров</h3><p>Старая CRM собирала договоры из шаблонов Google Docs на их Drive, в коде текстов не было. Поля, расчёты и 9 вариантов (аренда, коммерция, продажа × RU/GE/EN) готовы, но текст пунктов написан нами. Его надо заменить юридическим текстом заказчика в одном файле: <code>frontend/src/features/contracts/templates.ts</code>.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Telegram: токен, ID чатов и топиков</h3><p><code>BOT_TOKEN</code>, рабочая группа операторов, канал объявлений, канал сделок, топики. Бот должен быть админом группы, иначе не видит сообщения в топиках.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Хэштеги агентов</h3><p>Кто есть кто: «#GioCH» → конкретный агент. Заполняется в настройках CRM, нужно для разбора постов и сделок из канала.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Ответы Давида по journey</h3><p>8 открытых вопросов по пути клиента сейчас закрыты разумными значениями по умолчанию, их стоит подтвердить.</p></div>
-    <div class="ask"><span class="pill part">Нужно</span><h3>Сервер</h3><p>Машина с Docker и доменом для <code>PUBLIC_URL</code> (нужен HTTPS для мини-аппа Telegram).</p></div>
+  <h2>Что проверено и как</h2>
+  <div class="checks">
+    <div class="check"><h3>Автотесты</h3><p>Бэкенд 58, бот 97 (весь путь клиента, оператора и агента через фейковый Telegram), фронтенд собирается без ошибок типов.</p></div>
+    <div class="check"><h3>Установка из архива</h3><p>Архив развёрнут на пустую базу: миграции, импорт CSV, API, worker. Все 15 разделов CRM открываются без ошибок.</p></div>
+    <div class="check"><h3>Живой Telegram, тестовый бот</h3><p>/start, анкета из 6 вопросов, выбор районов, профиль, меню команд и описание бота работают.</p></div>
+    <div class="check"><h3>Livo и Korter вживую</h3><p>Сборщики на реальных сайтах: 96 и 80 объявлений. Конвейер до CRM: ingest → база → лента «Новые объявления» с фото и меткой источника → «Беру в работу» создаёт объект.</p></div>
   </div>
 </section>
 
 <section class="cols">
   <div>
-    <h2>Не сделано, следующий этап</h2>
+    <h2>Не проверено</h2>
     <ul>
-      <li>Ручное добавление показа в календаре (сейчас показы берутся только из заявок).</li>
-      <li>Хранение готовых договоров на сервере (сейчас печать в PDF и скачивание .doc).</li>
-      <li>Топ-10 репостов из Telegram: нужна отдельная MTProto-сессия.</li>
-      <li>Номера удостоверений и даты рождения в сделках.</li>
-      <li>Livo, Korter, Facebook, Instagram.</li>
+      <li><b>Подборка квартир в боте и всё после неё</b>: карточки, ❤️, заявка в группу операторов, кнопки оператора и агента вживую. Без ключа нейронки поиск не работает; путь проверен только автотестами.</li>
+      <li><b>Разбор объявлений нейронкой</b> для Livo и Korter: в проверке конвейера модель была подменена.</li>
+      <li><b>Запуск через docker-compose</b> на сервере: на машине разработчика нет Docker, доступа к Dokploy нет.</li>
+      <li><b>Мини-апп и вход в CRM через Telegram</b>: проверятся после выкладки на домен.</li>
+      <li><b>Импорт настоящих данных</b> из Google Sheets: в архиве были только тестовые строки.</li>
     </ul>
   </div>
   <div>
-    <h2>Не проверено</h2>
+    <h2>Не сделано</h2>
     <ul>
-      <li>Бот с настоящим токеном в настоящей рабочей группе.</li>
-      <li>Запуск через docker-compose: на моей машине нет Docker, сам файл собран и описан.</li>
-      <li>Импорт на реальных данных из Sheets.</li>
+      <li>Сборщик Instagram: ждёт доступа Meta.</li>
+      <li>Ручное добавление показа в календаре.</li>
+      <li>Хранение готовых договоров на сервере.</li>
+      <li>Топ-10 репостов из Telegram (нужна MTProto-сессия).</li>
+      <li>Номера удостоверений и даты рождения в сделках.</li>
     </ul>
   </div>
 </section>
 
 <section>
+  <h2>Что уже есть в материалах</h2>
+  <div class="checks">
+    <div class="check"><h3>Сервер и домен</h3><p>Dokploy Стаса (<code>dokploy.bugaev.tech</code>), проект «Homes in Georgia», домен <code>homes.37-27-206-154.sslip.io</code> с HTTPS. Сейчас там работает прототип бота: админка, <code>/journey</code>, <code>/map</code>. Новую систему туда ещё не выкладывали.</p></div>
+    <div class="check"><h3>Боевой бот</h3><p>@HomesinGeorgia_bot, токен лежит в env Dokploy. Один токен нельзя запускать в двух местах: прототип надо остановить, когда поднимется новая система.</p></div>
+    <div class="check"><h3>Telegram-настройки агентства</h3><p>Из старой CRM, Apps Script и генератора постов: рабочая группа и топик новостей, топики сделок, Make Foto и объявлений, чат и топики публикации, Telegram ID суперадминов, хэштеги ~30 агентов. Готовый блок для env собран. Номера топиков сделок, фото и объявлений нужно подтвердить: ID чата в выгрузке Apps Script был замаскирован.</p></div>
+    <div class="check"><h3>Аккаунты сотрудников</h3><p>В выгрузке Sheets только тестовые строки (<code>DEMO_…</code>), настоящих логинов нет. Это не мешает: суперадмины входят через Telegram по ID из env и заводят сотрудников в CRM (Управление → Пользователи), агенты подключаются в боте.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Что нужно от заказчика</h2>
+  <div class="asks">
+    <div class="ask"><span class="pill urgent">Срочно</span><h3>Отозвать утёкший токен бота</h3><p>Токен <code>8724734832:…</code> генератора постов лежит открытым текстом в публичных репозиториях: @BotFather → /revoke. Архивировать деплойменты Apps Script, убрать у таблицы доступ «по ссылке».</p></div>
+    <div class="ask"><span class="pill part">Для запуска</span><h3>Ключ нейронки</h3><p><code>OPENAI_API_KEY</code> (подойдёт ProxyAPI с <code>OPENAI_BASE_URL</code>). Без него подборка квартир и разбор новых объявлений не работают.</p></div>
+    <div class="ask"><span class="pill part">Для запуска</span><h3>Выкладка на Dokploy</h3><p>Сервер, домен и бот уже есть. Нужен доступ к Dokploy либо выкладка силами Стаса: приложение из <code>deploy/docker-compose.yml</code>, env дополнить строками из готового блока, не затирая токен. В @BotFather для @HomesinGeorgia_bot: <code>/setprivacy</code> → Disable, <code>/setdomain</code> → домен. Бот должен быть админом рабочей группы.</p></div>
+    <div class="ask"><span class="pill part">Для запуска</span><h3>Группа операторов</h3><p>Куда приходят заявки клиентов: отдельная группа или топик в рабочей. Её ID в <code>OPERATORS_CHAT_ID</code>, топик в <code>OPERATORS_TOPIC_ID</code>.</p></div>
+    <div class="ask"><span class="pill part">Нужно</span><h3>Настоящая выгрузка Sheets и тексты договоров</h3><p>CSV с реальными данными (импорт одной командой) и юридические тексты договоров из их Google Docs: сейчас текст пунктов написан нами, он лежит в <code>frontend/src/features/contracts/templates.ts</code>.</p></div>
+    <div class="ask"><span class="pill part">Нужно</span><h3>Хэштеги агентов и ответы Давида по journey</h3><p>Кто есть кто по хэштегам (#GioCH → агент), заполняется в настройках CRM. 8 открытых вопросов по пути клиента сейчас закрыты значениями по умолчанию.</p></div>
+    <div class="ask"><span class="pill res">Для Instagram</span><h3>Доступ Meta</h3><p>Instagram агентства в режиме Business, привязанный к странице Facebook, приложение в Meta for Developers и одобрение доступа Instagram Public Content Access.</p></div>
+  </div>
+</section>
+
+<section>
   <h2>Запуск на сервере</h2>
-  <pre>cp .env.example .env    # BOT_TOKEN, SECRET_KEY, POSTGRES_PASSWORD, OPERATORS_CHAT_ID, PUBLIC_URL…
+  <pre>cp .env.example .env    # BOT_TOKEN, SECRET_KEY, POSTGRES_PASSWORD, OPERATORS_CHAT_ID, PUBLIC_URL, OPENAI_API_KEY…
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 docker compose -f deploy/docker-compose.yml exec api sh -c \
   "cd backend && python -m app.importers.sheets_csv /path/to/sheets-csv"</pre>
-  <p class="note" style="margin-top:10px">Подробности: <code>README.md</code>, схема базы и API в <code>docs/ARCHITECTURE.md</code>, список утечек в <code>docs/SECURITY.md</code>.</p>
+  <p class="note" style="margin-top:10px">Подробности: <code>README.md</code> (раздел «Бот и нейронка»), <code>docs/ARCHITECTURE.md</code>, <code>docs/SECURITY.md</code>, <code>docs/SOURCES.md</code>.</p>
 </section>
 </div>

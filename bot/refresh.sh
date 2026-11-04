@@ -5,6 +5,7 @@
 # Run by hand or on a schedule (not installed, see docs/README.md "Автообновление"), e.g. cron every 6 hours:
 #   0 */6 * * * /path/to/rent-tbilisi-ai/refresh.sh >> /path/to/rent-tbilisi-ai/data/refresh.log 2>&1
 # Env: PY (python, default .venv/bin/python), TG (telegram-user-session runtime), SKIP_FACEBOOK=1 (Apify costs money), FB_EVERY_HOURS (0 = every run),
+#      SKIP_LIVO=1, SKIP_KORTER=1,
 #      TG_FETCH=session (default: Telethon via TG) | web (public channels via t.me/s, fetch_channel_web.py; the server).
 # A failed fetcher keeps its previous raw/*.json; a failed ingest skips the sync (the base stays as it was).
 cd "$(dirname "$0")" || exit 1
@@ -19,6 +20,9 @@ echo "=== $(date) refresh start"
 "$PY" db.py export-sources || exit 1          # admin edits sources in the DB, fetchers read sources.json
 "$PY" fetch_ss.py      || echo "fetch_ss failed, keeping old raw/ss.json"
 "$PY" fetch_myhome.py  || echo "fetch_myhome failed, keeping old raw/myhome.json"
+# livo.ge = the myhome base without Cloudflare (dedupe merges the same flat), korter.ge = owner listings with a pin
+[ "${SKIP_LIVO:-0}" = 1 ]   || "$PY" fetch_livo.py   || echo "fetch_livo failed, keeping old raw/livo.json"
+[ "${SKIP_KORTER:-0}" = 1 ] || "$PY" fetch_korter.py || echo "fetch_korter failed, keeping old raw/korter.json"
 if [ "${TG_FETCH:-session}" = web ]; then     # server: public channels via t.me/s, no user session
   "$PY" fetch_channel_web.py || echo "fetch_channel_web failed for some channels, they keep old files"
 elif [ -x "$TG" ]; then
