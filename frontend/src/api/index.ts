@@ -48,7 +48,7 @@ export const api = {
     take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),
     create: (b: Partial<Property>) => http.post<Property>('/properties', b),
     get: (id: number) => then(http.get<Property>(`/properties/${id}`), normProperty),
-    update: (id: number, b: Partial<Property>) => http.patch<Property>(`/properties/${id}`, b),
+    update: (id: number, b: Partial<Property> & { owner_name?: string; owner_phone?: string }) => http.patch<Property>(`/properties/${id}`, b),
     call: (id: number, reached: boolean) => http.post<Property>(`/properties/${id}/call`, { reached }),
     owner: (id: number, b: { is_owner: boolean; owner_name?: string; owner_phone?: string }) =>
       http.post<Property>(`/properties/${id}/owner`, b),

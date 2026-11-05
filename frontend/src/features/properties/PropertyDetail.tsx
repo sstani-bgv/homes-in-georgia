@@ -233,9 +233,10 @@ function ReviewStep({ p }: { p: Property }) {
 
 function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
-  const [f, setF] = useState<Partial<Property>>({});
-  const v = { ...p, ...f };
-  const upd = <K extends keyof Property>(k: K, val: Property[K]) => setF((x) => ({ ...x, [k]: val }));
+  type Form = Partial<Property> & { owner_name?: string; owner_phone?: string };
+  const [f, setF] = useState<Form>({});
+  const v: Form = { ...p, owner_name: p.owner?.name || '', owner_phone: p.owner?.phone || '', ...f };
+  const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
   const save = useMutation({ mutationFn: () => api.properties.update(p.id, f), onSuccess: (r) => { set(r); toast('Сохранено'); onClose(); setF({}); }, onError: (e) => toast(errText(e), true) });
   const numOrNull = (s: string) => (s === '' ? null : Number(s));
   return (
@@ -247,6 +248,8 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         <Field label="Спальни"><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
         <Field label="Площадь, м²"><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>
         <Field label="Этаж"><Input type="number" value={v.floor ?? ''} onChange={(e) => upd('floor', numOrNull(e.target.value))} /></Field>
+        <Field label="Собственник"><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
+        <Field label="Телефон собственника"><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
         <Field label="Кадастровый код" className="span2"><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
         <div className="span2"><Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" /></div>

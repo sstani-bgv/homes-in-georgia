@@ -86,6 +86,8 @@ class PropertyIn(BaseModel):
     is_exclusive: bool | None = None
     source_url: str | None = None
     source_type: str | None = None
+    owner_name: str | None = None
+    owner_phone: str | None = None
 
 
 class CallIn(BaseModel):

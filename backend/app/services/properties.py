@@ -279,10 +279,32 @@ def update(db: Session, pid: int, data: dict, actor: User) -> Property:
     p = _prop(db, pid)
     _require_owner(p, actor)
     _apply(p, data)
+    _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor)
     p.updated_at = now()
-    log_event(db, "property", p.id, "updated", actor, fields=sorted(k for k in data if k in EDITABLE))
+    log_event(db, "property", p.id, "updated", actor,
+              fields=sorted(k for k in data if k in EDITABLE or k in ("owner_name", "owner_phone")))
     db.commit()
     return p
+
+
+def _set_owner_contact(db: Session, p: Property, name: str | None, phone: str | None, actor: User) -> None:
+    """Fix the owner's name/phone from the object card (a typo like "Sofa" for "Nadia"). A phone that already belongs
+    to another owner in the base re-links the object to that owner instead of creating a twin."""
+    name, phone = (name or "").strip() or None, (phone or "").strip() or None
+    if not name and not phone:
+        return
+    o = db.get(Owner, p.owner_id) if p.owner_id else None
+    if o is None:
+        o, _ = upsert_owner(db, name, phone, p.address, p.source_url, actor=actor)
+        p.owner_id = o.id
+    elif phone and norm_phone(phone) != o.phone_norm:
+        other = find_owner(db, phone)
+        if other and other.id != o.id:
+            p.owner_id, o = other.id, other
+        else:
+            o.phone, o.phone_norm = phone, norm_phone(phone)
+    if name:
+        o.name = name
 
 
 def archive(db: Session, pid: int, actor: User) -> Property:

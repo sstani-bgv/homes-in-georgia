@@ -186,3 +186,19 @@ def test_feed_similar_dismiss_and_agent(db, client):
     left = {i["id"] for i in client.get("/api/listings/new", headers=auth(georgiy)).json()["items"]}
     assert left == {"ss33213266"}
     assert db.get(Listing, "ss3").status_reason == "неактуально"
+
+
+def test_fix_owner_name_and_phone_from_card(db, client):
+    georgiy = make_user(db, "agent", "Георгий")
+    make_listing(db, "kr7")
+    pid = client.post("/api/properties", json={"listing_id": "kr7"}, headers=auth(georgiy)).json()["id"]
+    client.post(f"/api/properties/{pid}/owner", json={"is_owner": True, "owner_name": "Sofa", "owner_phone": "+995 595 256 262"},
+                headers=auth(georgiy))
+    r = client.patch(f"/api/properties/{pid}", json={"owner_name": "Надя"}, headers=auth(georgiy)).json()
+    assert r["owner"]["name"] == "Надя" and r["owner"]["phone"] == "+995 595 256 262"
+    r = client.patch(f"/api/properties/{pid}", json={"owner_phone": "+995 599 11 22 33"}, headers=auth(georgiy)).json()
+    assert r["owner"]["phone"] == "+995 599 11 22 33" and db.query(Owner).count() == 1
+    other = Owner(name="Лела", phone="+995 577 00 00 01", phone_norm=norm_phone("+995 577 00 00 01"))
+    db.add(other); db.commit()
+    r = client.patch(f"/api/properties/{pid}", json={"owner_phone": "577000001"}, headers=auth(georgiy)).json()
+    assert r["owner"]["id"] == other.id  # a known number links to that owner instead of making a twin
