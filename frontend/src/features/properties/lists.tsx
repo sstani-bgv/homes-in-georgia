@@ -9,7 +9,7 @@ import type { Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Button, Empty, ErrorBox, Loading, Select, Seg } from '../../components/ui';
+import { Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
 import { PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
@@ -44,10 +44,36 @@ export function NewListings({ base = '' }: { base?: string }) {
     },
     onError: (e) => { toast(errText(e), true); qc.invalidateQueries({ queryKey: ['listings'] }); },
   });
+  const [agentFor, setAgentFor] = useState<string | null>(null);
+  const [agentC, setAgentC] = useState({ owner_name: '', owner_phone: '' });
+  const markAgent = useMutation({
+    mutationFn: () => api.listings.agent(agentFor!, agentC),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['listings'] });
+      qc.invalidateQueries({ queryKey: ['properties'] });
+      setAgentFor(null); setAgentC({ owner_name: '', owner_phone: '' });
+      toast('Отмечено как агент, контакт сохранён в базе');
+    },
+    onError: (e) => toast(errText(e), true),
+  });
+  const dismiss = useMutation({
+    mutationFn: (id: string) => api.listings.dismiss(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['listings'] }); toast('Убрано из ленты как неактуальное'); },
+    onError: (e) => toast(errText(e), true),
+  });
   const items = itemsOf(data);
 
   return (
     <>
+      <Modal open={!!agentFor} onClose={() => setAgentFor(null)} title="Это агент">
+        <form className="col gap-lg" onSubmit={(e) => { e.preventDefault(); markAgent.mutate(); }}>
+          <Field label="Имя"><input className="input" value={agentC.owner_name} onChange={(e) => setAgentC((c) => ({ ...c, owner_name: e.target.value }))} autoFocus /></Field>
+          <Field label="Телефон" hint="Номер попадёт в базу агентов: его объявления дальше будут помечаться автоматически">
+            <input className="input" type="tel" value={agentC.owner_phone} onChange={(e) => setAgentC((c) => ({ ...c, owner_phone: e.target.value }))} />
+          </Field>
+          <Button type="submit" block loading={markAgent.isPending} disabled={!agentC.owner_name.trim() && !agentC.owner_phone.trim()}>Сохранить</Button>
+        </form>
+      </Modal>
       <div className="row row-wrap" style={{ marginBottom: 14 }}>
         <div className="input-icon grow" style={{ minWidth: 200, maxWidth: 380 }}>
           <Search size={16} />
@@ -76,9 +102,16 @@ export function NewListings({ base = '' }: { base?: string }) {
             return (
               <ListingCard key={l.id} listing={l} locked={lockedByOther ? `Взял ${l.taken_by?.name}` : undefined}
                 footer={
-                  <div className="row">
-                    <Button block disabled={lockedByOther} loading={take.isPending && take.variables === l.id} onClick={() => take.mutate(l.id)}>Беру в работу</Button>
-                    {l.url && <a className="btn btn-secondary icon-btn" href={l.url} target="_blank" rel="noreferrer" title="Открыть источник"><ExternalLink size={16} /></a>}
+                  <div className="col gap-sm">
+                    <div className="row">
+                      <Button block disabled={lockedByOther} loading={take.isPending && take.variables === l.id} onClick={() => take.mutate(l.id)}>Беру в работу</Button>
+                      {l.url && <a className="btn btn-secondary icon-btn" href={l.url} target="_blank" rel="noreferrer" title="Открыть источник"><ExternalLink size={16} /></a>}
+                    </div>
+                    <div className="row">
+                      <Button size="sm" variant="secondary" block disabled={lockedByOther} onClick={() => setAgentFor(l.id)}>Агент</Button>
+                      <Button size="sm" variant="secondary" block disabled={lockedByOther} loading={dismiss.isPending && dismiss.variables === l.id}
+                        onClick={() => { if (window.confirm('Объявление удалено или неактуально? Оно уйдёт из ленты.')) dismiss.mutate(l.id); }}>Неактуально</Button>
+                    </div>
                   </div>
                 } />
             );

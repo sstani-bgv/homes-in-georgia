@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bot, Clock, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide-react';
 import { api } from '../api';
-import type { AiFlags, EventItem, Lead, LeadStatus, Listing, PropertyStatus } from '../api/types';
+import type { AiFlags, EventItem, Lead, LeadStatus, Listing, PropertyStatus, SimilarFlat } from '../api/types';
 import { mediaUrl } from '../api/client';
 import { Badge, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
@@ -60,6 +60,40 @@ export function AiFlagBadges({ flags }: { flags?: AiFlags | null }) {
 }
 
 /** Full listing: photos, text, all source links. A merged duplicate keeps every copy's link in `urls`. */
+/** The listing next to a similar flat from the agency channel, so the agent decides by eye whether it is the same one. */
+export function SimilarInChannel({ listing, similar }: { listing: Listing & { floor?: number | null }; similar: SimilarFlat[] }) {
+  return (
+    <div className="col gap-sm">
+      <div className="alert alert-warn">Похожая квартира уже есть в канале агентства. Сравните фото и параметры: это одна квартира или разные в одном доме?</div>
+      {similar.map((s) => (
+        <div key={s.id} className="card col gap-sm" style={{ padding: 12 }}>
+          <div className="row gap-sm" style={{ alignItems: 'flex-start' }}>
+            {s.photo && <img src={mediaUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
+            <div className="col" style={{ minWidth: 0 }}>
+              <strong className="ellipsis">{s.address || 'Пост в канале'}</strong>
+              <span className="faint" style={{ fontSize: 12 }}>в {s.distance_m} м от этого адреса</span>
+              {s.url && <a href={s.url} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть пост в канале</a>}
+            </div>
+          </div>
+          <table style={{ fontSize: 13, width: '100%' }}>
+            <thead><tr><th /><th style={{ textAlign: 'left' }}>Это объявление</th><th style={{ textAlign: 'left' }}>В канале</th></tr></thead>
+            <tbody>
+              {([
+                ['Цена', money(listing.price, 'USD'), money(s.price_usd ?? null, 'USD')],
+                ['Спальни', bedroomsLabel(listing.bedrooms) || '—', bedroomsLabel(s.bedrooms) || '—'],
+                ['Площадь', listing.area ? `${listing.area} м²` : '—', s.area ? `${s.area} м²` : '—'],
+                ['Этаж', listing.floor ?? '—', s.floor ?? '—'],
+              ] as [string, ReactNode, ReactNode][]).map(([k, a, b]) => (
+                <tr key={k}><td className="muted">{k}</td><td>{a}</td><td style={{ fontWeight: String(a) === String(b) ? 400 : 700 }}>{b}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['listing', id], queryFn: () => api.listings.get(id) });
   const l = data as (Listing & { urls?: string[]; dup_sources?: string[]; phones?: string[]; telegram_contacts?: string[]; floor?: number | null; description?: string | null; contacts_visible?: boolean; owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } }) | undefined;
@@ -102,6 +136,7 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
           {l.ai_flags?.duplicate && (
             <div className="alert alert-warn">Дубль: эта квартира уже опубликована в канале агентства. Ссылка на пост — в списке ниже.</div>
           )}
+          {!l.ai_flags?.duplicate && !!l.similar?.length && <SimilarInChannel listing={l} similar={l.similar} />}
           {!!l.urls?.length && (
             <div className="col gap-sm">
               <span className="label">{l.urls.length > 1 ? `Где опубликовано · ${l.urls.length}` : 'Источник'}</span>
@@ -138,6 +173,11 @@ export function ListingCard({ listing, locked, footer, onOpen }: { listing: List
           {listing.created_at && <span className="faint" style={{ fontSize: 12 }}>{fmtDateTime(listing.created_at)}</span>}
         </div>
         {listing.ai_flags?.reasons?.length ? <div className="muted" style={{ fontSize: 12 }}>{listing.ai_flags.reasons.join(' · ')}</div> : null}
+        {!listing.ai_flags?.duplicate && !!listing.similar?.length && (
+          <button type="button" className="alert alert-warn" onClick={show} style={{ fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+            Похожая квартира есть в канале — сравните
+          </button>
+        )}
         {locked && <div className="row gap-sm muted" style={{ fontSize: 12, fontWeight: 600 }}><Lock size={14} />{locked}</div>}
         <div style={{ marginTop: 'auto' }}>{footer}</div>
       </div>

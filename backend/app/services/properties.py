@@ -1,5 +1,6 @@
 """Funnel 1: new listing → take → call → owner/agent → shoot → media → review → publish (§4.2, §5)."""
 import logging
+import math
 import os
 import re
 import uuid
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import settings as env
 from app.models import STAFF, Deal, Event, Listing, Owner, Property, PropertyMedia, User
 from app.services import jobs
-from app.services.common import aware, get_or_404, jload, log_event, now
+from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
@@ -161,8 +162,57 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     elif flag == "duplicate":
         stmt = stmt.where(Listing.dup_sources.contains('"agency"'))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    rows = db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset))
-    return {"items": [listing_out(r) for r in rows], "total": total}
+    rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
+    sim = similar_in_channel(db, rows)
+    return {"items": [{**listing_out(r), "similar": sim.get(r.id, [])} for r in rows], "total": total}
+
+
+def _near(a: Listing, b: Listing) -> float:
+    """Metres between two pins (equirectangular; fine at city scale, 0.75 = cos(41.7°) for Tbilisi)."""
+    return 111_000 * math.hypot(a.lat - b.lat, (a.lng - b.lng) * 0.75)
+
+
+def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60) -> dict[str, list[dict]]:
+    """Agency-channel flats in the same building with close parameters (bedrooms ±1, area ±35%), for the agent to
+    compare by eye. Not a dup verdict: two flats in one house look alike on paper (Uznadze 4: 1st vs 4th floor)."""
+    rows = [r for r in rows if r.lat is not None and r.lng is not None and not listing_flags(r)["duplicate"]]
+    if not rows:
+        return {}
+    agency = db.scalars(select(Listing).where(Listing.source == "agency", Listing.status == "published",
+                                              Listing.lat.isnot(None), Listing.lng.isnot(None))).all()
+
+    def close(l: Listing, a: Listing) -> bool:
+        if l.bedrooms is not None and a.bedrooms is not None and abs(l.bedrooms - a.bedrooms) > 1:
+            return False
+        return not (l.area and a.area and abs(l.area - a.area) > 0.35 * max(l.area, a.area))
+
+    out = {}
+    for l in rows:
+        near = sorted(((_near(l, a), a) for a in agency if close(l, a)), key=lambda x: x[0])
+        near = [(d, a) for d, a in near if d <= radius][:2]
+        if near:
+            out[l.id] = [{"id": a.id, "url": (jload(a.urls, []) or [None])[0], "address": a.address,
+                          "photo": f"/api/listing-photos/{a.id}/0" if jload(a.photos, []) else None,
+                          "price_usd": a.price_usd, "bedrooms": a.bedrooms, "area": a.area, "floor": a.floor,
+                          "distance_m": round(d)} for d, a in near]
+    return out
+
+
+def dismiss_listing(db: Session, listing_id: str, actor: User) -> None:
+    """"Неактуально": the ad is deleted at the source. Kept as a human decision so the next ingest won't revive it."""
+    x = get_or_404(db, Listing, listing_id, "listing", lock=True)
+    x.decision, x.status, x.status_reason = "rejected", "rejected", "неактуально"
+    x.decided_by, x.decided_at, x.updated_at = actor.id, now_text(), now_text()
+    log_event(db, "listing", x.id, "dismissed", actor)
+    db.commit()
+
+
+def mark_listing_agent(db: Session, listing_id: str, actor: User, name: str | None, phone: str | None) -> Property:
+    """"Агент" straight from the feed: take the listing and record the agent contact in one go (C1 → agent_marked)."""
+    if not (name or "").strip() and not (phone or "").strip():
+        raise DomainError("owner_required", "owner name or phone is required")
+    p = take(db, listing_id, actor)
+    return owner_or_agent(db, p.id, actor, False, name, phone)
 
 
 def new_listing_facets(db: Session) -> dict:

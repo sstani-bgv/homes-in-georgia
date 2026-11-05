@@ -57,6 +57,13 @@ export interface Listing {
   taken_by?: UserRef | null;
   property_id?: number | null;
   status?: string | null;
+  /** agency-channel flats in the same building with close parameters: for a side-by-side check, not a dup verdict */
+  similar?: SimilarFlat[];
+}
+
+export interface SimilarFlat {
+  id: string; url?: string | null; address?: string | null; photo?: string | null; price_usd?: number | null;
+  bedrooms?: number | null; area?: number | null; floor?: number | null; distance_m: number;
 }
 
 export type PropertyStatus =

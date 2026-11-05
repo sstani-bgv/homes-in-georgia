@@ -36,6 +36,8 @@ export const api = {
 
   listings: {
     new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing>>('/listings/new', { ...q, limit }), (d) => normPage(d, normListing)),
+    dismiss: (id: string) => http.post<{ ok: boolean }>(`/listings/${id}/dismiss`),
+    agent: (id: string, body: { owner_name?: string; owner_phone?: string }) => http.post<Property>(`/listings/${id}/agent`, body),
     facets: () => http.get<Record<'sources' | 'districts' | 'metros', { value: string; count: number }[]>>('/listings/new/facets'),
     get: (id: string) => then(http.get<Listing>(`/listings/${id}`), normListing),
   },

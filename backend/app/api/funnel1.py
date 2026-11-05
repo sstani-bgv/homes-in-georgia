@@ -47,7 +47,25 @@ def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function")
         if owner:
             d["owner"] = {"name": owner.name, "phone": owner.phone, "is_agent": owner.is_agent}
     d["property"] = {"id": prop.id, "status": prop.status, "agent_id": prop.agent_id} if prop else None
+    d["similar"] = P.similar_in_channel(db, [listing]).get(listing.id, [])
     return d
+
+
+class ListingAgentIn(BaseModel):
+    owner_name: str | None = None
+    owner_phone: str | None = None
+
+
+@router.post("/listings/{listing_id}/dismiss")
+def listing_dismiss(listing_id: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    P.dismiss_listing(db, listing_id, user)
+    return {"ok": True}
+
+
+@router.post("/listings/{listing_id}/agent")
+def listing_agent(listing_id: str, body: ListingAgentIn, db: Session = Depends(get_db, scope="function"),
+                  user: User = Depends(current_user)):
+    return P.out(db, P.mark_listing_agent(db, listing_id, user, body.owner_name, body.owner_phone), user, full=True)
 
 
 # ---------------------------------------------------------------- properties

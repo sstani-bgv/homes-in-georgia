@@ -348,9 +348,9 @@ def sync(listings_path="listings.json", dropped_path="raw/dropped_agents.json", 
             ids.add(it["id"])
             it = mark_known_agent(it, known)
             status, reason = classify(it, moderate_all)
-            old = c.execute("SELECT decision FROM listings WHERE id = ?", (it["id"],)).fetchone()
-            if old and old["decision"]:  # a human already decided: keep it
-                status, reason = ("published", None) if old["decision"] == "approved" else ("rejected", "отклонено агентом")
+            old = c.execute("SELECT decision, status_reason FROM listings WHERE id = ?", (it["id"],)).fetchone()
+            if old and old["decision"]:  # a human already decided: keep it (and its reason, e.g. "неактуально")
+                status, reason = ("published", None) if old["decision"] == "approved" else ("rejected", old["status_reason"] or "отклонено агентом")
             latlng = it.get("latlng") or (None, None)
             vals = {k: it.get(k) for k in FIELDS}
             vals.update({k: json.dumps(it.get(k) or ({} if k == "details" else []), ensure_ascii=False) for k in JSON_COLS},
