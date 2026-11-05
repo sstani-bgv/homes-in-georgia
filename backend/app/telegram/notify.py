@@ -530,6 +530,14 @@ def property_call_retry(prop):
 
 
 @safe
+def property_owner_followup(prop):
+    ag = store.user(g(prop, "agent_id")) or {}
+    if ag.get("tg_id"):
+        tg.send(ag["tg_id"], f"🤔 Собственник обещал подумать — пора перезвонить: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
+                kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
+
+
+@safe
 def property_review_request(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     pid = g(prop, "id")

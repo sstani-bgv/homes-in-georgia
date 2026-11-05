@@ -315,7 +315,42 @@ def owner_refused(db: Session, pid: int, agent: User, comment: str | None = None
     _require_owner(p, agent)
     _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
     _status(db, p, "archived", agent, "owner_refused", comment=(comment or "").strip() or None)
+    p.next_call_at = None
+    for kind in ("call_retry", "owner_followup"):
+        jobs.cancel(db, kind, p.id)
+    db.commit()
+    return p
+
+
+def owner_thinking(db: Session, pid: int, agent: User, until, comment: str | None = None) -> Property:
+    """Owner is reached but thinking (has own clients, may call back): the object stays with the agent and the bot reminds
+    them to call again at `until`. Any next step (shoot, "сдал сам", "не хочет") clears the reminder."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, agent)
+    _require_status(p, "taken", "call_failed", "owner_confirmed")
+    p.next_call_at = aware(until)
     jobs.cancel(db, "call_retry", p.id)
+    jobs.schedule(db, "owner_followup", p.id, p.next_call_at)
+    log_event(db, "property", p.id, "owner_thinking", agent, until=p.next_call_at.isoformat(),
+              comment=(comment or "").strip() or None)
+    p.updated_at = now()
+    db.commit()
+    return p
+
+
+def owner_rented_self(db: Session, pid: int, agent: User, comment: str | None = None) -> Property:
+    """The owner rented the flat out himself: the object is closed and its listing never comes back to the feed."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, agent)
+    _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
+    p.next_call_at = None
+    for kind in ("call_retry", "owner_followup"):
+        jobs.cancel(db, kind, p.id)
+    _status(db, p, "archived", agent, "owner_rented_self", comment=(comment or "").strip() or None)
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    if listing:
+        listing.decision, listing.status, listing.status_reason = "rejected", "rejected", "сдал сам"
+        listing.decided_by, listing.decided_at, listing.updated_at = agent.id, now_text(), now_text()
     db.commit()
     return p
 
@@ -427,6 +462,8 @@ def schedule_shoot(db: Session, pid: int, agent: User, shoot_at) -> tuple[Proper
     _require_owner(p, agent)
     _require_status(p, "owner_confirmed", "shoot_scheduled")
     p.shoot_at = aware(shoot_at)
+    p.next_call_at = None
+    jobs.cancel(db, "owner_followup", p.id)
     owner = db.get(Owner, p.owner_id) if p.owner_id else None
     if not p.dup_check:
         res = check_duplicate(db, owner.phone if owner else None, p.address, exclude_property=p.id)

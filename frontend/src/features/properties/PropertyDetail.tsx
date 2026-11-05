@@ -1,7 +1,7 @@
 // Property page: stepper (C2–C4), operator review (B7a), publish (B7b), history. Used by /objects/:id and /m/properties/:id.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Camera, CheckCircle2, ExternalLink, Pencil, Phone, PhoneOff, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Archive, Camera, CheckCircle2, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Property } from '../../api/types';
@@ -113,19 +113,38 @@ function CallStep({ p }: { p: Property }) {
   );
 }
 
-/** Owner reached but won't work with us: the object goes back to the feed with a note for the next agent. */
-function RefuseButton({ p }: { p: Property }) {
+/** What the owner said, besides "yes": thinking (bot reminds to call back), rented it out himself, won't work with us. */
+function OwnerOutcomes({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
-  const m = useMutation({
-    mutationFn: (comment: string) => api.properties.refused(p.id, comment),
-    onSuccess: (r) => { set(r); toast('Объект вернулся в ленту: другой агент увидит, что вы звонили'); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const ask = () => {
-    const c = window.prompt('Собственник не хочет работать. Комментарий для следующего агента (необязательно):', '');
-    if (c !== null) m.mutate(c);
-  };
-  return <Button variant="ghost" size="sm" loading={m.isPending} onClick={ask}><PhoneOff size={14} />Собственник не хочет работать</Button>;
+  const [thinkOpen, setThinkOpen] = useState(false);
+  const [until, setUntil] = useState(() => isoToLocal(new Date(Date.now() + 2 * 864e5).toISOString()));
+  const [comment, setComment] = useState('');
+  const done = (msg: string) => (r: Property) => { set(r); toast(msg); setThinkOpen(false); setComment(''); };
+  const fail = (e: unknown) => toast(errText(e), true);
+  const think = useMutation({ mutationFn: () => api.properties.thinking(p.id, localToIso(until)!, comment), onSuccess: done('Бот напомнит перезвонить'), onError: fail });
+  const rented = useMutation({ mutationFn: (c: string) => api.properties.rentedSelf(p.id, c), onSuccess: done('Отмечено: собственник сдал сам'), onError: fail });
+  const refused = useMutation({ mutationFn: (c: string) => api.properties.refused(p.id, c), onSuccess: done('Объект вернулся в ленту: другой агент увидит, что вы звонили'), onError: fail });
+  const ask = (q: string, m: { mutate: (c: string) => void }) => { const c = window.prompt(q, ''); if (c !== null) m.mutate(c); };
+  return (
+    <div className="col gap-sm mt">
+      {p.status !== 'shoot_scheduled' && p.status !== 'call_failed' && p.next_call_at && (
+        <div className="alert alert-info">Собственник думает · бот напомнит перезвонить {fmtDateTime(p.next_call_at)}</div>
+      )}
+      <div className="row row-wrap gap-sm">
+        {p.status !== 'shoot_scheduled' && <Button variant="secondary" size="sm" onClick={() => setThinkOpen(true)}><Clock size={14} />Думает</Button>}
+        <Button variant="secondary" size="sm" loading={rented.isPending} onClick={() => ask('Собственник сдал сам? Объект закроется и не вернётся в ленту. Комментарий (необязательно):', rented)}><Home size={14} />Сдал сам</Button>
+        <Button variant="ghost" size="sm" loading={refused.isPending} onClick={() => ask('Собственник не хочет работать. Комментарий для следующего агента (необязательно):', refused)}><PhoneOff size={14} />Не хочет работать</Button>
+      </div>
+      <Modal open={thinkOpen} onClose={() => setThinkOpen(false)} title="Собственник думает">
+        <div className="col gap-lg">
+          <Field label="Когда перезвонить"><Input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} /></Field>
+          <Field label="Комментарий"><Input value={comment} placeholder="Например: есть свои клиенты, ждёт их ответ" onChange={(e) => setComment(e.target.value)} /></Field>
+          <div className="muted" style={{ fontSize: 12 }}>Объект остаётся за вами. Если собственник согласится — назначайте съёмку, если сдаст сам — нажмите «Сдал сам».</div>
+          <Button block disabled={!until} loading={think.isPending} onClick={() => think.mutate()}>Сохранить</Button>
+        </div>
+      </Modal>
+    </div>
+  );
 }
 
 function ShootStep({ p }: { p: Property }) {
@@ -334,7 +353,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {action && (
             <Card label="Следующий шаг" title={STEPS[Math.min(step, STEPS.length - 1)]}>
               {action}
-              {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <div className="mt"><RefuseButton p={p} /></div>}
+              {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <OwnerOutcomes p={p} />}
             </Card>
           )}
           {isStaff && p.status === 'review' && (

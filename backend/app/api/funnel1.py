@@ -180,6 +180,21 @@ def properties_refused(pid: int, body: RefusedIn, db: Session = Depends(get_db, 
     return P.out(db, P.owner_refused(db, pid, user, body.comment), user, full=True)
 
 
+class ThinkingIn(BaseModel):
+    until: datetime
+    comment: str | None = None
+
+
+@router.post("/properties/{pid}/thinking")
+def properties_thinking(pid: int, body: ThinkingIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return P.out(db, P.owner_thinking(db, pid, user, body.until, body.comment), user, full=True)
+
+
+@router.post("/properties/{pid}/rented-self")
+def properties_rented_self(pid: int, body: RefusedIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return P.out(db, P.owner_rented_self(db, pid, user, body.comment), user, full=True)
+
+
 @router.post("/properties/{pid}/shoot")
 def properties_shoot(pid: int, body: ShootIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     p, dup = P.schedule_shoot(db, pid, user, body.shoot_at)

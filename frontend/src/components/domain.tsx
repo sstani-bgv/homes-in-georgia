@@ -224,7 +224,7 @@ const ACTION_TEXT: Record<string, string> = {
   outcome_agent: 'Итог агента', outcome_client: 'Ответ клиента', deal_created: 'Заполнена форма сделки', deal_cancelled: 'Сделка отменена',
   rented: 'Сделка подтверждена · сдано', reopened: 'Заявка снова открыта', reschedule: 'Перенос просмотра', client_late: 'Клиент опаздывает',
   client_own_time: 'Клиент предложил своё время', message_to_client: 'Сообщение клиенту', message_from_client: 'Сообщение от клиента', sla_overdue: 'Срок шага истёк',
-  taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_refused: 'Собственник не хочет работать · объект вернулся в ленту', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
+  taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_refused: 'Собственник не хочет работать · объект вернулся в ленту', owner_thinking: 'Собственник думает', owner_rented_self: 'Собственник сдал сам', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',
   approved: 'Одобрено', returned: 'Возвращено агенту', published: 'Опубликовано в канале', archived: 'В архив', status: 'Смена статуса',
 };

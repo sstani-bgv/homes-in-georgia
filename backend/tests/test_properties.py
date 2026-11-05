@@ -218,3 +218,30 @@ def test_owner_refused_returns_object_to_feed_with_note(db, client):
     again = client.post("/api/properties", json={"listing_id": "kr8"}, headers=auth(nino)).json()
     assert again["id"] == pid and again["status"] == "taken" and again["agent"]["name"] == "Нино" and again["owner"]["name"] == "Veronika"
     assert "kr8" not in {i["id"] for i in client.get("/api/listings/new", headers=auth(nino)).json()["items"]}
+
+
+def test_owner_thinking_reminds_then_rented_self_closes(db, client, sent):
+    david = make_user(db, "agent", "David")
+    make_listing(db, "lv16")
+    pid = client.post("/api/properties", json={"listing_id": "lv16"}, headers=auth(david)).json()["id"]
+    client.post(f"/api/properties/{pid}/owner", json={"is_owner": True, "owner_name": "Rezi", "owner_phone": "+995 597 44 44 03"},
+                headers=auth(david))
+    until = datetime.now(timezone.utc) + timedelta(days=2)
+    r = client.post(f"/api/properties/{pid}/thinking", json={"until": until.isoformat(), "comment": "есть свои клиенты"},
+                    headers=auth(david)).json()
+    assert r["status"] == "owner_confirmed" and r["next_call_at"]
+    job = jobs.pending(db, "owner_followup", pid)[0]
+    db.execute(update(Job).where(Job.id == job.id).values(due_at=datetime.now(timezone.utc)))
+    db.commit()
+    worker.tick()
+    assert not sent.of("property_owner_followup")  # due moved away from next_call_at → stale, no ping
+    client.post(f"/api/properties/{pid}/thinking", json={"until": datetime.now(timezone.utc).isoformat()}, headers=auth(david))
+    db.execute(update(Job).where(Job.kind == "owner_followup", Job.done_at.is_(None)).values(due_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+    db.commit()
+    worker.tick()
+    assert sent.of("property_owner_followup")
+
+    r = client.post(f"/api/properties/{pid}/rented-self", json={"comment": "сдал своим"}, headers=auth(david)).json()
+    assert r["status"] == "archived" and r["next_call_at"] is None
+    assert db.get(Listing, "lv16").status_reason == "сдал сам"
+    assert "lv16" not in {i["id"] for i in client.get("/api/listings/new", headers=auth(david)).json()["items"]}

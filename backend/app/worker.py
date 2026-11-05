@@ -53,6 +53,16 @@ def call_retry(db: Session, job: Job):
     notify.property_call_retry(p)
 
 
+@handler("owner_followup")
+def owner_followup(db: Session, job: Job):
+    p = db.get(Property, _ref_id(job))
+    if not p or p.status not in ("taken", "call_failed", "owner_confirmed") or not p.next_call_at:
+        return "stale"
+    if abs((job.due_at - p.next_call_at).total_seconds()) > 60:  # the date moved; its own job is scheduled
+        return "stale"
+    notify.property_owner_followup(p)
+
+
 @handler("viewing_reminder")
 def viewing_reminder(db: Session, job: Job):
     lead = db.get(Lead, _ref_id(job))
