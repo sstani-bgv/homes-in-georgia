@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -35,6 +36,8 @@ if settings.APP_ENV != "dev" and (len(settings.SECRET_KEY) < 32 or "change-me" i
     raise RuntimeError("SECRET_KEY is missing or weak: set a random string of 32+ chars in .env")
 
 app = FastAPI(title="Homes in Georgia API", version="1.0", lifespan=lifespan)
+# nothing in front compresses: JSON lists and the JS bundle shrink ~5x, which matters on slow mobile links
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 if settings.DEV_CORS:
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                        allow_credentials=True, allow_methods=["*"], allow_headers=["*"])

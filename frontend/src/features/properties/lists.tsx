@@ -17,8 +17,12 @@ const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', 
 const sourceName = (s: string) => { const [k, ...rest] = s.split(':'); return PREFIX_LABEL[k] && rest.length ? `${PREFIX_LABEL[k]} · ${rest.join(':')}` : s; };
 const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
 
+const PAGE = 50;
+
 export function NewListings({ base = '' }: { base?: string }) {
-  const [f, setF] = useState<ListingFilter>({ q: '', flag: '' });
+  const [f, setF0] = useState<ListingFilter>({ q: '', flag: '' });
+  const [limit, setLimit] = useState(PAGE);
+  const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
   const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); set('bedrooms')([...beds].sort().join(',')); };
@@ -26,7 +30,7 @@ export function NewListings({ base = '' }: { base?: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
-  const { data, isLoading, error } = useQuery({ queryKey: ['listings', 'new', f], queryFn: () => api.listings.new(f) });
+  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, limit], queryFn: () => api.listings.new(f, limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
   const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q');
@@ -81,6 +85,11 @@ export function NewListings({ base = '' }: { base?: string }) {
           })}
         </div>
       )}
+      {(data?.total ?? 0) > items.length && (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
+          <Button variant="secondary" loading={isFetching} onClick={() => setLimit((n) => n + PAGE)}>Показать ещё ({(data?.total ?? 0) - items.length})</Button>
+        </div>
+      )}
     </>
   );
 }
@@ -133,6 +142,7 @@ export function PropertyList({ mine, base = '' }: { mine?: boolean; base?: strin
   const { data, isLoading, error } = useQuery({
     queryKey: ['properties', 'list', mine ? 'mine' : 'all', q, status],
     queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status }),
+    placeholderData: (p, prev) => (prev?.queryKey[2] === (mine ? 'mine' : 'all') ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const items = itemsOf(data);
   const navigate = useNavigate();

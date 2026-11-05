@@ -73,7 +73,7 @@ p { margin: 0; }
 .sidebar {
   position: sticky; top: 0; height: 100vh; width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   background: var(--gradient); color: #fff; display: flex; flex-direction: column; padding: 20px 14px;
-  overflow-y: auto;
+  overflow-y: auto; overflow-x: hidden;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
 .brand-mark { width: 36px; height: 36px; border-radius: 10px; background: #fff; display: grid; place-items: center; flex: none; }

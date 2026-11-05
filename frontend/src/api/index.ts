@@ -35,7 +35,7 @@ export const api = {
   cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
 
   listings: {
-    new: (q?: ListingFilter) => then(http.get<L<Listing>>('/listings/new', { ...q, limit: LIMIT }), (d) => normPage(d, normListing)),
+    new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing>>('/listings/new', { ...q, limit }), (d) => normPage(d, normListing)),
     facets: () => http.get<Record<'sources' | 'districts' | 'metros', { value: string; count: number }[]>>('/listings/new/facets'),
     get: (id: string) => then(http.get<Listing>(`/listings/${id}`), normListing),
   },
