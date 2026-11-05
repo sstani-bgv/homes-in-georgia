@@ -66,6 +66,7 @@ export const api = {
     review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
     publish: (id: number) => http.post<Property>(`/properties/${id}/publish`),
     archive: (id: number) => http.post<Property>(`/properties/${id}/archive`),
+    refused: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/refused`, { comment }),
     history: (id: number) => then(http.get<L<EventItem>>(`/properties/${id}/history`), (d) => normPage(d, normEvent)),
     checkDuplicate: (b: { phone?: string; address?: string; url?: string; cadastral?: string }) =>
       http.post<{ status?: string; matches?: unknown[]; [k: string]: unknown }>('/properties/check-duplicate', b),

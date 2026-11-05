@@ -202,3 +202,19 @@ def test_fix_owner_name_and_phone_from_card(db, client):
     db.add(other); db.commit()
     r = client.patch(f"/api/properties/{pid}", json={"owner_phone": "577000001"}, headers=auth(georgiy)).json()
     assert r["owner"]["id"] == other.id  # a known number links to that owner instead of making a twin
+
+
+def test_owner_refused_returns_object_to_feed_with_note(db, client):
+    david, nino = make_user(db, "agent", "David"), make_user(db, "agent", "Нино")
+    make_listing(db, "kr8")
+    pid = client.post("/api/properties", json={"listing_id": "kr8"}, headers=auth(david)).json()["id"]
+    client.post(f"/api/properties/{pid}/owner", json={"is_owner": True, "owner_name": "Veronika", "owner_phone": "+995 595 51 42 86"},
+                headers=auth(david))
+    assert client.post(f"/api/properties/{pid}/refused", json={"comment": "сдаёт только сама"}, headers=auth(nino)).status_code == 403
+    r = client.post(f"/api/properties/{pid}/refused", json={"comment": "сдаёт только сама"}, headers=auth(david)).json()
+    assert r["status"] == "archived"
+    item = next(i for i in client.get("/api/listings/new", headers=auth(nino)).json()["items"] if i["id"] == "kr8")
+    assert item["refused"]["by"] == "David" and item["refused"]["comment"] == "сдаёт только сама"
+    again = client.post("/api/properties", json={"listing_id": "kr8"}, headers=auth(nino)).json()
+    assert again["id"] == pid and again["status"] == "taken" and again["agent"]["name"] == "Нино" and again["owner"]["name"] == "Veronika"
+    assert "kr8" not in {i["id"] for i in client.get("/api/listings/new", headers=auth(nino)).json()["items"]}

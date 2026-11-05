@@ -113,6 +113,21 @@ function CallStep({ p }: { p: Property }) {
   );
 }
 
+/** Owner reached but won't work with us: the object goes back to the feed with a note for the next agent. */
+function RefuseButton({ p }: { p: Property }) {
+  const { toast, set } = useProp(p.id);
+  const m = useMutation({
+    mutationFn: (comment: string) => api.properties.refused(p.id, comment),
+    onSuccess: (r) => { set(r); toast('Объект вернулся в ленту: другой агент увидит, что вы звонили'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const ask = () => {
+    const c = window.prompt('Собственник не хочет работать. Комментарий для следующего агента (необязательно):', '');
+    if (c !== null) m.mutate(c);
+  };
+  return <Button variant="ghost" size="sm" loading={m.isPending} onClick={ask}><PhoneOff size={14} />Собственник не хочет работать</Button>;
+}
+
 function ShootStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [at, setAt] = useState(isoToLocal(p.shoot_at));
@@ -316,7 +331,12 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
 
       <div className={compact ? 'col gap-lg' : 'split'}>
         <div className="col gap-lg">
-          {action && <Card label="Следующий шаг" title={STEPS[Math.min(step, STEPS.length - 1)]}>{action}</Card>}
+          {action && (
+            <Card label="Следующий шаг" title={STEPS[Math.min(step, STEPS.length - 1)]}>
+              {action}
+              {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <div className="mt"><RefuseButton p={p} /></div>}
+            </Card>
+          )}
           {isStaff && p.status === 'review' && (
             <div className="row row-wrap">
               <a className="btn btn-secondary" href={generator} target="_blank" rel="noreferrer"><Wand2 size={16} />Открыть генератор постов</a>

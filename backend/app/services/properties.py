@@ -163,8 +163,9 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
         stmt = stmt.where(Listing.dup_sources.contains('"agency"'))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
-    sim = similar_in_channel(db, rows)
-    return {"items": [{**listing_out(r), "similar": sim.get(r.id, [])} for r in rows], "total": total}
+    sim, refused = similar_in_channel(db, rows), refusals_for(db, [r.id for r in rows])
+    return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id)} for r in rows],
+            "total": total}
 
 
 def _near(a: Listing, b: Listing) -> float:
@@ -305,6 +306,29 @@ def _set_owner_contact(db: Session, p: Property, name: str | None, phone: str | 
             o.phone, o.phone_norm = phone, norm_phone(phone)
     if name:
         o.name = name
+
+
+def owner_refused(db: Session, pid: int, agent: User, comment: str | None = None) -> Property:
+    """Owner reached but won't work with the agency: the object goes back to the feed so another agent can try; the feed
+    card says who called and when (refusals_for). Re-taking reuses this property, so history and owner stay."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, agent)
+    _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
+    _status(db, p, "archived", agent, "owner_refused", comment=(comment or "").strip() or None)
+    jobs.cancel(db, "call_retry", p.id)
+    db.commit()
+    return p
+
+
+def refusals_for(db: Session, listing_ids: list[str]) -> dict[str, dict]:
+    """listing id → the latest "owner won't work" note of its released object."""
+    props = dict(db.execute(select(Property.id, Property.listing_id).where(
+        Property.listing_id.in_(listing_ids), Property.status == "archived")).all()) if listing_ids else {}
+    out = {}
+    for e in db.scalars(select(Event).where(Event.entity == "property", Event.entity_id.in_([str(i) for i in props]),
+                                            Event.action == "owner_refused").order_by(Event.at)):
+        out[props[int(e.entity_id)]] = {"by": e.actor_label, "at": e.at.isoformat(), "comment": (e.data or {}).get("comment")}
+    return out
 
 
 def archive(db: Session, pid: int, actor: User) -> Property:

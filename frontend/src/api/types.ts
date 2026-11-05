@@ -59,6 +59,8 @@ export interface Listing {
   status?: string | null;
   /** agency-channel flats in the same building with close parameters: for a side-by-side check, not a dup verdict */
   similar?: SimilarFlat[];
+  /** the previous agent reached the owner, who won't work with the agency */
+  refused?: { by?: string | null; at: string; comment?: string | null } | null;
 }
 
 export interface SimilarFlat {

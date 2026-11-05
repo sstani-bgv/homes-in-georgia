@@ -48,6 +48,7 @@ def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function")
             d["owner"] = {"name": owner.name, "phone": owner.phone, "is_agent": owner.is_agent}
     d["property"] = {"id": prop.id, "status": prop.status, "agent_id": prop.agent_id} if prop else None
     d["similar"] = P.similar_in_channel(db, [listing]).get(listing.id, [])
+    d["refused"] = P.refusals_for(db, [listing.id]).get(listing.id)
     return d
 
 
@@ -168,6 +169,15 @@ def properties_call(pid: int, body: CallIn, db: Session = Depends(get_db, scope=
 @router.post("/properties/{pid}/owner")
 def properties_owner(pid: int, body: OwnerStepIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return P.out(db, P.owner_or_agent(db, pid, user, body.is_owner, body.owner_name, body.owner_phone), user, full=True)
+
+
+class RefusedIn(BaseModel):
+    comment: str | None = None
+
+
+@router.post("/properties/{pid}/refused")
+def properties_refused(pid: int, body: RefusedIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return P.out(db, P.owner_refused(db, pid, user, body.comment), user, full=True)
 
 
 @router.post("/properties/{pid}/shoot")

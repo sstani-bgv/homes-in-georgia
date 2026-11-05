@@ -173,6 +173,11 @@ export function ListingCard({ listing, locked, footer, onOpen }: { listing: List
           {listing.created_at && <span className="faint" style={{ fontSize: 12 }}>{fmtDateTime(listing.created_at)}</span>}
         </div>
         {listing.ai_flags?.reasons?.length ? <div className="muted" style={{ fontSize: 12 }}>{listing.ai_flags.reasons.join(' · ')}</div> : null}
+        {listing.refused && (
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Звонил {listing.refused.by || 'агент'} {fmtDateTime(listing.refused.at)}: собственник не хочет работать{listing.refused.comment ? ` («${listing.refused.comment}»)` : ''}. Попробуйте вы.
+          </div>
+        )}
         {!listing.ai_flags?.duplicate && !!listing.similar?.length && (
           <button type="button" className="alert alert-warn" onClick={show} style={{ fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
             Похожая квартира есть в канале — сравните
@@ -219,7 +224,7 @@ const ACTION_TEXT: Record<string, string> = {
   outcome_agent: 'Итог агента', outcome_client: 'Ответ клиента', deal_created: 'Заполнена форма сделки', deal_cancelled: 'Сделка отменена',
   rented: 'Сделка подтверждена · сдано', reopened: 'Заявка снова открыта', reschedule: 'Перенос просмотра', client_late: 'Клиент опаздывает',
   client_own_time: 'Клиент предложил своё время', message_to_client: 'Сообщение клиенту', message_from_client: 'Сообщение от клиента', sla_overdue: 'Срок шага истёк',
-  taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
+  taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_refused: 'Собственник не хочет работать · объект вернулся в ленту', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',
   approved: 'Одобрено', returned: 'Возвращено агенту', published: 'Опубликовано в канале', archived: 'В архив', status: 'Смена статуса',
 };
