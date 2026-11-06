@@ -75,7 +75,9 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
         {Number(d.client_src_amount) > 0 && <div className="calc-row"><span>Источник: {d.client_src}</span><strong>{money(d.client_src_amount)}</strong></div>}
         <div className="calc-row"><span>Агент ({d.agent_level}%)</span><strong>{money(d.agent_amount)}</strong></div>
       </div>
+      {d.property?.needs_check && <div className="alert alert-warn">Новый объект из сделки — проверить. {isStaff ? 'Сделку можно подтвердить после проверки объекта.' : 'Сделку подтвердят после проверки объекта оператором.'}</div>}
       <KV items={[
+        ['Объект', d.property ? <Link to={`${loc.pathname.startsWith('/m/') ? '/m/properties' : '/objects'}/${d.property.id}`}>#{d.property.id} · {d.property.address || 'без адреса'}</Link> : '—'],
         ['Агент', nameOf(d.agent_id, d.agent?.name)], ['Тип', `${d.deal_type === 'sale' ? 'Продажа' : 'Аренда'}${d.sub_type ? ` · ${d.sub_type}` : ''}`], ['Адрес', d.address],
         ['Клиент', [d.client_name, d.client_phone, d.client_tg].filter(Boolean).join(' · ') || '—'], ['Собственник', [d.owner_name, d.owner_phone].filter(Boolean).join(' · ') || '—'],
         ['Аренда', d.rent_from ? `${fmtDate(d.rent_from)} — ${fmtDate(d.rent_to)}` : '—'], ['День 14', d.t14_date ? `${fmtDate(d.t14_date)} · ${d.t14_status || ''}` : '—'],
@@ -84,7 +86,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
       <Link to={`${loc.pathname.startsWith('/m/') ? '/m' : ''}/contracts?deal_id=${d.id}`} className="btn btn-secondary"><FileText size={16} />Подготовить договор</Link>
       {isStaff && d.status === 'pending' && (
         <div className="row row-wrap">
-          <Button variant="ok" loading={confirm.isPending} onClick={() => confirm.mutate()}><CheckCircle2 size={16} />Подтвердить сделку</Button>
+          <Button variant="ok" loading={confirm.isPending} disabled={!!d.property?.needs_check} onClick={() => confirm.mutate()}><CheckCircle2 size={16} />Подтвердить сделку</Button>
           <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate()}><XCircle size={16} />Отменить</Button>
         </div>
       )}

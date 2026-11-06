@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
-from app.models import STAFF, Deal, Evaluation, User
+from app.models import STAFF, Deal, Evaluation, Property, User
 from app.services import analytics, deals, evaluations, reports, users
+from app.services import properties as P
 from app.services.common import get_or_404
 from app.services.errors import forbidden
 
@@ -48,6 +49,7 @@ class DealIn(BaseModel):
     rent_from: date | None = None
     rent_to: date | None = None
     t0: dict | None = None
+    new_object: bool = False  # stage 7 «Объекта нет в базе»: create the object from the form's fields
 
 
 class ReasonIn(BaseModel):
@@ -113,6 +115,8 @@ def deals_get(deal_id: int, db: Session = Depends(get_db, scope="function"), use
     out = deals.out(d, user)
     out["evaluations"] = [evaluations.out(e) for e in db.scalars(evaluations.query(db, deal_id))]
     out["rented_text"] = deals.rented_text(d, db)
+    p = db.get(Property, d.property_id) if d.property_id else None
+    out["property"] = {"id": p.id, "address": p.address, "status": p.status, "needs_check": P.needs_check(p)} if p else None
     return out
 
 

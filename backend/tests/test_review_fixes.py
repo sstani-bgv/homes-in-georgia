@@ -58,7 +58,7 @@ def test_deal_create_is_idempotent_per_lead_and_cancel_reverts(db, client, sent)
     op, ag = make_user(db, "operator"), make_user(db, "agent", exclusive_deals=10)
     listing = make_client_listing(db)
     prop = properties.take(db, listing.id, ag)
-    prop.status = "published"
+    prop.status, prop.is_exclusive = "published", True  # stage 7: the deal's exclusive flag comes from the object
     prop.post_url, prop.post_message_id = "https://t.me/rent_tbilisi_ge/1", "1"
     db.commit()
     lead = _to_time_chosen(db, op, ag, listing=listing)

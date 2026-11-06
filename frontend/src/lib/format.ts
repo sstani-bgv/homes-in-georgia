@@ -39,7 +39,7 @@ export const CR_FIELD: Record<string, string> = {
 
 export const SOURCE_LABEL: Record<string, string> = {
   ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', instagram: 'Instagram', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',
-  referral: 'Рекомендация', import: 'Импорт', other: 'Другое',
+  referral: 'Рекомендация', import: 'Импорт', deal: 'Из сделки', other: 'Другое',
 };
 
 export const DISTRICTS = ['Ваке', 'Сабуртало', 'Ваке-Багеби', 'Мтацминда', 'Вере', 'Ортачала', 'Дидубе', 'Чугурети', 'Исани', 'Самгори', 'Глдани', 'Надзаладеви', 'Крцаниси', 'Дигоми', 'Старый город'];

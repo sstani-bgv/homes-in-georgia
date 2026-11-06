@@ -101,6 +101,7 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
         agent = actor
     if actor is not None and actor.role not in STAFF and agent is not None and agent.id != actor.id:
         raise forbidden("agents create only their own deals")
+    picked = int(data["property_id"]) if data.get("property_id") else None
     lead = None
     if data.get("lead_id"):
         lead = get_or_404(db, Lead, int(data["lead_id"]), "lead", lock=True)
@@ -119,15 +120,18 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
             data.setdefault("client_name", client.name)
             data.setdefault("client_phone", client.phone)
             data.setdefault("client_tg", f"@{client.username}" if client.username else None)
+    from app.services import properties
+    if data.get("new_object") and not data.get("property_id"):
+        data["property_id"] = _new_object(db, data, agent, actor).id
+    elif picked and actor is not None and not (lead and lead.property_id == picked):
+        p = get_or_404(db, Property, picked, "property")
+        blocked = properties.deal_block(db, p, actor)
+        if blocked:
+            raise DomainError("object_taken", blocked, 409)
     if data.get("property_id"):
         p = db.get(Property, int(data["property_id"]))
-        if p:
-            data.setdefault("address", p.address)
-            data.setdefault("cadastral", p.cadastral_code)
-            data.setdefault("ad_link", p.post_url or p.source_url)
-            data.setdefault("is_exclusive", p.is_exclusive)
-            if data.get("price") in (None, "") and p.price is not None:
-                data["price"] = p.price
+        if p:  # stage 7: the object's data win over the form (read-only there; changed via the object's requests)
+            data.update(properties.deal_fields(db, p, actor, data.get("deal_type") or "rent"))
     if actor is not None and actor.role not in STAFF:  # payout inputs an agent must not set for themselves
         data.pop("agent_level", None)
         data.pop("platform_amount", None)
@@ -181,6 +185,31 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     return deal
 
 
+def _new_object(db: Session, data: dict, agent: User | None, actor: User | None) -> Property:
+    """Stage 7 «Объекта нет в базе»: the object typed in the deal form joins the base as the agent's object (owner bound
+    to him, stage 6.5) waiting for the operator's check (source_type=deal, no verified_at); the deal can't be confirmed
+    before it. An object the matcher calls `same` must be picked instead. No commit."""
+    from app.services import matching, properties
+    if agent is None:
+        raise DomainError("agent_required", "Укажите агента")
+    if not (data.get("address") or "").strip():
+        raise DomainError("address_required", "Укажите адрес объекта")
+    same = matching.same_as(db, data.get("address"), data.get("cadastral"), data.get("owner_phone"), data.get("ad_link"))
+    if same:
+        m = same[0]
+        raise DomainError("object_exists", f"Этот объект уже есть в базе: #{m['property_id']} {m['address'] or ''} "
+                          f"({', '.join(m['reasons'])}). Выберите его из базы", 409)
+    metro = str(data.get("metro") or "").lstrip("#")
+    p = properties.take(db, None, agent, {
+        "source_type": "deal", "address": data["address"].strip(), "cadastral_code": data.get("cadastral") or None,
+        "source_url": data.get("ad_link") or None, "is_exclusive": data.get("is_exclusive") in (True, "true", "1", 1, "on"),
+        "price": data.get("price"), "post_fields": {"metro": metro} if metro in properties.POST_ONE["metro"] else {}},
+        commit=False)
+    properties._set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor or agent)
+    log_event(db, "property", p.id, "from_deal", actor or agent)
+    return p
+
+
 def live_deal_for_lead(db: Session, lead: Lead | None) -> Deal | None:
     if lead is None:
         return None
@@ -200,6 +229,11 @@ def confirm(db: Session, deal_id: int, actor: User) -> Deal:
         return deal
     if deal.status != "pending":
         raise DomainError("bad_status", f"deal is {deal.status}")
+    p = db.get(Property, deal.property_id) if deal.property_id else None
+    if p is not None:
+        from app.services import properties
+        if properties.needs_check(p):
+            raise DomainError("object_unverified", "Новый объект из сделки ещё не проверен: сначала проверьте объект", 409)
     agent = get_or_404(db, User, deal.agent_id, "agent", lock=True) if deal.agent_id and deal.is_exclusive else None
     if agent and deal.is_exclusive:
         agent.exclusive_deals = (agent.exclusive_deals or 0) + 1

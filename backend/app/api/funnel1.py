@@ -148,6 +148,15 @@ def properties_board(db: Session = Depends(get_db, scope="function"), user: User
     return P.board(db, user)
 
 
+@router.get("/properties/deal-search")
+def properties_deal_search(q: str | None = None, pid: int | None = None, deal_type: str = "rent", lead_id: int | None = None,
+                           db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """Stage 7: the deal form's object picker (agents see another agent's object as blocked, without its data)."""
+    lead = db.get(Lead, lead_id) if lead_id else None
+    allow = lead.property_id if lead is not None and (user.role in STAFF or lead.agent_id == user.id) else None
+    return {"items": P.deal_search(db, user, q, pid, deal_type, allow)}
+
+
 @router.post("/properties/check-duplicate")
 def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     res = P.check_duplicate(db, body.phone, body.address, body.url, body.cadastral)
@@ -253,6 +262,11 @@ def properties_submit(pid: int, db: Session = Depends(get_db, scope="function"),
 def properties_review(pid: int, body: ReviewIn, db: Session = Depends(get_db, scope="function"),
                       user: User = Depends(require_roles(*STAFF_ROLES))):
     return P.out(db, P.review(db, pid, user, body.approve, body.comment), user, full=True)
+
+
+@router.post("/properties/{pid}/verify")
+def properties_verify(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+    return P.out(db, P.verify(db, pid, user), user, full=True)
 
 
 @router.get("/properties/{pid}/post")

@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest,
+  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -81,6 +81,8 @@ export const api = {
     thinking: (id: number, until: string, comment?: string) => http.post<Property>(`/properties/${id}/thinking`, { until, comment }),
     rentedSelf: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/rented-self`, { comment }),
     history: (id: number) => then(http.get<L<EventItem>>(`/properties/${id}/history`), (d) => normPage(d, normEvent)),
+    dealSearch: (q: { q?: string; pid?: number; deal_type?: string; lead_id?: number }) => http.get<{ items: DealPick[] }>('/properties/deal-search', q),
+    verify: (id: number) => then(http.post<Property>(`/properties/${id}/verify`), normProperty),
     checkDuplicate: (b: { phone?: string; address?: string; url?: string; cadastral?: string }) =>
       http.post<{ status?: string; matches?: unknown[]; [k: string]: unknown }>('/properties/check-duplicate', b),
   },

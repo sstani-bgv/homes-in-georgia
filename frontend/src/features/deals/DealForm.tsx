@@ -1,13 +1,15 @@
 // C9b deal form with live commission calc (/api/deals/calc) and T0 evaluation (as in the old #Rented form).
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Search } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../api';
-import { itemsOf } from '../../api/client';
+import { ApiError, itemsOf } from '../../api/client';
 import type { Deal, DealCalcIn } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
-import { Button, Card, Field, Input, Seg, Select, Switch, Textarea } from '../../components/ui';
+import { PropertyStatusBadge } from '../../components/domain';
+import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from '../../components/ui';
 import { levelFor, money, todayStr } from '../../lib/format';
 
 function useDebounced<T>(v: T, ms = 300): T {
@@ -44,6 +46,23 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   });
   const [t0, setT0] = useState<{ c: number | null; o: number | null; p: number | null; comment: string }>({ c: null, o: null, p: null, comment: '' });
   const upd = (k: keyof typeof f, v: unknown) => setF((x) => ({ ...x, [k]: v }));
+  // stage 7: the object is picked from the base (its fields become read-only) or typed by hand as a new object
+  const loc = useLocation();
+  const [pid, setPid] = useState<number | null>(null);
+  const [manual, setManual] = useState(false);
+  const [q, setQ] = useState('');
+  const [exists, setExists] = useState<number | null>(null);
+  const dq = useDebounced(q.trim());
+  const found = useQuery({ queryKey: ['deal-search', dq, leadId], queryFn: () => api.properties.dealSearch({ q: dq, lead_id: leadId }), enabled: !pid && !manual && !!dq });
+  const picked = useQuery({ queryKey: ['deal-pick', pid, f.deal_type, leadId], queryFn: () => api.properties.dealSearch({ pid: pid!, deal_type: f.deal_type, lead_id: leadId }), enabled: !!pid });
+  const obj = pid ? picked.data?.items[0] : undefined;
+  const ro = (k: string) => !!obj?.fields && k in obj.fields;
+  useEffect(() => { if (obj?.fields) setF((x) => ({ ...x, ...obj.fields })); }, [obj]);
+  const pick = (id: number | null) => {
+    if (obj?.fields) setF((x) => ({ ...x, ...Object.fromEntries(Object.keys(obj.fields!).map((k) => [k, k === 'is_exclusive' ? false : ''])) }));
+    setPid(id); setManual(false); setExists(null);
+  };
+  const objLink = (id: number) => (loc.pathname.startsWith('/m/') ? `/m/properties/${id}` : `/objects/${id}`);
 
   useEffect(() => {
     const l = lead.data;
@@ -57,6 +76,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       client_phone: l.client?.phone || x.client_phone,
       client_tg: l.client?.username ? `@${l.client.username}` : x.client_tg,
     }));
+    if (l.property_id) setPid(l.property_id);
   }, [lead.data]);
 
   const agentList = itemsOf(agents.data);
@@ -82,7 +102,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       // Only user inputs: amounts (platform/agent/recruit/client_src) are computed by the backend.
       const str = (v: string) => (v.trim() === '' ? null : v.trim());
       const body: Partial<Deal> & Record<string, unknown> = {
-        lead_id: leadId ?? null, property_id: lead.data?.property_id ?? null,
+        lead_id: leadId ?? null, property_id: manual ? null : pid, new_object: manual,
         agent_id: Number(f.agent_id), recruit_id: f.recruit_id ? Number(f.recruit_id) : null,
         deal_type: f.deal_type, sub_type: f.deal_type === 'rent' ? f.sub_type : null,
         is_exclusive: f.is_exclusive, is_rerented: f.is_rerented,
@@ -108,11 +128,15 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       toast('Сделка отправлена оператору на подтверждение');
       onDone?.(d);
     },
-    onError: (e) => toast(errText(e), true),
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'object_exists') setExists(Number(/#(\d+)/.exec(e.message)?.[1]) || null);
+      toast(errText(e), true);
+    },
   });
 
   const r = calc.data;
-  const valid = Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from);
+  const objectOk = manual ? !!f.address.trim() : !!obj && !obj.blocked;
+  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from);
   const calcBusy = debouncing || calc.isFetching;
 
   return (
@@ -131,24 +155,62 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
                 <Field label="Агент"><Input value={user?.name || ''} disabled /></Field>
               )}
               <Field label="Уровень агента"><Seg value={Number(f.agent_level)} onChange={(v) => upd('agent_level', v)} options={[50, 70, 90].map((v) => ({ value: v, label: `${v}%` }))} /></Field>
-              <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Цена аренды, $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} required /></Field>
+              <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Цена аренды, $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
               <Field label="Комиссия, % от цены"><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} /></Field>
               <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>
               <Field label="Источник клиента" hint="10% от комиссии"><Select value={f.client_src} onChange={(e) => upd('client_src', e.target.value)} options={SRC.slice(1).map((s) => ({ value: s, label: s }))} placeholder="Свой клиент" /></Field>
               <Field label="Рекрут"><Select value={f.recruit_id} onChange={(e) => upd('recruit_id', e.target.value)} placeholder="Без рекрута" options={itemsOf(recruits.data).map((u) => ({ value: u.id, label: u.name }))} /></Field>
               {f.recruit_id ? <Field label="Доля рекрута, %"><Input type="number" value={f.recruit_pct} onChange={(e) => upd('recruit_pct', e.target.value)} /></Field> : <div />}
               <div className="span2 row row-wrap gap-lg">
-                <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="Эксклюзив" />
+                <Switch checked={f.is_exclusive} onChange={(v) => !ro('is_exclusive') && upd('is_exclusive', v)} label="Эксклюзив" />
                 <Switch checked={f.is_rerented} onChange={(v) => upd('is_rerented', v)} label="Повторная сдача" />
               </div>
             </div>
           </div>
         </Card>
         <Card label="Объект и стороны" title="Детали">
+          <div className="col" style={{ marginBottom: 14 }}>
+            {pid ? (
+              <div className="list-row">
+                <div className="grow">
+                  <div style={{ fontWeight: 700 }}>Объект #{pid} · {obj?.address || '…'}</div>
+                  {obj && <div className="row row-wrap gap-sm mt"><PropertyStatusBadge status={obj.status} />{obj.agent_tag && <span className="muted" style={{ fontSize: 12 }}>{obj.agent_tag}</span>}{obj.needs_check && <Badge tone="warn">на проверке</Badge>}</div>}
+                </div>
+                <Link to={objLink(pid)} className="btn btn-secondary btn-sm"><ExternalLink size={14} />Открыть</Link>
+                <Button size="sm" variant="secondary" onClick={() => pick(null)}>Сменить</Button>
+              </div>
+            ) : manual ? (
+              <div className="alert alert-info" style={{ fontSize: 13 }}>
+                <span className="grow">Объекта нет в базе: он будет создан из этих данных и уйдёт оператору на проверку. Сделку подтвердят после проверки объекта.</span>
+                <Button size="sm" variant="secondary" onClick={() => setManual(false)}>Выбрать из базы</Button>
+              </div>
+            ) : (
+              <>
+                <div className="input-icon">
+                  <Search size={16} />
+                  <input className="input" placeholder="Адрес, номер объекта, телефон собственника, кадастр" value={q} onChange={(e) => setQ(e.target.value)} />
+                </div>
+                {!!dq && found.data && (found.data.items.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>В базе не найдено</div> : found.data.items.map((o) => (
+                  <button key={o.id} type="button" className="list-row" style={{ textAlign: 'left', width: '100%', background: 'none', cursor: 'pointer' }} onClick={() => pick(o.id)}>
+                    <div className="grow">
+                      <div style={{ fontWeight: 700 }}>#{o.id} · {o.address || 'Без адреса'}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>{[o.district, o.agent_tag].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    {o.blocked ? <Badge tone="warn">{o.blocked}</Badge> : <PropertyStatusBadge status={o.status} />}
+                  </button>
+                )))}
+                <Button size="sm" variant="secondary" onClick={() => setManual(true)}>Объекта нет в базе</Button>
+              </>
+            )}
+            {obj?.blocked && <div className="alert alert-warn">{obj.blocked}: сделку по нему оформляет его агент.</div>}
+            {obj?.fields && <div className="muted" style={{ fontSize: 12 }}>Данные объекта подставлены из базы. Изменить их можно в карточке объекта (после проверки — через «Запрос оператору»).</div>}
+            {exists && <div className="alert alert-warn"><span className="grow">Такой объект уже есть в базе: #{exists}</span><Button size="sm" onClick={() => pick(exists)}>Выбрать #{exists}</Button></div>}
+          </div>
           <div className="form-grid">
-            <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} /></Field>
-            <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => upd('cadastral', e.target.value)} /></Field>
-            <Field label="Ссылка на объявление"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} /></Field>
+            <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} disabled={!manual && (!pid || ro('address'))} /></Field>
+            <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => upd('cadastral', e.target.value)} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
+            <Field label="Ссылка на объявление"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} disabled={!manual && (!pid || ro('ad_link'))} /></Field>
+            {ro('metro') && <Field label="Метро" className="span2"><Input value={f.metro} disabled /></Field>}
             {f.deal_type === 'rent' && <>
               <Field label="Аренда с"><Input type="date" value={f.rent_from} onChange={(e) => upd('rent_from', e.target.value)} /></Field>
               <Field label="Аренда до"><Input type="date" value={f.rent_to} onChange={(e) => upd('rent_to', e.target.value)} /></Field>
@@ -156,8 +218,8 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
             <Field label="Клиент"><Input value={f.client_name} onChange={(e) => upd('client_name', e.target.value)} /></Field>
             <Field label="Телефон клиента"><Input value={f.client_phone} onChange={(e) => upd('client_phone', e.target.value)} inputMode="tel" /></Field>
             <Field label="Telegram клиента"><Input value={f.client_tg} onChange={(e) => upd('client_tg', e.target.value)} /></Field>
-            <Field label="Собственник"><Input value={f.owner_name} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
-            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => upd('owner_phone', e.target.value)} inputMode="tel" /></Field>
+            <Field label="Собственник"><Input value={f.owner_name} onChange={(e) => upd('owner_name', e.target.value)} disabled={!manual && (!pid || ro('owner_name'))} /></Field>
+            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => upd('owner_phone', e.target.value)} inputMode="tel" disabled={!manual && (!pid || ro('owner_phone'))} /></Field>
           </div>
         </Card>
         <Card label="День 0" title="Оценка сделки при заключении · H2O 0–3">

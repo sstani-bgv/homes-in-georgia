@@ -66,7 +66,7 @@ cd frontend && npm run dev                          # фронт с hot reload, 
 ## Тесты
 
 ```bash
-cd backend && ../.venv/bin/python -m pytest -q                      # 99 тестов (S3-тест: TEST_S3_* → локальный MinIO)
+cd backend && ../.venv/bin/python -m pytest -q                      # 102 теста (S3-тест: TEST_S3_* → локальный MinIO)
 cd bot && ../.venv/bin/python -m unittest discover -s test          # 104 теста, e2e через fake Bot API
 cd frontend && npm run build                                        # проверка типов + сборка
 ```

@@ -276,7 +276,7 @@ def new_listing_facets(db: Session) -> dict:
 
 # ---------------------------------------------------------------- take (C1 → C2)
 
-def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict | None = None) -> Property:
+def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict | None = None, commit: bool = True) -> Property:
     """"Беру в работу": the object is locked to this agent; 409 taken_by_other for anyone else."""
     if listing_id:
         listing = get_or_404(db, Listing, listing_id, "listing", lock=True)
@@ -315,7 +315,8 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
     if listing_id:
         link_listing(db, p, listing)
     log_event(db, "property", p.id, "taken", agent, listing_id=listing_id)
-    db.commit()
+    if commit:
+        db.commit()
     return p
 
 
@@ -1178,6 +1179,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     d["agent"] = ref(agent)
     d["locked"] = bool(p.agent_id) and p.agent_id != user.id and user.role not in STAFF
     d["locked_fields"] = list(LOCKED_AFTER_VERIFY) if is_locked_for(p, user) else []
+    d["needs_check"] = needs_check(p)
     owner = get(Owner, p.owner_id)
     if owner:
         visible = can_see_owner(p, user)
@@ -1237,19 +1239,87 @@ def card(db: Session, p: Property, user: User) -> dict:
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,
-          mine: bool = False):
+          mine: bool = False, everyone: bool = False):
     stmt = select(Property)
-    if mine or (user.role not in STAFF and agent_id is None and not status):
+    if mine or (user.role not in STAFF and agent_id is None and not status and not everyone):
         stmt = stmt.where(Property.agent_id == user.id)
     elif agent_id:
         stmt = stmt.where(Property.agent_id == agent_id)
     if status:
         stmt = stmt.where(Property.status.in_(status.split(",")))
     if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(or_(Property.address.ilike(like), Property.district.ilike(like),
-                              Property.cadastral_code.ilike(like), cast(Property.id, Text).ilike(like)))
+        like = f"%{q.strip().lstrip('#')}%"
+        conds = [Property.address.ilike(like), Property.district.ilike(like), Property.cadastral_code.ilike(like),
+                 cast(Property.id, Text).ilike(like)]
+        pn = norm_phone(re.sub(r"[^\d+]", "", q))
+        if len(pn) >= 5:  # the owner's phone, any format
+            conds.append(Property.owner_id.in_(select(Owner.id).where(Owner.phone_norm.like(f"%{pn}%"))))
+        stmt = stmt.where(or_(*conds))
     return stmt.order_by(Property.updated_at.desc())
+
+
+# ---------------------------------------------------------------- deals (stage 7)
+
+def needs_check(p: Property) -> bool:
+    """«Новый объект из сделки — проверить»: typed in the deal form, not checked by an operator yet."""
+    return p.source_type == "deal" and p.verified_at is None
+
+
+def deal_block(db: Session, p: Property, user: User) -> str | None:
+    """Why this agent can't file a deal on the object: it is another agent's (the owner's agent, stage 6.5, else the
+    object's). Staff are never blocked."""
+    if user.role in STAFF:
+        return None
+    o = db.get(Owner, p.owner_id) if p.owner_id else None
+    bound = o.agent_id if o is not None and o.agent_id and not o.is_agent else p.agent_id
+    if bound and bound != user.id:
+        return f"Объект закреплён за {users_svc.tag_of(db.get(User, bound))}"
+    return None
+
+
+def deal_fields(db: Session, p: Property, user: User | None, deal_type: str = "rent") -> dict:
+    """The deal's object fields taken from the object (read-only in the form). Owner and ad link only for those who see
+    the owner (user None = the system)."""
+    pf = p.post_fields or {}
+    price = pf.get("sale_price") if deal_type == "sale" and pf.get("sale_price") else p.price
+    d = {"address": p.address, "cadastral": p.cadastral_code, "metro": pf.get("metro"), "is_exclusive": p.is_exclusive,
+         "price": float(price) if price is not None else None}
+    if user is None or can_see_owner(p, user):
+        o = db.get(Owner, p.owner_id) if p.owner_id else None
+        d.update(ad_link=p.post_url or p.source_url, owner_name=o.name if o else None, owner_phone=o.phone if o else None)
+    return {k: v for k, v in d.items() if v not in (None, "")}
+
+
+def deal_search(db: Session, user: User, q: str | None = None, pid: int | None = None, deal_type: str = "rent",
+                allow: int | None = None) -> list[dict]:
+    """The deal form's object picker: by address, #id, cadastral code or the owner's phone, among all agents' objects.
+    Another agent's object comes with `blocked` and without its data. allow = the object of the agent's own lead."""
+    if pid:
+        rows = [p for p in [db.get(Property, int(pid))] if p is not None]
+    elif q and q.strip().lstrip("#"):
+        rows = list(db.scalars(query(db, user, q=q, everyone=True).limit(20)))
+    else:
+        return []
+    out = []
+    for p in rows:
+        blocked = None if p.id == allow else deal_block(db, p, user)
+        agent = db.get(User, p.agent_id) if p.agent_id else None
+        out.append({"id": p.id, "address": p.address, "district": p.district, "status": p.status, "bedrooms": p.bedrooms,
+                    "agent_tag": users_svc.tag_of(agent) if agent else None, "needs_check": needs_check(p),
+                    "blocked": blocked, "fields": None if blocked else deal_fields(db, p, user, deal_type)})
+    return out
+
+
+def verify(db: Session, pid: int, actor: User) -> Property:
+    """The operator checked the object (stage 7: a new object from a deal; its deal can be confirmed then)."""
+    if actor.role not in STAFF:
+        raise forbidden("only operators verify objects")
+    p = _prop(db, pid, lock=True)
+    if p.verified_at is None:
+        p.verified_at = now()
+        log_event(db, "property", p.id, "verified", actor)
+        db.commit()
+    return p
 
 
 def board(db: Session, user: User, per_column: int = 100) -> dict[str, list[dict]]:

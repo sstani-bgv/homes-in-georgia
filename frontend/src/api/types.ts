@@ -145,6 +145,8 @@ export interface Property {
   /** stage 6: the operator's first approve / publish; after it locked_fields go through «Запрос оператору» for the agent */
   verified_at?: string | null;
   locked_fields?: string[];
+  /** stage 7: «Новый объект из сделки — проверить» (typed in the deal form, not verified yet) */
+  needs_check?: boolean;
   /** full card, staff and the object's agent: pending «Запросы оператору» */
   change_requests?: ChangeRequest[];
   /** PATCH / archive: the request this call created instead of applying (locked fields after verification) */
@@ -302,6 +304,17 @@ export interface Deal {
   source?: string | null;
   created_at?: string;
   days_left?: number | null;
+  /** GET /deals/:id: the deal's object (stage 7) */
+  property?: { id: number; address?: string | null; status: PropertyStatus; needs_check: boolean } | null;
+  /** POST: «Объекта нет в базе» → the object is created from the form's fields */
+  new_object?: boolean;
+}
+
+/** GET /properties/deal-search: the deal form's object picker; another agent's object comes `blocked`, without fields. */
+export interface DealPick {
+  id: number; address?: string | null; district?: string | null; status: PropertyStatus; bedrooms?: number | null;
+  agent_tag?: string | null; needs_check: boolean; blocked?: string | null;
+  fields: { address?: string; cadastral?: string; metro?: string; ad_link?: string; owner_name?: string; owner_phone?: string; is_exclusive?: boolean; price?: number } | null;
 }
 
 export interface DealCalcIn {

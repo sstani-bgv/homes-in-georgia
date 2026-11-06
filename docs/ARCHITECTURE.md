@@ -257,6 +257,14 @@ raise — it logs failures).
   `models.ARCHIVE_REASONS` (other → comment, duplicate → duplicate_of required), fields archive_reason/archive_comment/archived_at;
   refused → owner_refused, rented-self → rented_by_owner, confirmed deal → rented_by_us. Objects are never deleted.
 - `check_duplicate(db, phone, address, url, cadastral)` (port of apps-script checkProperty + legacy lib-repository rules)
+- stage 7: the deal form picks its object: `GET /properties/deal-search?q=|pid=&deal_type=&lead_id=` (address, #id,
+  cadastral, owner phone; all agents' objects; another agent's one → `blocked` «Объект закреплён за #Tag» and no data).
+  `deals.create` with `property_id` takes `properties.deal_fields` (address, cadastral, metro, exclusive, price/sale price;
+  ad link + owner only if the user sees the owner) over the form; an agent's deal on another agent's object → 409
+  `object_taken` (the object of his own lead is allowed). `new_object: true` («Объекта нет в базе»): `matching.same_as`
+  (same link / cadastral / phone+address) → 409 `object_exists` «…#id… Выберите его из базы»; else `take(commit=False)` makes
+  an object `source_type=deal` with the owner bound to the agent; `needs_check` (no verified_at) blocks `confirm` (409
+  `object_unverified`) until `POST /properties/{id}/verify` (staff, sets verified_at). `GET /deals/{id}` → `property`.
 `deals.py`: `calc(...)`, `create(db, data, actor)`, `confirm(db, deal_id, actor)`, `cancel`, `rented_text(deal)`
 `evaluations.py`, `reports.py` (save + topic post + counters), `users.py` (level logic, promote recruit → agent),
 `inbound.py` (Telegram work group / channel → channel_posts, news, owners + makefoto reports, pending deals; bot/inbound.py

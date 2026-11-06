@@ -15,6 +15,7 @@ CLI (once after deploy; the bot's sync keeps both up to date afterwards):
 import logging
 import re
 import sys
+from types import SimpleNamespace
 
 from sqlalchemy import select, text
 from sqlalchemy import update as update_
@@ -144,6 +145,21 @@ def match(db: Session, l: Listing, objs: dict[int, dict] | None = None) -> list[
         if v != NONE:
             out.append({"property_id": pid, "verdict": v, "score": score, "reasons": why})
     return sorted(out, key=lambda m: (m["verdict"] != SAME, -m["score"], m["property_id"]))
+
+
+def same_as(db: Session, address: str | None = None, cadastral: str | None = None, phone: str | None = None,
+            url: str | None = None) -> list[dict]:
+    """Stage 7: objects of the base the matcher calls `same` for an object typed by hand in the deal form (no ad
+    behind it, so no photos): the same link, cadastral code, or the owner's phone and address."""
+    l = SimpleNamespace(address=address, district=None, bedrooms=None, floor=None, area=None)
+    f = {"l": l, "urls": {(url or "").strip()} - {""}, "phones": [phone] if phone else [],
+         "cads": {_digits(cadastral)} - {""}, "hashes": []}
+    out = []
+    for pid, o in _objects(db).items():
+        v, _, why = verdict(f, o)
+        if v == SAME:
+            out.append({"property_id": pid, "address": o["p"].address, "reasons": why})
+    return out
 
 
 def attach(db: Session, p: Property, l: Listing, actor: User | None, reasons: list[str], via: str) -> list[tuple]:

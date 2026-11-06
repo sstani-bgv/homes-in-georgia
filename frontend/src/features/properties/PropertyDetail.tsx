@@ -362,6 +362,24 @@ function ExclusiveConflict({ p }: { p: Property }) {
   );
 }
 
+/** Stage 7: an object typed in a deal form; its deal is confirmed only after the operator checks it here. */
+function NeedsCheck({ p }: { p: Property }) {
+  const { isStaff } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const m = useMutation({
+    mutationFn: () => api.properties.verify(p.id),
+    onSuccess: (r) => { qc.setQueryData(['property', p.id], r); qc.invalidateQueries({ queryKey: ['deal'] }); toast('Объект проверен · сделку можно подтвердить'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  return (
+    <div className="alert alert-warn">
+      <span className="grow">Новый объект из сделки — проверить: адрес, собственник и телефон, кадастр и ссылку. {isStaff ? 'Сделка по нему ждёт этой проверки.' : 'Оператор проверит его перед подтверждением сделки.'}</span>
+      {isStaff && <Button size="sm" variant="ok" loading={m.isPending} onClick={() => m.mutate()}><CheckCircle2 size={14} />Объект проверен</Button>}
+    </div>
+  );
+}
+
 function Deals({ p, compact }: { p: Property; compact?: boolean }) {
   if (!p.deals?.length) return null;
   return (
@@ -744,6 +762,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
 
       <div className={compact ? 'col gap-lg' : 'split'}>
         <div className="col gap-lg">
+          {p.needs_check && <NeedsCheck p={p} />}
           {action && (
             <Card label="Следующий шаг" title={STEPS[Math.min(step, STEPS.length - 1)]}>
               {action}
