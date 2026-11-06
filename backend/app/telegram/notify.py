@@ -6,8 +6,10 @@ import functools
 import html
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
 
+from app import storage
 from app.telegram import client as tg
 from app.telegram import links, store, texts
 from app.telegram.client import app_btn, cb, conf, kb, url_btn
@@ -586,15 +588,16 @@ def agency_chat():
     return ch
 
 
-def media_paths(pid):
-    root = conf("MEDIA_DIR", "data/media")
+def media_paths(pid, tmp):
+    """[(kind, local path)] of the first 10 files that exist (MEDIA_STORAGE=s3: downloaded into the tmp dir)."""
     rows = store.q("SELECT kind, path FROM property_media WHERE property_id = %s ORDER BY position, id", (pid,))
     out = []
     for r in rows:
-        p = r["path"] if os.path.isabs(r["path"]) else os.path.join(root, r["path"])
-        if os.path.exists(p):
+        if len(out) == 10:
+            break
+        if p := storage.fetch(r["path"], tmp):
             out.append((r["kind"] or "photo", p))
-    return out[:10]
+    return out
 
 
 @safe
@@ -604,17 +607,18 @@ def publish_post(prop):
     -> (message_id, url) or None."""
     chat = agency_chat()
     caption = g(prop, "post_text") or g(prop, "description") or prop_title(prop)
-    media = media_paths(g(prop, "id"))
-    if media:
-        files, items = {}, []
-        for n, (kind, path) in enumerate(media):
-            files[f"f{n}"] = path
-            items.append({"type": "video" if kind == "video" else "photo", "media": f"attach://f{n}",
-                          **({"caption": tg.clip(caption, 1024, html=False)} if n == 0 else {})})
-        res = tg.call("sendMediaGroup", files=files, chat_id=chat, media=items)
-        m = res[0] if res else None
-    else:
-        m = tg.send(chat, tg.plain_to_html(caption, 4096))
+    with tempfile.TemporaryDirectory() as tmp:
+        media = media_paths(g(prop, "id"), tmp)
+        if media:
+            files, items = {}, []
+            for n, (kind, path) in enumerate(media):
+                files[f"f{n}"] = path
+                items.append({"type": "video" if kind == "video" else "photo", "media": f"attach://f{n}",
+                              **({"caption": tg.clip(caption, 1024, html=False)} if n == 0 else {})})
+            res = tg.call("sendMediaGroup", files=files, chat_id=chat, media=items)
+            m = res[0] if res else None
+        else:
+            m = tg.send(chat, tg.plain_to_html(caption, 4096))
     if not m:
         return None
     mid = m["message_id"]

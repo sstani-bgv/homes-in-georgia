@@ -61,6 +61,7 @@ class Property(Base):
     post_message_id = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    # + text_embedding / photo_embedding vector(768) (migration 0006): not mapped, raw SQL in app/embeddings.py
 
 
 class PropertyMedia(Base):

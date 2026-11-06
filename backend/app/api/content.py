@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app import storage
 from app.api.deps import ADMIN_ROLES, STAFF_ROLES, current_user, paginate, require_roles
 from app.config import REPO_ROOT, settings as env
 from app.db import get_db
@@ -224,6 +225,10 @@ def _safe(root: Path, rel: str) -> Path:
 
 @router.get("/media/{path:path}")
 def media_file(path: str, user: User = Depends(current_user)):
+    if storage.is_s3():
+        if path.startswith("/") or ".." in path.split("/"):
+            raise DomainError("not_found", "file not found")
+        return RedirectResponse(storage.url(path), status_code=307)
     p = _safe(media_root(), path)
     if not p.is_file():
         raise DomainError("not_found", "file not found")

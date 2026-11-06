@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import storage
 from app.config import settings as env
 from app.models import STAFF, Deal, Event, Listing, Owner, Property, PropertyMedia, User
 from app.services import jobs
@@ -499,8 +500,6 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
     p = _prop(db, pid, lock=True)
     _require_owner(p, actor)
     _require_status(p, "owner_confirmed", "shoot_scheduled", "media_uploaded", "returned", "review", "published")
-    folder = media_root() / "properties" / str(p.id)
-    folder.mkdir(parents=True, exist_ok=True)
     pos = db.scalar(select(func.coalesce(func.max(PropertyMedia.position), -1)).where(PropertyMedia.property_id == p.id))
     out = []
     for name, content in files:
@@ -509,11 +508,11 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
             raise DomainError("bad_file", f"only photos and videos are allowed: {name}")
         if len(content) > MAX_UPLOAD:
             raise DomainError("too_large", f"file is too large: {name}")
-        fname = f"{uuid.uuid4().hex}{ext}"
-        (folder / fname).write_bytes(content)
+        key = f"properties/{p.id}/{uuid.uuid4().hex}{ext}"
+        storage.put(key, content)
         pos += 1
         m = PropertyMedia(property_id=p.id, kind="video" if ext in VIDEO_EXT else "photo",
-                          path=f"properties/{p.id}/{fname}", room=room, position=pos, uploaded_by=actor.id)
+                          path=key, room=room, position=pos, uploaded_by=actor.id)
         db.add(m)
         out.append(m)
     if p.status in ("owner_confirmed", "shoot_scheduled", "returned"):
@@ -531,8 +530,8 @@ def delete_media(db: Session, pid: int, mid: int, actor: User) -> None:
     if not m or m.property_id != p.id:
         raise DomainError("not_found", "media not found")
     try:
-        (media_root() / m.path).unlink(missing_ok=True)
-    except OSError:
+        storage.delete(m.path)
+    except Exception:
         log.warning("could not delete %s", m.path)
     db.delete(m)
     log_event(db, "property", p.id, "media_deleted", actor, media_id=mid)

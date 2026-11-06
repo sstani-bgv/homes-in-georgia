@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     T14_DAYS: int = 14
     CONTRACT_REMIND_DAYS: str = "30,7,1"
     MEDIA_DIR: str = str(REPO_ROOT / "data" / "media")
+    MEDIA_STORAGE: str = "local"        # local: files under MEDIA_DIR | s3: S3-compatible bucket (app/storage.py)
+    S3_ENDPOINT: str = ""               # e.g. https://<account>.r2.cloudflarestorage.com, http://localhost:9000 (MinIO)
+    S3_BUCKET: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_REGION: str = "us-east-1"        # R2/MinIO/AWS accept us-east-1; Hetzner: fsn1/nbg1/hel1
+    S3_PUBLIC_URL: str = ""             # optional public base URL of the bucket (CDN/R2 domain); else presigned URLs
     DEV_CORS: bool = False
     APP_ENV: str = "prod"  # dev: allows a weak SECRET_KEY
 

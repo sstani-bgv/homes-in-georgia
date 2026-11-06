@@ -12,12 +12,14 @@ x-app: &app
 
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector (migration 0006). Debian/glibc image: the old postgres:16-alpine (musl) data sorts text differently, so
+    # it gets a NEW volume and the data moves by pg_dump/pg_restore (docs/DEPLOY.md); the old `pg` volume stays as is.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-homes}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-homes}
-    volumes: [pg:/var/lib/postgresql/data]
+    volumes: [pgvector:/var/lib/postgresql/data]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"], interval: 5s, retries: 20 }
     restart: unless-stopped
 
@@ -41,4 +43,13 @@ services:
     command: ["sh", "-c", "cd bot && ./refresh_loop.sh"]
     depends_on: { api: { condition: service_started } }
 
-volumes: { pg: {}, media: {}, botdata: {}, botraw: {} }
+  # Optional S3-compatible storage for local tests of MEDIA_STORAGE=s3 (production uses R2 / Hetzner): uncomment and set
+  # MEDIA_STORAGE=s3 S3_ENDPOINT=http://minio:9000 S3_BUCKET=homes S3_ACCESS_KEY=minio S3_SECRET_KEY=<secret> in .env.
+  # minio:
+  #   image: bitnamilegacy/minio:latest   # minio/minio is no longer published on Docker Hub
+  #   environment: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY}", MINIO_DEFAULT_BUCKETS: homes }
+  #   ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+  #   volumes: [minio:/bitnami/minio/data]   # + `minio: {}` under volumes
+  #   restart: unless-stopped
+
+volumes: { pg: {}, pgvector: {}, media: {}, botdata: {}, botraw: {} }   # pg: the old alpine data, kept for rollback

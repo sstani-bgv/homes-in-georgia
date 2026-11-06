@@ -9,6 +9,7 @@ pyjwt==2.15.1
 bcrypt==5.0.0
 httpx==0.28.1
 python-multipart==0.0.33
+boto3==1.43.125   # app/storage.py: MEDIA_STORAGE=s3 (R2 / Hetzner / MinIO)
 tzdata
 # tests
 pytest==9.2.0

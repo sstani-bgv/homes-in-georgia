@@ -66,6 +66,8 @@ TZ=Asia/Tbilisi
 SLA_OPERATOR_TAKE_MIN=5  SLA_AGENT_SLOTS_MIN=30  SLA_SLOTS_TO_CLIENT_MIN=60  CLIENT_PROMISE_MIN=30
 CALL_RETRY_HOURS=2  VIEWING_REMINDER_MIN=60  POST_VIEWING_SURVEY_MIN=60  T14_DAYS=14  CONTRACT_REMIND_DAYS=30,7,1
 MEDIA_DIR=/app/data/media
+MEDIA_STORAGE=local              # s3: CRM media in an S3-compatible bucket (backend/app/storage.py)
+S3_ENDPOINT= S3_BUCKET= S3_ACCESS_KEY= S3_SECRET_KEY= S3_REGION=us-east-1 S3_PUBLIC_URL=
 ```
 
 ## 3. Roles & auth
@@ -124,8 +126,9 @@ shoot_at, address, district, cadastral_code, price NUMERIC, currency default 'US
 total_floors, description, is_exclusive BOOL, checklist JSONB (rooms → bool), ai_flags JSONB
 (owner|agent_suspect|duplicate + reasons, copied from listings), duplicate_of FK properties NULL,
 dup_check TEXT (added|exists — C3 message), review_comment, reviewed_by FK users, reviewed_at, published_at,
-post_url, post_message_id, created_at, updated_at.
-`property_media`: id, property_id FK, kind (photo|video), path, room TEXT NULL, position INT, uploaded_by, created_at.
+post_url, post_message_id, created_at, updated_at, text_embedding / photo_embedding vector(768) (pgvector, SigLIP,
+HNSW cosine; not ORM-mapped, written by `app/embeddings.py`).
+`property_media`: id, property_id FK, kind (photo|video), path (storage key, `properties/<id>/<uuid>.<ext>`), room TEXT NULL, position INT, uploaded_by, created_at.
 
 Generic history: `events`: id, entity TEXT (property|lead|deal|user|owner), entity_id TEXT, action TEXT,
 actor_id FK users NULL, actor_label TEXT (e.g. 'bot', 'client'), data JSONB, at timestamptz. Every status change
@@ -276,7 +279,7 @@ Analytics: `GET /analytics/dashboard`, `GET /analytics/funnel?from=&to=`, `GET /
 Content: `GET/POST/DELETE /ticker`, `GET /news`, `GET /channel-posts?hashtag=&district=&status=&q=&agent_id=&source=&rooms=&exclusive=&price_min=&price_max=`, `GET/PUT /settings` (admin: lead_target, moderation, SLA minutes,
 dashboard metrics toggles), `GET/POST/PATCH /sources` (listing sources), `GET /addresses`.
 Catalog moderation (bot prototype "Проверка"): `GET /moderation`, `POST /moderation/{listing_id} {approve}`.
-Media: `GET /media/{path}` (auth), `GET /listing-photos/{listing_id}/{n}`.
+Media: `GET /media/{path}` (auth; MEDIA_STORAGE=s3 → 307 to a presigned or S3_PUBLIC_URL link), `GET /listing-photos/{listing_id}/{n}`.
 Tools: `POST /tools/telegram/{method}` — server-side proxy for the legacy post generator (allow-listed methods
 sendMessage/sendPhoto/sendMediaGroup/sendVideo/sendDocument and allow-listed chat ids from env; role ≥ agent).
 Public (no auth): `GET /public/ics/{token}` (viewing calendar file), `GET /health`.
