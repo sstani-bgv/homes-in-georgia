@@ -136,6 +136,14 @@ first_seen_at, last_seen_at, created_at. properties.listing_id stays the "origin
 status (draft|published|removed), url, message_id, published_at, removed_at, created_at. Written by publish /
 published_by_generator (`record_publication`); post_url/post_message_id on properties are kept for compat.
 `channel_posts.property_id` FK NULL: an agency channel post matched to our publication by link (exact only).
+Auto-matching (migration 0008, `services/matching.py`): every new listing (bot `db.sync` → `matching.process`) gets a
+verdict per object: same (link / cadastral / 2+ dHash photos / owner phone + address) → linked to the object itself;
+similar (district + bedrooms + floor + area ±10%, or text embedding ≥ 0.92) → `listing_matches` (listing_id,
+property_id, score, reasons JSONB, status pending|confirmed|rejected, decided_by, decided_at), decided by an operator
+in «Новые объявления». `listings.photo_hashes` = the ingest's dHash per photo. Exclusive objects: a live outside ad
+(`property_listings` not gone, not `removed_checked_at`) is a conflict: red badge, event, task to the agent, and
+publish / approve answer 409 `exclusive_conflict` until an operator presses «Проверено: снято» (manual check: ss.ge /
+myhome block server requests, so an HTTP probe can't tell removed from blocked).
 
 Generic history: `events`: id, entity TEXT (property|lead|deal|user|owner), entity_id TEXT, action TEXT,
 actor_id FK users NULL, actor_label TEXT (e.g. 'bot', 'client'), data JSONB, at timestamptz. Every status change
@@ -266,7 +274,9 @@ Callback data prefixes handled by the bot: `lg:` (group), `ls:` (slots), `lv:` (
 Auth: see §3. Users: `GET /users?role=&active=`, `POST /users`, `PATCH /users/{id}` (role, level, active, mentor,
 districts, plans), `POST /users/{id}/promote` (recruit→agent), `GET /users/{id}/stats`.
 Me/cabinet: `GET /me/cabinet` (counters vs plans this month, my deals, level progress, my properties, my leads, upcoming viewings, expiring contracts).
-Funnel 1: `GET /listings/new?q=&source=&flag=`, `GET /listings/{id}` (agent-only fields: urls, text),
+Funnel 1: `GET /listings/new?q=&source=&flag=&known=` (known=1 also shows ads already linked to an object),
+`POST /listings/{id}/matches/{property_id}` {same} (staff), `GET /properties/{id}/elsewhere`,
+`POST /properties/{id}/listings/{listing_id}/removed` (staff, «Проверено: снято»), `GET /listings/{id}` (agent-only fields: urls, text),
 `GET /properties?status=&agent_id=&q=&mine=1`, `GET /properties/board` (by status), `POST /properties` (manual or
 `{listing_id}` = Беру в работу), `GET /properties/{id}`, `PATCH /properties/{id}`, `POST /properties/{id}/call`
 `{reached}`, `/owner` `{is_owner, owner_name, owner_phone}`, `/shoot` `{shoot_at}`, `/media` (multipart files, room),

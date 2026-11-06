@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ListingsStats,
+  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -35,7 +35,10 @@ export const api = {
   cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
 
   listings: {
-    new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing>>('/listings/new', { ...q, limit }), (d) => normPage(d, normListing)),
+    new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing> & { known_total?: number }>('/listings/new', { ...q, limit }),
+      (d) => ({ ...normPage(d, normListing), known_total: Array.isArray(d) ? 0 : d.known_total ?? 0 })),
+    /** «Тот же объект» (same) / «Другой» on a «Похож на объект #N» card */
+    decideMatch: (id: string, pid: number, same: boolean) => http.post<{ ok: boolean; status: string }>(`/listings/${id}/matches/${pid}`, { same }),
     dismiss: (id: string) => http.post<{ ok: boolean }>(`/listings/${id}/dismiss`),
     agent: (id: string, body: { owner_name?: string; owner_phone?: string }) => http.post<Property>(`/listings/${id}/agent`, body),
     facets: () => http.get<Record<'sources' | 'districts' | 'metros', { value: string; count: number }[]>>('/listings/new/facets'),
@@ -66,6 +69,8 @@ export const api = {
     review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
     publish: (id: number) => http.post<Property>(`/properties/${id}/publish`),
     archive: (id: number) => http.post<Property>(`/properties/${id}/archive`),
+    elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
+    adRemoved: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/removed`), normProperty),
     refused: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/refused`, { comment }),
     thinking: (id: number, until: string, comment?: string) => http.post<Property>(`/properties/${id}/thinking`, { until, comment }),
     rentedSelf: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/rented-self`, { comment }),
@@ -154,4 +159,4 @@ export const api = {
   addresses: () => http.get<L<{ id: number; district: string; address: string; ad_link?: string }>>('/addresses'),
 };
 
-export type ListingFilter = { q?: string; source?: string; flag?: string; district?: string; metro?: string; bedrooms?: string; price_min?: string; price_max?: string };
+export type ListingFilter = { q?: string; source?: string; flag?: string; district?: string; metro?: string; bedrooms?: string; price_min?: string; price_max?: string; known?: string };

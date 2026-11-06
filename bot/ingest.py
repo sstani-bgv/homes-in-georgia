@@ -595,7 +595,7 @@ def main():
             it["agent_reasons"].append("ИИ: " + p["agent_reason"])
         apply_profile(it, p)
         it.pop("photo_urls", None)
-        it.pop("hashes", None)
+        it["photo_hashes"] = it.pop("hashes", [])  # -> listings.photo_hashes: the CRM matcher compares photos by them
         (dropped if it.get("agent_reasons") else out).append(it)
 
     json.dump(out, open("listings.json", "w"), ensure_ascii=False, indent=1)

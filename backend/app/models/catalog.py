@@ -56,6 +56,7 @@ class Listing(Base):
     lng = Column(Float)
     geo_precision = Column(Text)
     photos = Column(Text, nullable=False, server_default="[]")
+    photo_hashes = Column(Text, nullable=False, server_default="[]")  # dHash per photo (bot/ingest.py), migration 0008
     description_ru = Column(Text)
     description_en = Column(Text)
     district_en = Column(Text)

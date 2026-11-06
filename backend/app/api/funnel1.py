@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import STAFF, Lead, Listing, Owner, Property, User
+from app.services import matching
 from app.services import properties as P
 from app.services.leads import ACTIVE
 from app.services.common import get_or_404, log_event
@@ -23,8 +24,9 @@ router = APIRouter(tags=["objects"])
 def listings_new(q: str | None = None, source: str | None = None, flag: str | None = None,
                  district: str | None = None, metro: str | None = None, bedrooms: str | None = None,
                  price_min: int | None = Query(None, ge=0), price_max: int | None = Query(None, ge=0),
-                 limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return P.new_listings(db, q, source, flag, limit, offset, district, metro, price_min, price_max, bedrooms)
+                 limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), known: int = 0,
+                 db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return P.new_listings(db, q, source, flag, limit, offset, district, metro, price_min, price_max, bedrooms, bool(known))
 
 
 @router.get("/listings/new/facets")
@@ -67,6 +69,18 @@ def listing_dismiss(listing_id: str, db: Session = Depends(get_db, scope="functi
 def listing_agent(listing_id: str, body: ListingAgentIn, db: Session = Depends(get_db, scope="function"),
                   user: User = Depends(current_user)):
     return P.out(db, P.mark_listing_agent(db, listing_id, user, body.owner_name, body.owner_phone), user, full=True)
+
+
+class MatchDecisionIn(BaseModel):
+    same: bool
+
+
+@router.post("/listings/{listing_id}/matches/{pid}")
+def listing_match_decide(listing_id: str, pid: int, body: MatchDecisionIn, db: Session = Depends(get_db, scope="function"),
+                         user: User = Depends(require_roles(*STAFF_ROLES))):
+    """«Тот же объект» (same=true: the ad is linked to the object) / «Другой» on a «Похож на объект #N» card."""
+    m = matching.decide(db, listing_id, pid, user, body.same)
+    return {"ok": True, "status": m.status}
 
 
 # ---------------------------------------------------------------- properties
@@ -245,6 +259,20 @@ class GeneratorPostIn(BaseModel):
 def properties_published(pid: int, body: GeneratorPostIn, db: Session = Depends(get_db, scope="function"),
                          user: User = Depends(require_roles(*STAFF_ROLES))):
     return P.out(db, P.published_by_generator(db, pid, user, body.post_url, body.message_id), user, full=True)
+
+
+@router.get("/properties/{pid}/elsewhere")
+def properties_elsewhere(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """Where else the object is advertised (the exclusive toggle shows it). Links only for staff / the object's agent."""
+    p = get_or_404(db, Property, pid, "property")
+    show = P.can_see_owner(p, user)
+    return {"items": [{**a, "url": a["url"] if show else None} for a in matching.elsewhere(db, p)]}
+
+
+@router.post("/properties/{pid}/listings/{listing_id}/removed")
+def properties_ad_removed(pid: int, listing_id: str, db: Session = Depends(get_db, scope="function"),
+                          user: User = Depends(require_roles(*STAFF_ROLES))):
+    return P.out(db, P.ad_removed(db, pid, listing_id, user), user, full=True)
 
 
 @router.post("/properties/{pid}/archive")

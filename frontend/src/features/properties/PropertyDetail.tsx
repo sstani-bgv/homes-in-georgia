@@ -9,7 +9,7 @@ import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Media, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { AiFlagBadges, DupCheck, PropertyStatusBadge, Timeline } from '../../components/domain';
+import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
 import { DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
@@ -321,6 +321,39 @@ function Ads({ p }: { p: Property }) {
   );
 }
 
+const srcName = (s?: string | null) => SOURCE_LABEL[s || ''] || s || 'другой сайт';
+
+/** Exclusive still advertised elsewhere: the agent asks the owner to take the ad down, the operator checks and presses
+ * «Проверено: снято» (manual on purpose: ss.ge / myhome block server checks). Until then it can't go out as an exclusive. */
+function ExclusiveConflict({ p }: { p: Property }) {
+  const { isStaff } = useAuth();
+  const { toast, set } = useProp(p.id);
+  const removed = useMutation({
+    mutationFn: (lid: string) => api.properties.adRemoved(p.id, lid),
+    onSuccess: (r) => { set(r); toast('Отмечено: объявление снято'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const ads = p.exclusive_conflict || [];
+  if (!ads.length) return null;
+  return (
+    <Card label="Эксклюзив" title={`Эксклюзив висит на ${[...new Set(ads.map((a) => srcName(a.source)))].join(', ')}`}>
+      <div className="alert alert-warn">Задача агенту: попросить собственника снять объявление. Публикация как эксклюзив закрыта, пока оператор не проверит, что объявление снято.</div>
+      {ads.map((a) => (
+        <div className="list-row" key={a.listing_id}>
+          <div className="grow" style={{ fontWeight: 700 }}>{srcName(a.source)}</div>
+          {a.url && <a className="btn btn-secondary btn-sm" href={a.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />Открыть</a>}
+          {isStaff && (
+            <Button size="sm" loading={removed.isPending && removed.variables === a.listing_id}
+              onClick={() => { if (window.confirm('Вы открыли ссылку и убедились, что объявление снято с сайта?')) removed.mutate(a.listing_id); }}>
+              Проверено: снято
+            </Button>
+          )}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function Deals({ p, compact }: { p: Property; compact?: boolean }) {
   if (!p.deals?.length) return null;
   return (
@@ -359,9 +392,11 @@ function ReviewStep({ p }: { p: Property }) {
       <MediaGrid p={p} />
       <div className="muted" style={{ fontSize: 12 }}>Генератор откроется с полями, фото и видео объекта. После «Опубликовать в канал» объект сам станет «Опубликован», агенту придёт ссылка.</div>
       <Field label="Комментарий агенту"><Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что переснять или поправить" /></Field>
+      {!!p.exclusive_conflict?.length && <div className="alert alert-warn">Эксклюзив ещё висит на других сайтах: публикация закрыта до «Проверено: снято».</div>}
       <div className="row row-wrap">
         {/* publishing goes through the agency generator (watermark, topics, owner info); it reports the post back */}
-        <a className="btn btn-ok btn-lg" href={`/tools/post-generator?property_id=${p.id}`} target="_blank" rel="noreferrer"><CheckCircle2 size={18} />Одобрить → генератор постов</a>
+        {p.exclusive_conflict?.length ? <Button variant="ok" size="lg" disabled><CheckCircle2 size={18} />Одобрить → генератор постов</Button>
+          : <a className="btn btn-ok btn-lg" href={`/tools/post-generator?property_id=${p.id}`} target="_blank" rel="noreferrer"><CheckCircle2 size={18} />Одобрить → генератор постов</a>}
         <Button variant="danger" size="lg" disabled={!comment.trim()} loading={review.isPending} onClick={() => review.mutate(false)}>Вернуть агенту</Button>
       </div>
     </div>
@@ -376,6 +411,8 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
   const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
   const save = useMutation({ mutationFn: () => api.properties.update(p.id, f), onSuccess: (r) => { set(r); toast('Сохранено'); onClose(); setF({}); }, onError: (e) => toast(errText(e), true) });
   const numOrNull = (s: string) => (s === '' ? null : Number(s));
+  const where = useQuery({ queryKey: ['property-elsewhere', p.id], queryFn: () => api.properties.elsewhere(p.id), enabled: open && !!v.is_exclusive });
+  const found = where.data?.items || [];
   return (
     <Modal open={open} onClose={onClose} title="Поля объекта">
       <div className="form-grid">
@@ -389,7 +426,21 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         <Field label="Телефон собственника"><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
         <Field label="Кадастровый код" className="span2"><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
-        <div className="span2"><Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" /></div>
+        <div className="span2 col gap-sm">
+          <Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" />
+          {v.is_exclusive && (where.isLoading ? <span className="muted" style={{ fontSize: 12 }}>Проверяем другие сайты…</span>
+            : found.length ? (
+              <div className="alert alert-warn col gap-sm" style={{ fontSize: 13 }}>
+                <span><b>Этот объект найден ещё на: {[...new Set(found.map((a) => srcName(a.source)))].join(', ')}.</b> Попросите собственника снять объявления, иначе эксклюзив не опубликовать.</span>
+                {found.map((a) => (
+                  <span key={a.listing_id} className="muted">
+                    {srcName(a.source)} · {a.verdict === 'linked' ? 'привязано к объекту' : a.verdict === 'same' ? 'тот же объект' : `похож: ${a.reasons.join(', ')}`}
+                    {a.url && <> · <a href={a.url} target="_blank" rel="noreferrer">открыть</a></>}
+                  </span>
+                ))}
+              </div>
+            ) : where.data ? <div className="alert alert-ok" style={{ fontSize: 13 }}>На других сайтах этот объект не найден</div> : null)}
+        </div>
       </div>
       <div className="row mt-lg"><Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={onClose}>Отмена</Button></div>
     </Modal>
@@ -441,6 +492,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
             <div className="row row-wrap gap-sm mt">
               <PropertyStatusBadge status={p.status} />
               {p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}
+              <ExclusiveConflictBadge p={p} />
               <AiFlagBadges flags={p.ai_flags} />
             </div>
           </div>
@@ -464,9 +516,10 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {isStaff && p.status === 'review' && (
             <div className="row row-wrap">
               <a className="btn btn-secondary" href={generator} target="_blank" rel="noreferrer"><Wand2 size={16} />Открыть генератор постов</a>
-              <Button variant="ghost" loading={publish.isPending} onClick={() => publish.mutate()}>Опубликовать без генератора</Button>
+              <Button variant="ghost" disabled={!!p.exclusive_conflict?.length} loading={publish.isPending} onClick={() => publish.mutate()}>Опубликовать без генератора</Button>
             </div>
           )}
+          <ExclusiveConflict p={p} />
           {!mediaInAction && <Gallery p={p} />}
           <Publications p={p} />
           <Ads p={p} />

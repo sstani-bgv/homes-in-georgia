@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import settings as env
-from app.models import (STAFF, ChannelPost, Deal, Event, Listing, Owner, Property, PropertyListing, PropertyMedia,
-                        PropertyPublication, User)
+from app.models import (STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property, PropertyListing,
+                        PropertyMedia, PropertyPublication, User)
 from app.services import jobs
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
@@ -136,8 +136,10 @@ def _untaken():
 
 def new_listings(db: Session, q: str | None = None, source: str | None = None, flag: str | None = None,
                  limit: int = 50, offset: int = 0, district: str | None = None, metro: str | None = None,
-                 price_min: int | None = None, price_max: int | None = None, bedrooms: str | None = None) -> dict:
-    """Listings not yet taken into work, newest first. `source` is a type (ss, facebook…) or an exact source (fb:group)."""
+                 price_min: int | None = None, price_max: int | None = None, bedrooms: str | None = None,
+                 known: bool = False) -> dict:
+    """Listings not yet taken into work, newest first. `source` is a type (ss, facebook…) or an exact source (fb:group).
+    Ads the matcher already linked to an object («уже известные») are hidden unless known=True; known_total counts them."""
     stmt = select(Listing).where(*_untaken())
     if q:
         like = f"%{q.strip()}%"
@@ -164,11 +166,36 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
         stmt = stmt.where(or_(Listing.agent_suspect == 1, Listing.agent_reasons != "[]"))
     elif flag == "duplicate":
         stmt = stmt.where(Listing.dup_sources.contains('"agency"'))
+    # an object's own origin ad is not "known": released objects (owner refused) come back to the feed through it
+    linked = select(PropertyListing.listing_id).join(Property, Property.id == PropertyListing.property_id).where(
+        Property.listing_id.is_distinct_from(PropertyListing.listing_id))
+    known_total = db.scalar(select(func.count()).select_from(stmt.where(Listing.id.in_(linked)).subquery()))
+    if not known:
+        stmt = stmt.where(Listing.id.not_in(linked))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
-    sim, refused = similar_in_channel(db, rows), refusals_for(db, [r.id for r in rows])
-    return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id)} for r in rows],
-            "total": total}
+    ids = [r.id for r in rows]
+    sim, refused, objs = similar_in_channel(db, rows), refusals_for(db, ids), known_objects(db, ids)
+    return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id),
+                       **objs.get(r.id, {"known_object": None, "matches": []})} for r in rows],
+            "total": total, "known_total": known_total}
+
+
+def known_objects(db: Session, listing_ids: list[str]) -> dict[str, dict]:
+    """listing id → {known_object: the object it is linked to, matches: pending «похож» objects} (stage 4 matcher)."""
+    out = {i: {"known_object": None, "matches": []} for i in listing_ids}
+    if not listing_ids:
+        return out
+    for lid, pid, addr in db.execute(select(PropertyListing.listing_id, Property.id, Property.address)
+                                     .join(Property, Property.id == PropertyListing.property_id)
+                                     .where(PropertyListing.listing_id.in_(listing_ids))):
+        out[lid]["known_object"] = {"id": pid, "address": addr}
+    for m, addr in db.execute(select(ListingMatch, Property.address).join(Property, Property.id == ListingMatch.property_id)
+                              .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == "pending")
+                              .order_by(ListingMatch.score.desc(), ListingMatch.id)):
+        out[m.listing_id]["matches"].append({"property_id": m.property_id, "address": addr, "score": m.score,
+                                             "reasons": m.reasons})
+    return out
 
 
 def _near(a: Listing, b: Listing) -> float:
@@ -235,6 +262,9 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
     if listing_id:
         listing = get_or_404(db, Listing, listing_id, "listing", lock=True)
         existing = db.scalar(select(Property).where(Property.listing_id == listing_id).with_for_update())
+        if existing is None:  # the matcher linked this ad to an object: take that object, don't create a twin
+            pid = db.scalar(select(PropertyListing.property_id).where(PropertyListing.listing_id == listing_id))
+            existing = db.get(Property, pid, with_for_update=True) if pid else None
         if existing:
             link_listing(db, existing, listing)
             if existing.agent_id == agent.id and existing.status != "archived":
@@ -305,8 +335,12 @@ def _apply(p: Property, data: dict):
 def update(db: Session, pid: int, data: dict, actor: User) -> Property:
     p = _prop(db, pid)
     _require_owner(p, actor)
+    was_exclusive = p.is_exclusive
     _apply(p, data)
     _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor)
+    if p.is_exclusive and not was_exclusive:
+        for a in external_ads(db, [p.id]).get(p.id, []):
+            log_event(db, "property", p.id, "exclusive_conflict", actor, **a)
     p.updated_at = now()
     log_event(db, "property", p.id, "updated", actor,
               fields=sorted(k for k in data if k in EDITABLE or k in ("owner_name", "owner_phone")))
@@ -594,6 +628,8 @@ def review(db: Session, pid: int, operator: User, approve: bool, comment: str | 
         raise forbidden("only operators review objects")
     p = _prop(db, pid, lock=True)
     _require_status(p, "review")
+    if approve:
+        _require_no_exclusive_conflict(db, p)
     p.review_comment, p.reviewed_by, p.reviewed_at = comment, operator.id, now()
     if approve:
         log_event(db, "property", p.id, "approved", operator, comment=comment)
@@ -669,6 +705,7 @@ def publish(db: Session, pid: int, actor: User) -> Property:
     if actor.role not in STAFF:
         raise forbidden("only operators publish")
     _require_status(p, "review", "published")
+    _require_no_exclusive_conflict(db, p)
     p.post_text = post_text(db, p)  # transient attribute read by notify.publish_post
     ref = _notify("publish_post", p)
     if ref:
@@ -713,6 +750,47 @@ def unmark_rented(db: Session, pid: int, actor: User | None) -> None:
     p = db.get(Property, pid)
     if p and p.status == "rented":
         _status(db, p, "published", actor, "rent_cancelled")
+
+
+# ---------------------------------------------------------------- exclusives (stage 4)
+
+def external_ads(db: Session, pids: list[int]) -> dict[int, list[dict]]:
+    """Object id → its outside ads that are still live (not gone from the ingest, not checked as removed by an operator).
+    An exclusive object must have none: they are its «Эксклюзив висит на …» conflict."""
+    out: dict[int, list[dict]] = {}
+    if not pids:
+        return out
+    for pid, lid, src, url in db.execute(
+            select(PropertyListing.property_id, PropertyListing.listing_id, PropertyListing.source, PropertyListing.url)
+            .join(Listing, Listing.id == PropertyListing.listing_id)
+            .where(PropertyListing.property_id.in_(pids), PropertyListing.removed_checked_at.is_(None),
+                   Listing.status != "gone", Listing.source != "agency").order_by(PropertyListing.id)):
+        out.setdefault(pid, []).append({"listing_id": lid, "source": src, "url": url})
+    return out
+
+
+def _require_no_exclusive_conflict(db: Session, p: Property) -> None:
+    ads = external_ads(db, [p.id]).get(p.id) if p.is_exclusive else None
+    if ads:
+        raise DomainError("exclusive_conflict", "the exclusive is still advertised on "
+                          + ", ".join(sorted({a["source"] or "?" for a in ads})), 409)
+
+
+def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
+    """«Проверено: снято»: the operator opened the outside ad and saw it is taken down; it stops blocking the exclusive.
+    A manual check on purpose: ss.ge / myhome block server requests (Cloudflare), an HTTP probe can't tell "removed"
+    from "blocked". The ingest marking the ad gone clears it too."""
+    if actor.role not in STAFF:
+        raise forbidden("only operators confirm a removed ad")
+    p = _prop(db, pid, lock=True)
+    link = db.scalar(select(PropertyListing).where(PropertyListing.property_id == p.id,
+                                                   PropertyListing.listing_id == listing_id))
+    if link is None:
+        raise DomainError("not_found", "the ad is not linked to this object")
+    link.removed_checked_at, link.removed_checked_by = now(), actor.id
+    log_event(db, "property", p.id, "ad_removed_checked", actor, listing_id=listing_id, source=link.source, url=link.url)
+    db.commit()
+    return p
 
 
 # ---------------------------------------------------------------- dedup
@@ -770,6 +848,11 @@ def prefetch(db: Session, rows: list[Property], cache: dict) -> None:
                 cache[(model.__name__, obj.id)] = obj
             for i in ids:
                 cache.setdefault((model.__name__, i), None)
+    ex = [p.id for p in rows if p.is_exclusive and ("conflict", p.id) not in cache]
+    if ex:
+        ads = external_ads(db, ex)
+        for pid in ex:
+            cache[("conflict", pid)] = ads.get(pid, [])
     pids = [p.id for p in rows if ("media_count", p.id) not in cache]
     if pids:
         counts = dict(db.execute(select(PropertyMedia.property_id, func.count()).where(PropertyMedia.property_id.in_(pids))
@@ -815,6 +898,11 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                       "phone": owner.phone if visible else None}
     else:
         d["owner"] = None
+    k = ("conflict", p.id)
+    if p.is_exclusive and k not in cache:
+        cache[k] = external_ads(db, [p.id]).get(p.id, [])
+    visible = can_see_owner(p, user)  # ad links lead to the owner's phone
+    d["exclusive_conflict"] = [{**a, "url": a["url"] if visible else None} for a in cache.get(k, [])] if p.is_exclusive else []
     if full:
         d["media"] = [{"id": m.id, "kind": m.kind, "room": m.room, "position": m.position, "url": f"/api/media/{m.path}"}
                       for m in media(db, p.id)]
@@ -842,7 +930,8 @@ def card(db: Session, p: Property, user: User) -> dict:
         ads.append({"listing_id": l.id, "source": link.source or source_type_of(l), "status": l.status,
                     "url": (link.url or (jload(l.urls, []) or [None])[0]) if contacts else None,
                     "price_usd": l.price_usd, "first_seen": iso(link.first_seen_at) or l.first_seen,
-                    "last_seen": iso(link.last_seen_at) or l.last_seen, "origin": l.id == p.listing_id})
+                    "last_seen": iso(link.last_seen_at) or l.last_seen, "origin": l.id == p.listing_id,
+                    "removed_checked_at": iso(link.removed_checked_at)})
     deals = []
     if contacts:
         names = {}

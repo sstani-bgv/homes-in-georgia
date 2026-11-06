@@ -575,6 +575,17 @@ def property_returned(prop):
 
 
 @safe
+def exclusive_conflict(prop, source, url):
+    """Stage 4: the agent's exclusive showed up on another site → a task to get the owner to take the ad down."""
+    ag = store.user(g(prop, "agent_id")) or {}
+    if ag.get("tg_id"):
+        tg.send(ag["tg_id"], f"🔴 <b>Эксклюзив #{g(prop, 'id')} висит на {e(source)}</b>\n{e(prop_title(prop))}\n\n"
+                f"Задача: попросить собственника снять объявление {e(url or '')}\n"
+                "Публикация как эксклюзив закрыта, пока оператор не отметит «Проверено: снято».",
+                kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
+
+
+@safe
 def property_published(prop):
     """C5: the agent gets the link to the channel post."""
     ag = store.user(g(prop, "agent_id")) or {}

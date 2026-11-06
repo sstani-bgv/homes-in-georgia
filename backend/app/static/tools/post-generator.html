@@ -1104,6 +1104,12 @@ async function publishPost() {
   vibrate();
   const htmlText = buildTelegramHTML();
   if (!htmlText || htmlText.length < 10) { alert('Заполните форму перед публикацией'); return; }
+  // CRM stage 4: an exclusive still advertised elsewhere can't go out as an exclusive
+  if (exclusiveConflict.length && document.getElementById('exclusiveToggle').checked) {
+    alert('Эксклюзив ещё висит на: ' + exclusiveConflict.join(', ') + '. Попросите собственника снять объявление; '
+      + 'после «Проверено: снято» в карточке объекта можно публиковать как эксклюзив.');
+    return;
+  }
 
   const btns = ['publishBtn', 'publishBtnDesktop'];
   const setBtns = (text, color, disabled) => btns.forEach(id => {
@@ -1219,6 +1225,8 @@ async function loadTeamTags(role, containerId, statusId) {
   }
 }
 
+let exclusiveConflict = [];  // sources where the CRM object (an exclusive) is still advertised
+
 // ?property_id=<id>: prefill the form from the CRM object (best effort, the agent can still edit everything)
 async function prefillFromProperty() {
   const pid = new URLSearchParams(location.search).get('property_id');
@@ -1233,6 +1241,7 @@ async function prefillFromProperty() {
     if (p.price) { set('priceInput', Math.round(p.price)); if (typeof onPriceInput === 'function') onPriceInput(); }
     if (p.owner) { set('ownerName', p.owner.name); set('ownerPhone', p.owner.phone); }
     const ex = document.getElementById('exclusiveToggle'); if (ex) ex.checked = !!p.is_exclusive;
+    exclusiveConflict = [...new Set((p.exclusive_conflict || []).map(a => a.source || '?'))];
     // the agent's photos and video from the object card (up to 9 photos + 1 video, the generator's own limits)
     const items = (p.media || []).filter(m => m.url);
     const photos = items.filter(m => m.kind === 'photo').slice(0, 9), video = items.find(m => m.kind === 'video');

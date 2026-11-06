@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bot, Clock, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide-react';
 import { api } from '../api';
-import type { AiFlags, EventItem, Lead, LeadStatus, Listing, PropertyStatus, SimilarFlat } from '../api/types';
+import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
 import { mediaUrl } from '../api/client';
 import { Badge, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
@@ -57,6 +57,14 @@ export function AiFlagBadges({ flags }: { flags?: AiFlags | null }) {
       {flags.duplicate && <Badge tone="red" title={reasons}>дубль</Badge>}
     </>
   );
+}
+
+/** Red «Эксклюзив висит на ss.ge»: the exclusive object still has live ads on other sites (stage 4). */
+export function ExclusiveConflictBadge({ p }: { p: Pick<Property, 'exclusive_conflict'> }) {
+  const ads = p.exclusive_conflict || [];
+  if (!ads.length) return null;
+  const where = [...new Set(ads.map((a) => SOURCE_LABEL[a.source || ''] || a.source || 'другом сайте'))].join(', ');
+  return <Badge tone="red" title="Попросите собственника снять объявление">Эксклюзив висит на {where}</Badge>;
 }
 
 /** Full listing: photos, text, all source links. A merged duplicate keeps every copy's link in `urls`. */
@@ -227,13 +235,16 @@ const ACTION_TEXT: Record<string, string> = {
   taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_refused: 'Собственник не хочет работать · объект вернулся в ленту', owner_thinking: 'Собственник думает', owner_rented_self: 'Собственник сдал сам', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',
   approved: 'Одобрено', returned: 'Возвращено агенту', published: 'Опубликовано в канале', archived: 'В архив', status: 'Смена статуса',
+  listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято',
 };
+const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked'];
 function eventText(e: EventItem): string {
   const base = ACTION_TEXT[e.action] || e.action;
   const d = e.data || {};
   const outcome = d.outcome ? OUTCOME_LABEL[d.outcome as string] || (d.outcome as string) : '';
   const reason = d.reason ? REFUSAL_LABEL[d.reason as string] || (d.reason as string) : '';
-  const extra = (d.comment || d.note || d.to || [outcome, reason].filter(Boolean).join(', ') || '') as string;
+  const source = AD_EVENTS.includes(e.action) && d.source ? SOURCE_LABEL[d.source as string] || (d.source as string) : '';
+  const extra = (d.comment || d.note || d.to || [outcome, reason, source].filter(Boolean).join(', ') || '') as string;
   return extra ? `${base}: ${extra}` : base;
 }
 

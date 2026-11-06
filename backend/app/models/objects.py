@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, Numeric, Text, func, text
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, func,
+                        text)
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
@@ -89,6 +90,24 @@ class PropertyListing(Base):
     url = Column(Text)
     first_seen_at = Column(DateTime(timezone=True))
     last_seen_at = Column(DateTime(timezone=True))
+    # the operator checked the ad is taken down: no longer an exclusive conflict (migration 0008)
+    removed_checked_at = Column(DateTime(timezone=True))
+    removed_checked_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ListingMatch(Base):
+    """A "similar" object for a new ad (app/services/matching.py), until an operator says same / different."""
+    __tablename__ = "listing_matches"
+    __table_args__ = (UniqueConstraint("listing_id", "property_id", name="listing_matches_pair_uq"),)
+    id = Column(Integer, primary_key=True)
+    listing_id = Column(Text, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False, server_default=text("0"))
+    reasons = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    status = Column(Text, nullable=False, server_default="pending")  # pending | confirmed | rejected
+    decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

@@ -7,7 +7,7 @@ import { api, type ListingFilter } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
+import { ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
 import { PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
@@ -26,14 +26,15 @@ export function NewListings({ base = '' }: { base?: string }) {
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
   const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); set('bedrooms')([...beds].sort().join(',')); };
-  const { user } = useAuth();
+  const { user, isStaff } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
+  const objLink = (id: number) => (base === '/m' ? `/m/properties/${id}` : `/objects/${id}`);
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, limit], queryFn: () => api.listings.new(f, limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
-  const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q');
+  const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q' && k !== 'known');
   const take = useMutation({
     mutationFn: (id: string) => api.properties.take(id),
     onSuccess: (p) => {
@@ -59,6 +60,11 @@ export function NewListings({ base = '' }: { base?: string }) {
   const dismiss = useMutation({
     mutationFn: (id: string) => api.listings.dismiss(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['listings'] }); toast('Убрано из ленты как неактуальное'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const decide = useMutation({
+    mutationFn: (v: { id: string; pid: number; same: boolean }) => api.listings.decideMatch(v.id, v.pid, v.same),
+    onSuccess: (_, v) => { qc.invalidateQueries({ queryKey: ['listings'] }); toast(v.same ? `Объявление привязано к объекту #${v.pid}` : 'Отмечено: другой объект'); },
     onError: (e) => toast(errText(e), true),
   });
   const items = itemsOf(data);
@@ -92,7 +98,13 @@ export function NewListings({ base = '' }: { base?: string }) {
         <div className="row gap-sm" role="group" aria-label="Спальни">
           {BEDS.map((b) => <Button key={b.value} size="sm" variant={beds.has(b.value) ? 'primary' : 'secondary'} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</Button>)}
         </div>
-        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '' })}>Сбросить</Button>}
+        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить</Button>}
+        {(!!data?.known_total || f.known) && (
+          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')}
+            title="Объявления, которые система уже привязала к объектам базы">
+            Показать уже известные ({data?.known_total ?? 0})
+          </Button>
+        )}
       </div>
       {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : (
@@ -103,6 +115,25 @@ export function NewListings({ base = '' }: { base?: string }) {
               <ListingCard key={l.id} listing={l} locked={lockedByOther ? `Взял ${l.taken_by?.name}` : undefined}
                 footer={
                   <div className="col gap-sm">
+                    {l.known_object && (
+                      <Link className="alert alert-ok" to={objLink(l.known_object.id)} style={{ fontSize: 12, fontWeight: 700 }}>
+                        Уже есть в базе · объект #{l.known_object.id}
+                      </Link>
+                    )}
+                    {(l.matches || []).map((m) => (
+                      <div key={m.property_id} className="alert alert-warn col gap-sm" style={{ fontSize: 12 }}>
+                        <span>Похож на <Link to={objLink(m.property_id)} style={{ fontWeight: 700 }}>объект #{m.property_id}</Link>{m.address ? ` · ${m.address}` : ''}</span>
+                        <span className="muted">{m.reasons.join(' · ')}</span>
+                        {isStaff && (
+                          <div className="row">
+                            <Button size="sm" block loading={decide.isPending && decide.variables?.pid === m.property_id && decide.variables?.same}
+                              onClick={() => decide.mutate({ id: l.id, pid: m.property_id, same: true })}>Тот же объект</Button>
+                            <Button size="sm" variant="secondary" block loading={decide.isPending && decide.variables?.pid === m.property_id && !decide.variables?.same}
+                              onClick={() => decide.mutate({ id: l.id, pid: m.property_id, same: false })}>Другой</Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                     <div className="row">
                       <Button block disabled={lockedByOther} loading={take.isPending && take.variables === l.id} onClick={() => take.mutate(l.id)}>Беру в работу</Button>
                       {l.url && <a className="btn btn-secondary icon-btn" href={l.url} target="_blank" rel="noreferrer" title="Открыть источник"><ExternalLink size={16} /></a>}
@@ -136,6 +167,7 @@ export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
         <div className="grow">
           <div className="kcard-title ellipsis">{p.address || `Объект #${p.id}`}</div>
           <div className="kcard-meta">{[p.district, bedroomsLabel(p.bedrooms), money(p.price, p.currency || 'USD')].filter(Boolean).join(' · ')}</div>
+          <ExclusiveConflictBadge p={p} />
         </div>
       </div>
       <div className="row row-between mt" style={{ marginTop: 8 }}>
@@ -212,7 +244,7 @@ export function PropertyList({ mine, archived, base = '' }: { mine?: boolean; ar
                       <td><Link to={link(p.id)} style={{ fontWeight: 700, color: 'inherit' }}>{p.address || '—'}</Link><div><Place district={p.district} /></div></td>
                       <td className="num" style={{ fontWeight: 700 }}>{money(p.price, p.currency || 'USD')}</td>
                       <td>{p.agent?.name || '—'}</td>
-                      <td><PropertyStatusBadge status={p.status} /></td>
+                      <td><div className="row row-wrap gap-sm"><PropertyStatusBadge status={p.status} /><ExclusiveConflictBadge p={p} /></div></td>
                       <td className="muted">{ago(p.updated_at || p.created_at)}</td>
                     </tr>
                   ))}

@@ -73,6 +73,7 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_credentials: 'Неверный логин или пароль',
   forbidden: 'Нет доступа к этой странице или действию',
   not_found: 'Не найдено: запись удалена или ссылка устарела',
+  exclusive_conflict: 'Эксклюзив ещё висит на других сайтах. Попросите собственника снять объявление, затем оператор отмечает «Проверено: снято»',
 };
 
 async function request<T>(method: string, path: string, body?: unknown, query?: Query, retried = false): Promise<T> {

@@ -61,7 +61,16 @@ export interface Listing {
   similar?: SimilarFlat[];
   /** the previous agent reached the owner, who won't work with the agency */
   refused?: { by?: string | null; at: string; comment?: string | null } | null;
+  /** the matcher linked this ad to an object already in the base */
+  known_object?: { id: number; address?: string | null } | null;
+  /** «похож»: objects an operator should compare with (pending) */
+  matches?: ListingMatch[];
 }
+
+export interface ListingMatch { property_id: number; address?: string | null; score: number; reasons: string[] }
+/** a live outside ad of an exclusive object (url hidden unless you may see the owner contacts) */
+export interface ExternalAd { listing_id: string; source?: string | null; url?: string | null }
+export interface Elsewhere extends ExternalAd { verdict: 'linked' | 'same' | 'similar'; reasons: string[] }
 
 export interface SimilarFlat {
   id: string; url?: string | null; address?: string | null; photo?: string | null; price_usd?: number | null;
@@ -120,12 +129,14 @@ export interface Property {
   /** full card only: the object's ads on other sites; url is null unless you may see the owner contacts */
   listings?: PropertyAd[];
   deals?: PropertyDeal[];
+  /** exclusive objects: live outside ads → «Эксклюзив висит на …», publishing as exclusive is blocked */
+  exclusive_conflict?: ExternalAd[];
   created_at?: string;
   updated_at?: string;
 }
 
 export interface Publication { id: number; channel: string; status: 'draft' | 'published' | 'removed'; url?: string | null; message_id?: string | null; published_at?: string | null; removed_at?: string | null }
-export interface PropertyAd { listing_id: string; source?: string | null; status?: string | null; url?: string | null; price_usd?: number | null; first_seen?: string | null; last_seen?: string | null; origin: boolean }
+export interface PropertyAd { listing_id: string; source?: string | null; status?: string | null; url?: string | null; price_usd?: number | null; first_seen?: string | null; last_seen?: string | null; origin: boolean; removed_checked_at?: string | null }
 export interface PropertyDeal { id: number; status: string; deal_type?: string | null; price?: number | null; agent?: string | null; rent_from?: string | null; rent_to?: string | null; created_at?: string | null }
 
 export interface EventItem {

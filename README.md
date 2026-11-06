@@ -28,6 +28,13 @@ docker compose -f deploy/docker-compose.yml exec api sh -c "cd backend && python
 | `OPENAI_API_KEY` | ключ для поиска квартир; без него анкета работает, а подборка нет |
 | `OPENAI_BASE_URL`, `LLM_MODEL` | для совместимого API (например ProxyAPI) и выбора модели, по умолчанию `gpt-4.1-mini` |
 
+### Узнавание объектов (этап 4)
+
+Каждое новое объявление при `bot/db.py sync` сверяется с базой объектов (`backend/app/services/matching.py`): тот же
+объект привязывается сам, похожий ждёт решения оператора в «Новых объявлениях». Один раз после выката:
+`cd backend && python -m app.services.matching hashes` (хэши фото старых объявлений), затем `... matching run`
+(сверить объявления, пришедшие до этапа 4).
+
 ### Фото и видео (S3)
 
 По умолчанию файлы CRM лежат на диске (`MEDIA_DIR`). Чтобы хранить их в S3-совместимом хранилище (Cloudflare R2, Hetzner, MinIO):
@@ -59,7 +66,7 @@ cd frontend && npm run dev                          # фронт с hot reload, 
 ## Тесты
 
 ```bash
-cd backend && ../.venv/bin/python -m pytest -q                      # 76 тестов (S3-тест: TEST_S3_* → локальный MinIO)
+cd backend && ../.venv/bin/python -m pytest -q                      # 84 теста (S3-тест: TEST_S3_* → локальный MinIO)
 cd bot && ../.venv/bin/python -m unittest discover -s test          # 103 теста, e2e через fake Bot API
 cd frontend && npm run build                                        # проверка типов + сборка
 ```

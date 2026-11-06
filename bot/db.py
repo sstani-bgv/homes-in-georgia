@@ -38,7 +38,7 @@ DEFAULT_SETTINGS = {
     "final_llm": "on",          # hybrid only. off: top 5 by score with templated reasons (one short Codex call)
 }
 
-JSON_COLS = ("urls", "dup_sources", "photos", "features", "agent_reasons", "details")
+JSON_COLS = ("urls", "dup_sources", "photos", "photo_hashes", "features", "agent_reasons", "details")
 
 
 def load_env(path=None):
@@ -339,7 +339,7 @@ def sync(listings_path="listings.json", dropped_path="raw/dropped_agents.json", 
     if os.path.exists(dropped_path):
         items += json.loads(Path(dropped_path).read_text())
     t = now()
-    counts = {}
+    counts, new = {}, []
     with tx(path) as c:
         moderate_all = get_setting("moderate_all", c) == "1"
         known = agent_phones(c)
@@ -361,6 +361,7 @@ def sync(listings_path="listings.json", dropped_path="raw/dropped_agents.json", 
             else:
                 vals.update(id=it["id"], first_seen=t)
                 c.execute(f"INSERT INTO listings ({', '.join(vals)}) VALUES ({', '.join(':' + k for k in vals)})", vals)
+                new.append(it["id"])
             counts[status] = counts.get(status, 0) + 1
         if full:
             live = c.execute("SELECT id FROM listings WHERE status != 'gone'").fetchall()
@@ -370,7 +371,27 @@ def sync(listings_path="listings.json", dropped_path="raw/dropped_agents.json", 
             else:
                 c.executemany("UPDATE listings SET status = 'gone', updated_at = ? WHERE id = ?", [(t, i) for i in missing])
                 counts["gone"] = len(missing)
+    match_new(new)
     return counts
+
+
+def match_new(ids):
+    """New listings → the CRM matcher (backend app.services.matching): the same flat is linked to its object, a similar
+    one waits for an operator in «Новые объявления». Never fails the sync."""
+    if not ids:
+        return {}
+    try:
+        from app.db import SessionLocal
+        from app.services import matching
+        with SessionLocal() as s:
+            res = matching.process(s, ids)
+        if res.get("same") or res.get("similar"):
+            print("matched new listings:", res)
+        return res
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("matching %d new listings failed", len(ids))
+        return {"error": len(ids)}
 
 
 def stats():
