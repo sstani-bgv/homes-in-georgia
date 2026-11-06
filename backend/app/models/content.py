@@ -76,6 +76,7 @@ class ChannelPost(Base):
     link = Column(Text)
     raw = Column(Text)
     status = Column(Text, nullable=False, server_default="active")
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"), index=True)  # our object, if matched
 
 
 class Job(Base):

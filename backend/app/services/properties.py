@@ -4,18 +4,20 @@ import math
 import os
 import re
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import update as update_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import settings as env
-from app.models import STAFF, Deal, Event, Listing, Owner, Property, PropertyMedia, User
+from app.models import (STAFF, ChannelPost, Deal, Event, Listing, Owner, Property, PropertyListing, PropertyMedia,
+                        PropertyPublication, User)
 from app.services import jobs
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
@@ -234,6 +236,7 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
         listing = get_or_404(db, Listing, listing_id, "listing", lock=True)
         existing = db.scalar(select(Property).where(Property.listing_id == listing_id).with_for_update())
         if existing:
+            link_listing(db, existing, listing)
             if existing.agent_id == agent.id and existing.status != "archived":
                 return existing
             if existing.agent_id and existing.status != "archived":
@@ -258,9 +261,31 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
     except IntegrityError:
         db.rollback()
         raise DomainError("taken_by_other", "object already taken by another agent")
+    if listing_id:
+        link_listing(db, p, listing)
     log_event(db, "property", p.id, "taken", agent, listing_id=listing_id)
     db.commit()
     return p
+
+
+def _ts(s: str | None) -> datetime | None:
+    try:
+        return aware(datetime.fromisoformat(s)) if s else None
+    except ValueError:
+        return None
+
+
+def link_listing(db: Session, p: Property, listing: Listing) -> PropertyListing:
+    """Attach an outside ad to the object (idempotent; one ad belongs to one object). No commit."""
+    link = db.scalar(select(PropertyListing).where(PropertyListing.listing_id == listing.id))
+    if link is None:
+        urls = jload(listing.urls, []) or []
+        link = PropertyListing(property_id=p.id, listing_id=listing.id, source=source_type_of(listing),
+                               url=urls[0] if urls else None)
+        db.add(link)
+    link.first_seen_at, link.last_seen_at = _ts(listing.first_seen) or link.first_seen_at, _ts(listing.last_seen)
+    db.flush()
+    return link
 
 
 def _apply(p: Property, data: dict):
@@ -622,6 +647,23 @@ def post_text(db: Session, p: Property) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def record_publication(db: Session, p: Property, channel: str, url: str | None, message_id: str | None) -> PropertyPublication:
+    """One row per post: the same post (by message id or link) reported again updates it, a new post adds a row.
+    Links a matching agency channel post (channel_posts) to the object. No commit."""
+    q = select(PropertyPublication).where(PropertyPublication.property_id == p.id, PropertyPublication.channel == channel)
+    keys = [c for c in ((PropertyPublication.message_id, message_id), (PropertyPublication.url, url)) if c[1]]
+    pub = db.scalar(q.where(or_(*(col == v for col, v in keys)))) if keys else None
+    if pub is None:
+        pub = PropertyPublication(property_id=p.id, channel=channel)
+        db.add(pub)
+    pub.status, pub.removed_at, pub.published_at = "published", None, p.published_at or now()
+    pub.url, pub.message_id = url or pub.url, message_id or pub.message_id
+    if channel == "tg" and pub.url:
+        db.execute(update_(ChannelPost).where(ChannelPost.link == pub.url).values(property_id=p.id))
+    db.flush()
+    return pub
+
+
 def publish(db: Session, pid: int, actor: User) -> Property:
     p = _prop(db, pid, lock=True)
     if actor.role not in STAFF:
@@ -632,6 +674,8 @@ def publish(db: Session, pid: int, actor: User) -> Property:
     if ref:
         p.post_message_id, p.post_url = str(ref[0]), ref[1]
     p.published_at = now()
+    if ref:
+        record_publication(db, p, "tg", p.post_url, p.post_message_id)
     _status(db, p, "published", actor, post_url=p.post_url)
     db.commit()
     _notify("property_published", p)
@@ -650,6 +694,8 @@ def published_by_generator(db: Session, pid: int, actor: User, post_url: str | N
         log_event(db, "property", p.id, "approved", actor, via="post_generator")
     p.post_url, p.post_message_id = post_url or p.post_url, message_id or p.post_message_id
     p.published_at = now()
+    if post_url or message_id:
+        record_publication(db, p, "tg", post_url, message_id)
     _status(db, p, "published", actor, post_url=p.post_url)
     db.commit()
     _notify("property_published", p)
@@ -775,12 +821,40 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
         d["post_text"] = post_text(db, p)
+        d.update(card(db, p, user))
     else:
         k = ("media_count", p.id)
         if k not in cache:
             cache[k] = db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id))
         d["media_count"] = cache[k]
     return d
+
+
+def card(db: Session, p: Property, user: User) -> dict:
+    """Full object card extras: our publications, the object's ads on other sites, its deals."""
+    pubs = db.scalars(select(PropertyPublication).where(PropertyPublication.property_id == p.id)
+                      .order_by(PropertyPublication.published_at.desc().nullslast(), PropertyPublication.id.desc()))
+    iso = lambda v: v.isoformat() if v else None  # noqa: E731
+    contacts = can_see_owner(p, user)  # ad links lead to the owner's phone: same rule as the owner block
+    ads = []
+    for link, l in db.execute(select(PropertyListing, Listing).join(Listing, Listing.id == PropertyListing.listing_id)
+                              .where(PropertyListing.property_id == p.id).order_by(PropertyListing.id)):
+        ads.append({"listing_id": l.id, "source": link.source or source_type_of(l), "status": l.status,
+                    "url": (link.url or (jload(l.urls, []) or [None])[0]) if contacts else None,
+                    "price_usd": l.price_usd, "first_seen": iso(link.first_seen_at) or l.first_seen,
+                    "last_seen": iso(link.last_seen_at) or l.last_seen, "origin": l.id == p.listing_id})
+    deals = []
+    if contacts:
+        names = {}
+        for dl in db.scalars(select(Deal).where(Deal.property_id == p.id).order_by(Deal.id.desc())):
+            if dl.agent_id and dl.agent_id not in names:
+                names[dl.agent_id] = db.scalar(select(User.name).where(User.id == dl.agent_id))
+            deals.append({"id": dl.id, "status": dl.status, "deal_type": dl.deal_type,
+                          "price": float(dl.price) if dl.price is not None else None, "agent": names.get(dl.agent_id),
+                          "rent_from": iso(dl.rent_from), "rent_to": iso(dl.rent_to), "created_at": iso(dl.created_at)})
+    return {"publications": [{"id": x.id, "channel": x.channel, "status": x.status, "url": x.url, "message_id": x.message_id,
+                              "published_at": iso(x.published_at), "removed_at": iso(x.removed_at)} for x in pubs],
+            "listings": ads, "deals": deals}
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,

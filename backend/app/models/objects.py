@@ -5,6 +5,9 @@ from app.db import Base
 
 PROPERTY_STATUSES = ("new", "taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled",
                      "media_uploaded", "review", "returned", "published", "rented", "archived")
+# where we publish an object; plain strings so the site / IG / FB join later without a migration
+PUBLICATION_CHANNELS = ("tg",)
+PUBLICATION_STATUSES = ("draft", "published", "removed")
 
 
 class Owner(Base):
@@ -73,6 +76,33 @@ class PropertyMedia(Base):
     room = Column(Text)
     position = Column(Integer, nullable=False, server_default=text("0"))
     uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PropertyListing(Base):
+    """An outside ad (ss, myhome, fb, old TG post) of this object. Property.listing_id is the origin one."""
+    __tablename__ = "property_listings"
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    listing_id = Column(Text, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False, unique=True)
+    source = Column(Text)
+    url = Column(Text)
+    first_seen_at = Column(DateTime(timezone=True))
+    last_seen_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PropertyPublication(Base):
+    """Our post of this object in a channel (PUBLICATION_CHANNELS)."""
+    __tablename__ = "property_publications"
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel = Column(Text, nullable=False, server_default="tg")
+    status = Column(Text, nullable=False, server_default="published")
+    url = Column(Text)
+    message_id = Column(Text)
+    published_at = Column(DateTime(timezone=True))
+    removed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

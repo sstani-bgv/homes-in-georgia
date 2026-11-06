@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChannelFeed } from '../features/properties/ChannelFeed';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus } from 'lucide-react';
 import { api } from '../api';
@@ -14,7 +13,7 @@ import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { DISTRICTS } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 
-type ObjTab = 'new' | 'board' | 'mine' | 'all' | 'channel';
+type ObjTab = 'new' | 'board' | 'mine' | 'all' | 'archive';
 
 function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [f, setF] = useState({ address: '', district: '', price: '', bedrooms: '', source_url: '' });
@@ -50,13 +49,13 @@ export function ObjectsPage() {
     <>
       <PageHead title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'Доска' }, { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База' }, { value: 'channel', label: 'Публикации в канале' },
+        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'В работе' }, { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
       ]} />
       {tab === 'new' && <NewListings />}
       {tab === 'board' && <PropertyBoard />}
       {tab === 'mine' && <PropertyList mine />}
-      {tab === 'all' && <PropertyList />}
-      {tab === 'channel' && <ChannelFeed />}
+      {tab === 'all' && <PropertyList key="all" />}
+      {tab === 'archive' && <PropertyList key="archive" archived />}
       <ManualProperty open={manual} onClose={() => setManual(false)} />
     </>
   );

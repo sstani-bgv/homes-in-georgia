@@ -24,7 +24,7 @@ const TABS = [
   { to: '/m/reports', label: 'Отчёты', icon: ClipboardList },
 ];
 const TITLES: [RegExp, string][] = [
-  [/^\/m\/leads\/\d+/, 'Заявка'], [/^\/m\/leads/, 'Заявки'], [/^\/m\/properties\/\d+/, 'Объект'], [/^\/m\/properties/, 'Мои объекты'],
+  [/^\/m\/leads\/\d+/, 'Заявка'], [/^\/m\/leads/, 'Заявки'], [/^\/m\/properties\/\d+/, 'Объект'], [/^\/m\/properties/, 'Объекты'],
   [/^\/m\/new/, 'Новые объявления'], [/^\/m\/deals\/\d+/, 'Сделка'], [/^\/m\/deals\/new/, 'Новая сделка'], [/^\/m\/deal/, 'Сделка'], [/^\/m\/reports/, 'Отчёты'], [/^\/m\/me/, 'Кабинет'], [/^\/m\/contracts/, 'Договор'], [/^\/m\/calendar/, 'Календарь'],
 ];
 
@@ -62,7 +62,15 @@ export function MLeads() {
   );
 }
 export function MLead() { const { id } = useParams(); return <LeadDetail id={Number(id)} compact />; }
-export function MProperties() { return <PropertyList mine base="/m" />; }
+export function MProperties() {
+  const [view, setView] = useState<'mine' | 'all' | 'archive'>('mine');
+  return (
+    <div className="col">
+      <Seg value={view} onChange={setView} options={[{ value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' }]} />
+      <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />
+    </div>
+  );
+}
 export function MProperty() { const { id } = useParams(); return <PropertyDetail id={Number(id)} compact />; }
 export function MNew() { return <NewListings base="/m" />; }
 /** /m/deal and /m/deals/new?lead=<id> (bot link) — also accepts ?lead_id=. */

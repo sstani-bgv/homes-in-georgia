@@ -129,6 +129,13 @@ dup_check TEXT (added|exists — C3 message), review_comment, reviewed_by FK use
 post_url, post_message_id, created_at, updated_at, text_embedding / photo_embedding vector(768) (pgvector, SigLIP,
 HNSW cosine; not ORM-mapped, written by `app/embeddings.py`).
 `property_media`: id, property_id FK, kind (photo|video), path (storage key, `properties/<id>/<uuid>.<ext>`), room TEXT NULL, position INT, uploaded_by, created_at.
+The object is the main entity (one real flat); ads and our posts attach to it (migration 0007):
+`property_listings`: id, property_id FK CASCADE, listing_id FK listings UNIQUE (one ad → one object), source, url,
+first_seen_at, last_seen_at, created_at. properties.listing_id stays the "origin" ad; `services.properties.link_listing`.
+`property_publications`: id, property_id FK CASCADE, channel TEXT (only `tg` now; site/ig/fb later, no migration),
+status (draft|published|removed), url, message_id, published_at, removed_at, created_at. Written by publish /
+published_by_generator (`record_publication`); post_url/post_message_id on properties are kept for compat.
+`channel_posts.property_id` FK NULL: an agency channel post matched to our publication by link (exact only).
 
 Generic history: `events`: id, entity TEXT (property|lead|deal|user|owner), entity_id TEXT, action TEXT,
 actor_id FK users NULL, actor_label TEXT (e.g. 'bot', 'client'), data JSONB, at timestamptz. Every status change
@@ -184,7 +191,7 @@ recruit_id, mentor_id, date DATE, data JSONB (all form fields), created_at. Coun
 
 `ticker_messages`: id, text, status (active|deleted), created_at. `news`: id, date, text, message_id.
 `addresses`: id, district, address, ad_link, is_active. `channel_posts`: id, message_id UNIQUE, date, agent_name,
-district, price, rooms, building, is_exclusive, link, raw TEXT, status (active|rented|archived) (Listings +
+district, price, rooms, building, is_exclusive, link, raw TEXT, status (active|rented|archived), property_id NULL (Listings +
 Active_Listings sheets / channel topic parser).
 
 `jobs` (durable scheduler): id, kind TEXT, ref TEXT, due_at timestamptz, payload JSONB, done_at NULL, attempts INT,

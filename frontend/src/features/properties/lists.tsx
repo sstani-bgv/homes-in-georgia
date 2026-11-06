@@ -169,13 +169,18 @@ export function PropertyBoard() {
   );
 }
 
-export function PropertyList({ mine, base = '' }: { mine?: boolean; base?: string }) {
+const LIVE = (Object.keys(PROPERTY_STATUS) as (keyof typeof PROPERTY_STATUS)[]).filter((s) => s !== 'archived');
+
+/** mine: the agent's own objects; archived: «Архив»; otherwise «База объектов» — every live object, for everyone
+ * (owner contacts stay hidden by the API for other agents' objects). */
+export function PropertyList({ mine, archived, base = '' }: { mine?: boolean; archived?: boolean; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const scope = archived ? 'archive' : mine ? 'mine' : 'all';
   const { data, isLoading, error } = useQuery({
-    queryKey: ['properties', 'list', mine ? 'mine' : 'all', q, status],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status }),
-    placeholderData: (p, prev) => (prev?.queryKey[2] === (mine ? 'mine' : 'all') ? p : undefined), // keep the list while a filter reloads, never across tabs
+    queryKey: ['properties', 'list', scope, q, status],
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status: archived ? 'archived' : status || (mine ? '' : LIVE.join(',')) }),
+    placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const items = itemsOf(data);
   const navigate = useNavigate();
@@ -187,12 +192,14 @@ export function PropertyList({ mine, base = '' }: { mine?: boolean; base?: strin
           <Search size={16} />
           <input className="input" placeholder="Адрес, район, номер" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">Все статусы</option>
-          {Object.entries(PROPERTY_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        {!archived && (
+          <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">Все статусы</option>
+            {(mine ? Object.keys(PROPERTY_STATUS) as typeof LIVE : LIVE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
+          </select>
+        )}
       </div>
-      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Объектов нет" /> : (
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : 'Объектов нет'} /> : (
         <>
           <div className="card hide-mobile">
             <div className="table-wrap">

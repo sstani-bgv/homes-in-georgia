@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import ChannelPost, Deal, News, Owner, Report, User
+from app.models import ChannelPost, Deal, News, Owner, PropertyPublication, Report, User
 from app.services import settings as settings_svc
 from app.services.common import TZ, jload, log_event, now
 from app.services.dedup import address_match, norm_address
@@ -265,6 +265,9 @@ def handle_listing(db: Session, msg: dict, source: str) -> dict | None:
         p.status = "rented"
     elif existing is None:
         p.status = "active"
+    if p.property_id is None:  # our own publication of a CRM object coming back as a channel post
+        p.property_id = db.scalar(select(PropertyPublication.property_id).where(
+            PropertyPublication.channel == "tg", PropertyPublication.url == p.link).limit(1))
     db.add(p)
     db.commit()
     return {"post": p.id, "rented": rented_refs}

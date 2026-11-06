@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ChannelPost, ListingsStats,
+  Settings, Source, TickerMessage, User, ListingsStats,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -134,8 +134,6 @@ export const api = {
     remove: (id: number) => http.del<unknown>(`/ticker/${id}`),
   },
   news: () => http.get<L<NewsItem>>('/news'),
-  channelPosts: (q?: { hashtag?: string; district?: string; status?: string; q?: string; agent_id?: number; source?: string; rooms?: string; exclusive?: boolean; limit?: number; offset?: number }) =>
-    http.get<L<ChannelPost>>('/channel-posts', { limit: 60, ...q }),
 
   settings: {
     get: () => http.get<Settings>('/settings'),

@@ -1,15 +1,19 @@
-// Property page: stepper (C2–C4), operator review (B7a), publish (B7b), history. Used by /objects/:id and /m/properties/:id.
+// Property page: stepper (C2–C4), operator review (B7a), publish (B7b), and the full object card: gallery, parameters,
+// owner, where it is published, its ads on other sites, deals, history. Used by /objects/:id and /m/properties/:id.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Camera, CheckCircle2, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Archive, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
-import type { Property } from '../../api/types';
+import type { Media, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { DealStatusBadge } from '../../pages/Deals';
 
 export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Ванная', 'Балкон', 'Вид из окна', 'Подъезд'];
 const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Фото', 'Проверка', 'Публикация'];
@@ -219,19 +223,118 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   );
 }
 
-function MediaGrid({ p, onDelete }: { p: Property; onDelete?: (id: number) => void }) {
-  const media = p.media || [];
+type Shot = Pick<Media, 'kind' | 'room'> & { id: number | string; src: string };
+const shotsOf = (p: Property): Shot[] => (p.media || []).map((m) => ({ id: m.id, kind: m.kind, room: m.room, src: m.url || m.path }));
+
+function Lightbox({ items, index, onIndex, onClose }: { items: Shot[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
+  const go = (d: number) => onIndex((index + d + items.length) % items.length);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  });
+  const m = items[index];
+  return createPortal(
+    <>
+      <div className="overlay" onClick={onClose} />
+      <div className="lightbox" role="dialog" aria-modal="true" onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()}>
+          {m.kind === 'video' ? <video key={m.src} src={mediaUrl(m.src)} controls autoPlay /> : <img src={mediaUrl(m.src)} alt={m.room || ''} />}
+        </div>
+        <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
+          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(-1)} aria-label="Назад"><ChevronLeft size={18} /></Button>}
+          <span className="badge">{index + 1} / {items.length}{m.room ? ` · ${m.room}` : ''}</span>
+          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(1)} aria-label="Вперёд"><ChevronRight size={18} /></Button>}
+          <Button variant="secondary" className="icon-btn" onClick={onClose} aria-label="Закрыть"><X size={18} /></Button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+function MediaGrid({ p, items, onDelete }: { p?: Property; items?: Shot[]; onDelete?: (id: number) => void }) {
+  const media = items || (p ? shotsOf(p) : []);
+  const [open, setOpen] = useState<number | null>(null);
   if (!media.length) return <div className="muted" style={{ fontSize: 13 }}>Файлов пока нет</div>;
   return (
     <div className="photo-strip">
-      {media.map((m) => (
-        <div className="ph" key={m.id}>
-          {m.kind === 'video' ? <video src={mediaUrl(m.url || m.path)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={mediaUrl(m.url || m.path)} alt={m.room || ''} loading="lazy" />}
+      {open !== null && <Lightbox items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+      {media.map((m, i) => (
+        <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
+          {m.kind === 'video' ? <video src={mediaUrl(m.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={mediaUrl(m.src)} alt={m.room || ''} loading="lazy" />}
           {m.room && <span className="room badge badge-blue">{m.room}</span>}
-          {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={() => onDelete(m.id)} aria-label="Удалить"><Trash2 size={14} /></button>}
+          {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
         </div>
       ))}
     </div>
+  );
+}
+
+/** Own photos/videos, or the origin ad's photos until the shoot. */
+function Gallery({ p }: { p: Property }) {
+  const own = shotsOf(p);
+  const fromAd = (p.listing?.photos || []).map((src, i): Shot => ({ id: `l${i}`, kind: 'photo', src }));
+  return (
+    <Card label="Фото и видео" title={own.length ? `Файлы объекта · ${own.length}` : fromAd.length ? 'Фото из объявления' : 'Галерея'}>
+      <MediaGrid items={own.length ? own : fromAd} />
+    </Card>
+  );
+}
+
+const PUB_STATUS: Record<string, [string, 'ok' | 'grey' | 'warn']> = { published: ['опубликован', 'ok'], removed: ['снят', 'grey'], draft: ['черновик', 'warn'] };
+
+/** «Где опубликован»: our posts per channel. Only the TG channel exists for now; site / IG / FB rows come later. */
+function Publications({ p }: { p: Property }) {
+  const pubs = (p.publications || []).filter((x) => x.channel === 'tg');
+  return (
+    <Card label="Каналы" title="Где опубликован">
+      {!pubs.length ? <div className="muted" style={{ fontSize: 13 }}>Пока нигде не опубликован</div> : pubs.map((x) => (
+        <div className="list-row" key={x.id}>
+          <div className="grow">
+            <div style={{ fontWeight: 700 }}>Telegram-канал</div>
+            <div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(x.status === 'removed' ? x.removed_at : x.published_at)}</div>
+          </div>
+          <Badge tone={PUB_STATUS[x.status]?.[1] || 'grey'}>{PUB_STATUS[x.status]?.[0] || x.status}</Badge>
+          {x.url && <a className="btn btn-secondary btn-sm" href={x.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />Пост</a>}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/** «Объявления на других сайтах»: the outside ads of this flat. Links only for staff and the object's agent. */
+function Ads({ p }: { p: Property }) {
+  const ads = p.listings || [];
+  return (
+    <Card label="Дубли" title="Объявления на других сайтах">
+      {!ads.length ? <div className="muted" style={{ fontSize: 13 }}>Других объявлений не найдено</div> : ads.map((a) => (
+        <div className="list-row" key={a.listing_id}>
+          <div className="grow">
+            <div className="row gap-sm" style={{ fontWeight: 700 }}>{SOURCE_LABEL[a.source || ''] || a.source || '—'}{a.origin && <Badge tone="grey">первоисточник</Badge>}</div>
+            <div className="muted" style={{ fontSize: 12 }}>{[money(a.price_usd), a.first_seen ? `с ${fmtDate(a.first_seen)}` : null].filter(Boolean).join(' · ')}</div>
+          </div>
+          {a.url ? <a className="btn btn-secondary btn-sm" href={a.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />Открыть</a> : null}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+function Deals({ p, compact }: { p: Property; compact?: boolean }) {
+  if (!p.deals?.length) return null;
+  return (
+    <Card label="Сделки" title={`Сделки по объекту · ${p.deals.length}`}>
+      {p.deals.map((d) => (
+        <Link className="list-row" key={d.id} to={compact ? `/m/deals/${d.id}` : `/deals/${d.id}`} style={{ color: 'inherit' }}>
+          <div className="grow">
+            <div style={{ fontWeight: 700 }}>Сделка #{d.id} · {money(d.price)}</div>
+            <div className="muted" style={{ fontSize: 12 }}>{[d.agent, d.rent_from ? `${fmtDate(d.rent_from)} – ${fmtDate(d.rent_to)}` : fmtDate(d.created_at)].filter(Boolean).join(' · ')}</div>
+          </div>
+          <DealStatusBadge s={d.status} />
+        </Link>
+      ))}
+    </Card>
   );
 }
 
@@ -313,7 +416,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   if (['taken', 'call_failed'].includes(p.status)) action = canWork ? <CallStep p={p} /> : null;
   else if (p.status === 'owner_confirmed') action = canWork ? <ShootStep p={p} /> : null;
   else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <MediaStep p={p} canEdit={canWork} />;
-  else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="col"><div className="alert alert-info">На проверке у оператора · обычно до 1 часа</div><MediaGrid p={p} /></div>;
+  else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">На проверке у оператора · обычно до 1 часа</div>;
   else if (p.status === 'agent_marked') action = <div className="alert alert-info">Ответил агент · объект остаётся в базе с пометкой «агент»</div>;
   else if (['published', 'rented'].includes(p.status)) action = (
     <div className="col">
@@ -322,9 +425,11 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
         {p.post_url && <a className="btn" href={p.post_url} target="_blank" rel="noreferrer"><ExternalLink size={16} />Пост в канале</a>}
         {isStaff && <a className="btn btn-secondary" href={generator} target="_blank" rel="noreferrer"><Wand2 size={16} />Открыть генератор постов</a>}
       </div>
-      <MediaGrid p={p} />
     </div>
   );
+  // the media / review steps show the files with their own controls
+  const mediaInAction = ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status) || (p.status === 'review' && isStaff);
+  const ownerVisible = !!(p.owner?.phone || p.owner_phone);
 
   return (
     <div className="col gap-lg">
@@ -362,18 +467,36 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               <Button variant="ghost" loading={publish.isPending} onClick={() => publish.mutate()}>Опубликовать без генератора</Button>
             </div>
           )}
+          {!mediaInAction && <Gallery p={p} />}
+          <Publications p={p} />
+          <Ads p={p} />
+          <Deals p={p} compact={compact} />
           {!compact && <Card label="История" title="События объекта"><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>
         <div className="col gap-lg">
-          <Card label="Объект" title="Карточка" actions={canWork ? <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />Править</Button> : undefined}>
+          <Card label="Собственник" title={<>{p.owner?.name || '—'} {p.owner?.is_agent ? <Badge tone="warn">агент</Badge> : null}</>}>
             <KV items={[
-              ['Агент', p.agent?.name || '—'],
-              ['Собственник', <>{p.owner?.name || '—'} {p.owner?.is_agent ? <Badge tone="warn">агент</Badge> : null}</>],
               ['Телефон', <OwnerPhone p={p} />],
+              ['Агент объекта', p.agent?.name || '—'],
+            ]} />
+            {!ownerVisible && p.owner && <div className="muted mt" style={{ fontSize: 12 }}>Контакты видны оператору и агенту объекта</div>}
+          </Card>
+          <Card label="Объект" title="Параметры" actions={canWork ? <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />Править</Button> : undefined}>
+            <KV items={[
+              ['Адрес', p.address || '—'],
+              ['Район', p.district || '—'],
+              ['Цена', money(p.price, p.currency || 'USD')],
+              ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
+              ['Комнат', p.rooms ?? '—'],
+              ['Площадь', p.area ? `${p.area} м²` : '—'],
               ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
               ['Кадастр', p.cadastral_code || '—'],
+              ['Эксклюзив', p.is_exclusive ? 'да' : 'нет'],
+              ['Дубль объекта', p.duplicate_of ? <Link to={compact ? `/m/properties/${p.duplicate_of}` : `/objects/${p.duplicate_of}`}>#{p.duplicate_of}</Link> : '—'],
+              ['Создан', fmtDateTime(p.created_at)],
               ['Взят', fmtDateTime(p.taken_at)],
               ['Съёмка', fmtDateTime(p.shoot_at)],
+              ['Опубликован', fmtDateTime(p.published_at)],
               ['Источник', p.source_url ? <a href={p.source_url} target="_blank" rel="noreferrer">открыть</a> : '—'],
             ]} />
             {p.description && <p className="muted mt" style={{ fontSize: 13 }}>{p.description}</p>}

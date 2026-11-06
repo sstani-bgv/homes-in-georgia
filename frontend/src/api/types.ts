@@ -114,9 +114,19 @@ export interface Property {
   post_url?: string | null;
   media?: Media[];
   photos?: string[];
+  listing?: (Listing & { urls?: string[] }) | null;
+  /** full card only: our posts of the object (channel: 'tg' for now) */
+  publications?: Publication[];
+  /** full card only: the object's ads on other sites; url is null unless you may see the owner contacts */
+  listings?: PropertyAd[];
+  deals?: PropertyDeal[];
   created_at?: string;
   updated_at?: string;
 }
+
+export interface Publication { id: number; channel: string; status: 'draft' | 'published' | 'removed'; url?: string | null; message_id?: string | null; published_at?: string | null; removed_at?: string | null }
+export interface PropertyAd { listing_id: string; source?: string | null; status?: string | null; url?: string | null; price_usd?: number | null; first_seen?: string | null; last_seen?: string | null; origin: boolean }
+export interface PropertyDeal { id: number; status: string; deal_type?: string | null; price?: number | null; agent?: string | null; rent_from?: string | null; rent_to?: string | null; created_at?: string | null }
 
 export interface EventItem {
   id: number | string;
@@ -379,12 +389,6 @@ export type Settings = Record<string, unknown>;
 
 export interface AppConfig { bot_username?: string; public_url?: string; mock?: boolean }
 
-/** GET /api/channel-posts — agency listings parsed from the channel / work-group topic. */
-export interface ChannelPost {
-  id: number; message_id?: number | null; source?: string | null; date?: string | null; agent_name?: string | null; agent_id?: number | null;
-  district?: string | null; price?: number | null; rooms?: string | null; building?: string | null; is_exclusive?: boolean | null;
-  link?: string | null; status?: string | null; raw?: string | null;
-}
 export interface WeeklyListings { total: number; week_start: string; by_agent: Record<string, number>; top_agents: { name: string; count: number }[] }
 /** GET /api/analytics/listings */
 export interface ListingsStats {
