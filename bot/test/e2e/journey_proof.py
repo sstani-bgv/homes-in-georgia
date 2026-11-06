@@ -51,7 +51,7 @@ GEORGIY = {"id": 5002, "name": "Георгий", "username": "georgiy_agent"}
 JOHN = {"id": 1002, "name": "John", "username": "john_client", "lang": "en"}
 GROUP = {"id": -100500, "title": "Операторы"}
 WORK = {"id": -100600, "title": "Рабочая группа"}
-PUBLISH = {"id": -1007770001, "originals": 2, "owner": 22, "album": 207}  # the generator's channel and its topics (fake)
+PUBLISH = {"id": -1007770001, "originals": 2, "owner": 22, "album": 207}  # PUBLISH_CHAT_ID and its topics (fake)
 
 # journey listings (the parser's output format, bot/listings.json); photos are real scraped flats, relative to bot/
 PH = lambda n: [f"raw/img/mh{n}_{i}.jpg" for i in range(3)]  # noqa: E731
@@ -565,7 +565,7 @@ def funnel1():
         s.shot(pg, "C3_duplicate_exists.png")
         ctx.close()
 
-    with Step("C4", "Фото и видео загружены в Mini App по комнатам, чек-лист, «Фото и видео сняты · на проверку» → оператору") as s:
+    with Step("C4", "Фото и видео загружены в Mini App по комнатам, чек-лист, «Готово — отправить оператору» → оператору") as s:
         ctx = miniapp(GEORGIY)
         pg = open_page(ctx, f"/m/properties/{S['p1']}", "Загрузить фото и видео", s)
         for room, f in (("Гостиная", "img/mh21319607_0.jpg"), ("Гостиная", "video/ss37055835.mp4"), ("Кухня", "img/mh21319607_1.jpg"),
@@ -578,9 +578,10 @@ def funnel1():
         pg.wait_for_timeout(600)
         s.shot(pg, "C4_media_checklist.png")
         m = FAKE.mark()
-        click(pg, "Фото и видео сняты · на проверку")
-        toast(pg, "Отправлено оператору на проверку")
-        pg.get_by_text("На проверке у оператора").first.wait_for()
+        pg.on("dialog", lambda d: d.accept())
+        click(pg, "Готово — отправить оператору")
+        toast(pg, "Отправлено оператору")
+        pg.get_by_text("Отправлено оператору · фото и чек-лист закрыты").first.wait_for()
         s.shot(pg, "C4_submitted.png")
         p = api("georgiy", "GET", f"/properties/{S['p1']}").json()
         s.eq(p["status"], "review", "статус объекта")
@@ -606,72 +607,58 @@ def funnel1():
         s.chat("B7a_returned_agent_bot.png", GEORGIY["id"], since=m)
         ctx.close()
 
-    with Step("B7a", "Агент дозагрузил фото и снова отправил; оператор «Одобрить → генератор постов»: генератор открылся с медиа и полями объекта") as s:
+    with Step("B7a", "Агент дозагрузил фото и нажал «Готово — отправить оператору»; оператор видит объект в очереди «На публикацию», в карточке генератор поста заполнен из объекта") as s:
         ctx = miniapp(GEORGIY)
         pg = open_page(ctx, f"/m/properties/{S['p1']}", "Оператор вернул", s)
         pg.get_by_label("Комната").select_option("Ванная")
         pg.set_input_files("input[type=file]", str(BOT / "raw" / "img" / "mh20361085_1.jpg"))
         pg.wait_for_function("document.querySelectorAll('.photo-strip .ph').length >= 5", timeout=15000)
-        click(pg, "Фото и видео сняты · на проверку")
-        toast(pg, "Отправлено оператору на проверку")
+        pg.on("dialog", lambda d: d.accept())
+        click(pg, "Готово — отправить оператору")
+        toast(pg, "Отправлено оператору")
+        s.ok(pg.get_by_text("фото и чек-лист закрыты").count() > 0 and pg.locator("input[type=file]").count() == 0,
+             "после отправки агент больше не меняет фото и чек-лист")
         ctx.close()
         ctx = desktop("nino")
+        pg = open_page(ctx, "/objects?tab=review", "На публикацию", s)
+        s.ok(pg.get_by_text("Абашидзе 17").count() > 0, "объект в очереди «На публикацию»")
         pg = open_page(ctx, f"/objects/{S['p1']}", "Автопроверки", s)
-        link = pg.get_by_role("link", name="Одобрить → генератор постов")
-        s.eq(link.get_attribute("href"), f"/tools/post-generator?property_id={S['p1']}", "кнопка одобрения ведёт в генератор постов")
-        s.shot(pg, "B7a_review_approve.png")
-        with ctx.expect_page() as new_tab:
-            link.click()
-        gen = new_tab.value
-        s.page = gen
-        alerts = []
-        gen.on("dialog", lambda d: (alerts.append(d.message), d.accept()))
-        gen.wait_for_load_state("networkidle")
-        # prefill from the object: 4 photos + the video from the card, address, price, owner
-        gen.wait_for_function("document.querySelectorAll('#photoGrid > div').length === 5", timeout=30000)
-        s.eq(gen.evaluate("media.map(m => m.type).join(',')"), "photo,photo,photo,photo,video", "медиа объекта загружены в генератор")
-        s.eq(gen.input_value("#priceInput"), "850", "цена из объекта")
-        s.eq(gen.input_value("#ownerPhone"), "+995 591 23 45 67", "телефон собственника из объекта")
-        s.ok("Абашидзе 17" in gen.input_value("#addressInput"), "адрес из объекта")
-        gen.wait_for_timeout(1200)  # the agent tag is picked 800 ms after the team tags load
-        agent_pre = gen.evaluate("[...document.querySelectorAll('#agentTags .tag.selected')].map(t => t.dataset.val).join(',')")
-        district_pre = gen.evaluate("[...document.querySelectorAll('[data-group=district].selected')].map(t => t.dataset.val).join(',')")
-        beds_pre = gen.evaluate("[...document.querySelectorAll('[data-group=beds].selected')].map(t => t.dataset.val).join(',')")
-        s.eq(agent_pre, "#Георгий", "тег агента подставлен генератором сам")
-        s.eq((district_pre, beds_pre), ("#Vake", "#2Bed"), "теги района и спален подставлены из объекта")
-        prev = gen.locator("#postPreview").inner_text()
-        s.ok("#Vake" in prev and "850$ + Deposit 850$" in prev and "#Георгий" in prev, "превью поста заполнено")
-        s.shot(gen, "B7b_generator.png")
+        pg.wait_for_function("document.querySelector('textarea') && document.querySelector('textarea').value.includes('#Vake')", timeout=15000)
+        text = pg.locator("textarea").first.input_value()
+        for part in ("#Vake", "#2Bed #Apartment for #Rent", "850$ + Deposit 850$", "#Price700to900", "#Георгий"):
+            s.ok(part in text, f"текст поста из объекта: «{part}»")
+        s.eq(pg.locator("[role=checkbox][aria-checked=true]").count(), 5, "все 5 файлов объекта в посте")
+        s.shot(pg, "B7b_generator.png")
         S["m_pub"] = FAKE.mark()
-        gen.click("#publishBtnDesktop")
-        gen.wait_for_function("document.getElementById('publishBtnDesktop').textContent.includes('Опубликовано')", timeout=90000)
-        s.ok(not alerts, f"генератор не показал ошибок (alert): {alerts}")
-        s.shot(gen, "B7b_generator_published.png")
+        click(pg, "Опубликовать")
+        toast(pg, "Опубликовано")
+        s.shot(pg, "B7b_generator_published.png")
         p = api("nino", "GET", f"/properties/{S['p1']}").json()
         s.eq(p["status"], "published", "статус объекта")
         S["post_url"] = p.get("post_url") or ""
-        s.ok(re.fullmatch(r"https://t\.me/c/7770001/\d+", S["post_url"]), f"ссылка на пост генератора сохранена: {S['post_url']}")
+        s.ok(re.fullmatch(r"https://t\.me/c/7770001/\d+", S["post_url"]), f"ссылка на пост сохранена: {S['post_url']}")
+        s.ok(any(x["url"] == S["post_url"] for x in p["publications"]), "пост в «Где опубликован»")
         hist = [h.get("action") for h in itemsof(api("nino", "GET", f"/properties/{S['p1']}/history").json())]
         s.ok("approved" in hist, f"в истории объекта «approved»: {hist}")
         ctx.close()
 
-    with Step("B7b", "Генератор опубликовал: оригиналы, альбом с водяным знаком и подписью в формате канала, Owner Information") as s:
+    with Step("B7b", "Опубликовано из карточки: оригиналы, альбом с водяным знаком и подписью в формате канала, Owner Information") as s:
         ch, m = PUBLISH["id"], S["m_pub"]
         calls = [c for c in FAKE.calls(chat=ch, since=m)]
         topic = lambda c: int(c.get("message_thread_id") or 0)  # noqa: E731
         orig = [c for c in calls if topic(c) == PUBLISH["originals"]]
         album = [c for c in calls if topic(c) == PUBLISH["album"]]
         owner = [c for c in calls if topic(c) == PUBLISH["owner"]]
-        s.eq([c["method"] for c in orig], ["sendDocument"] * 4 + ["sendVideo", "sendMessage"], "топик оригиналов: 4 файла + видео + текст")
-        s.eq([c["method"] for c in album], ["sendPhoto"] * 4 + ["sendVideo", "sendMessage"], "топик альбома: 4 фото + видео + текст")
-        s.eq(S["post_url"].rsplit("/", 1)[-1], str(orig[-1]["message_id"]), "post_url = текст в топике оригиналов")
-        cap = album[0].get("caption") or ""
+        s.eq([(c["method"], [x["type"] for x in c["media"]]) for c in orig], [("sendMediaGroup", ["document"] * 5)], "топик оригиналов: 5 файлов документами")
+        s.eq([(c["method"], [x["type"] for x in c["media"]]) for c in album], [("sendMediaGroup", ["photo"] * 4 + ["video"])], "топик альбома: 4 фото + видео")
+        s.eq(S["post_url"].rsplit("/", 1)[-1], str(album[0]["message_id"]), "post_url = альбом")
+        cap = album[0]["media"][0].get("caption") or ""
         for part in ("#Vake", "#2Bed #Apartment for #Rent", "850$ + Deposit 850$", "0% Commission", "#Price700to900",
                      "#Георгий", "APARTMENTS ON MAP"):
             s.ok(part in cap, f"подпись альбома: «{part}»")
-        s.ok("<a href=" in album[-1]["text"] and album[-1].get("parse_mode") == "HTML", "текст поста в HTML со ссылками")
+        s.ok("<a href=" in cap and album[0]["media"][0].get("parse_mode") == "HTML", "подпись в HTML со ссылками")
         from PIL import Image, ImageChops
-        o0, a0 = Image.open(orig[0]["file"]).convert("RGB"), Image.open(album[0]["file"]).convert("RGB")
+        o0, a0 = Image.open(orig[0]["media"][0]["file"]).convert("RGB"), Image.open(album[0]["media"][0]["file"]).convert("RGB")
         diff = ImageChops.difference(o0.resize(a0.size), a0).getbbox()
         s.ok(a0.size == o0.size and diff is not None, f"фото альбома с водяным знаком (отличается от оригинала, {a0.size})")
         side = Image.new("RGB", (a0.width * 2 + 20, a0.height), "white")  # original | watermarked, side by side
@@ -690,7 +677,7 @@ def funnel1():
         s.chat("B7b_owner_info.png", ch, since=m, thread=PUBLISH["owner"], title="Канал агентства · топик собственников",
                subtitle=f"топик {PUBLISH['owner']}")
 
-    with Step("C5", "Агенту пришло «опубликован» со ссылкой на пост генератора; в Mini App объект «Опубликовано»") as s:
+    with Step("C5", "Агенту пришло «опубликован» со ссылкой на пост; в Mini App объект «Опубликовано»") as s:
         msg = with_text(GEORGIY["id"], f"Объект #{S['p1']} опубликован", S["m_pub"])
         s.eq(btn_url(msg, "📢 Пост в канале", "url"), S["post_url"], "кнопка «📢 Пост в канале»")
         s.chat("C5_published_agent_bot.png", GEORGIY["id"], since=S["m_pub"])

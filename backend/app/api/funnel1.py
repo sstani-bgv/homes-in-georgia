@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
-from app.models import STAFF, Lead, Listing, Owner, Property, User
+from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
 from app.services import matching
 from app.services import properties as P
 from app.services.leads import ACTIVE
@@ -245,20 +245,25 @@ def properties_review(pid: int, body: ReviewIn, db: Session = Depends(get_db, sc
     return P.out(db, P.review(db, pid, user, body.approve, body.comment), user, full=True)
 
 
+@router.get("/properties/{pid}/post")
+def properties_post(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+    """The card's post generator: the channel caption built from the object, its hashtags, the channels to post to."""
+    text = P.post_text(db, get_or_404(db, Property, pid, "property"))
+    return {"text": text, "hashtags": P.hashtags(text), "channels": list(PUBLICATION_CHANNELS)}
+
+
+class PublishIn(BaseModel):
+    text: str | None = None
+    media_ids: list[int] | None = None  # picked files in album order; None = all
+    channel: str = "tg"
+    comment: str | None = None
+
+
 @router.post("/properties/{pid}/publish")
-def properties_publish(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
-    return P.out(db, P.publish(db, pid, user), user, full=True)
-
-
-class GeneratorPostIn(BaseModel):
-    post_url: str | None = None
-    message_id: str | None = None
-
-
-@router.post("/properties/{pid}/published")
-def properties_published(pid: int, body: GeneratorPostIn, db: Session = Depends(get_db, scope="function"),
-                         user: User = Depends(require_roles(*STAFF_ROLES))):
-    return P.out(db, P.published_by_generator(db, pid, user, body.post_url, body.message_id), user, full=True)
+def properties_publish(pid: int, body: PublishIn | None = None, db: Session = Depends(get_db, scope="function"),
+                       user: User = Depends(require_roles(*STAFF_ROLES))):
+    b = body or PublishIn()
+    return P.out(db, P.publish(db, pid, user, b.text, b.media_ids, b.channel, b.comment), user, full=True)
 
 
 @router.get("/properties/{pid}/elsewhere")

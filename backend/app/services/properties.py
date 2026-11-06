@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import settings as env
-from app.models import (STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property, PropertyListing,
-                        PropertyMedia, PropertyPublication, User)
+from app.models import (PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
+                        PropertyListing, PropertyMedia, PropertyPublication, User)
 from app.services import jobs
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
@@ -33,6 +33,9 @@ EDITABLE = ("address", "district", "cadastral_code", "price", "currency", "bedro
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif"}
 MAX_UPLOAD = 300 * 1024 * 1024
+# the agent's media and checklist are open until «Готово — отправить оператору»; after that only staff change them,
+# unless the operator returns the object (returned)
+AGENT_MEDIA_STATUSES = ("owner_confirmed", "shoot_scheduled", "media_uploaded", "returned")
 CHECKLIST_ROOMS = ("living_room", "kitchen", "bedroom", "bathroom", "balcony", "view", "entrance", "building")
 
 
@@ -51,6 +54,12 @@ def _require_owner(p: Property, actor: User):
     if actor.role in STAFF or p.agent_id == actor.id:
         return
     raise forbidden("object is taken by another agent")
+
+
+def _require_media_editable(p: Property, actor: User):
+    _require_owner(p, actor)
+    if actor.role not in STAFF and p.status not in AGENT_MEDIA_STATUSES:
+        raise DomainError("submitted", "the object is with the operator: media and checklist are read-only", 409)
 
 
 def _require_status(p: Property, *allowed: str):
@@ -557,8 +566,8 @@ def media_root() -> Path:
 
 def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: str | None, actor: User) -> list[PropertyMedia]:
     p = _prop(db, pid, lock=True)
-    _require_owner(p, actor)
-    _require_status(p, "owner_confirmed", "shoot_scheduled", "media_uploaded", "returned", "review", "published")
+    _require_media_editable(p, actor)
+    _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
     pos = db.scalar(select(func.coalesce(func.max(PropertyMedia.position), -1)).where(PropertyMedia.property_id == p.id))
     out = []
     for name, content in files:
@@ -584,7 +593,7 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
 
 def delete_media(db: Session, pid: int, mid: int, actor: User) -> None:
     p = _prop(db, pid)
-    _require_owner(p, actor)
+    _require_media_editable(p, actor)
     m = db.get(PropertyMedia, mid)
     if not m or m.property_id != p.id:
         raise DomainError("not_found", "media not found")
@@ -603,7 +612,7 @@ def media(db: Session, pid: int) -> list[PropertyMedia]:
 
 def set_checklist(db: Session, pid: int, checklist: dict, actor: User) -> Property:
     p = _prop(db, pid)
-    _require_owner(p, actor)
+    _require_media_editable(p, actor)
     p.checklist = {str(k): bool(v) for k, v in (checklist or {}).items()}
     log_event(db, "property", p.id, "checklist", actor, checklist=p.checklist)
     db.commit()
@@ -629,19 +638,15 @@ def review(db: Session, pid: int, operator: User, approve: bool, comment: str | 
     p = _prop(db, pid, lock=True)
     _require_status(p, "review")
     if approve:
-        _require_no_exclusive_conflict(db, p)
+        return publish(db, p.id, operator, comment=comment)
     p.review_comment, p.reviewed_by, p.reviewed_at = comment, operator.id, now()
-    if approve:
-        log_event(db, "property", p.id, "approved", operator, comment=comment)
-        db.commit()
-        return publish(db, p.id, operator)
     _status(db, p, "returned", operator, comment=comment)
     db.commit()
     _notify("property_returned", p)
     return p
 
 
-# CRM district -> the channel's hashtag (static/tools/post-generator.html, buildRentPost)
+# CRM district -> the channel's hashtag (the agency's old HTML post generator, buildRentPost)
 DISTRICT_TAG = {"Ваке": "#Vake", "Ваке-Багеби": "#Vake", "Сабуртало": "#Saburtalo", "Мтацминда": "#Mtatsminda", "Вере": "#Vera",
                 "Ортачала": "#Ortachala", "Дидубе": "#Didube", "Чугурети": "#Chugureti", "Исани": "#Isani", "Самгори": "#Samgori",
                 "Глдани": "#Gldani", "Надзаладеви": "#Nadzaladevi", "Дигоми": "#Digomi", "Сололаки": "#Sololaki",
@@ -700,40 +705,41 @@ def record_publication(db: Session, p: Property, channel: str, url: str | None, 
     return pub
 
 
-def publish(db: Session, pid: int, actor: User) -> Property:
+def hashtags(text: str) -> list[str]:
+    return list(dict.fromkeys(re.findall(r"#\w+", text or "")))
+
+
+def publish(db: Session, pid: int, actor: User, text: str | None = None, media_ids: list[int] | None = None,
+            channel: str = "tg", comment: str | None = None) -> Property:
+    """B7: the operator publishes from the object card: the caption as edited (default post_text), the picked media in
+    the picked order (default all), to a channel of PUBLICATION_CHANNELS. Publishing an object in review approves it.
+    Without BOT_TOKEN in dev the post is a dry run (recorded without a link); a Telegram failure leaves it unpublished."""
     p = _prop(db, pid, lock=True)
     if actor.role not in STAFF:
         raise forbidden("only operators publish")
+    if channel not in PUBLICATION_CHANNELS:
+        raise DomainError("bad_channel", f"unknown channel {channel}")
     _require_status(p, "review", "published")
     _require_no_exclusive_conflict(db, p)
-    p.post_text = post_text(db, p)  # transient attribute read by notify.publish_post
+    if media_ids is not None:
+        own = {m.id for m in media(db, p.id)}
+        if not set(media_ids) <= own:
+            raise DomainError("not_found", "media not found")
+    p.post_text = (text or "").strip() or post_text(db, p)  # transient attributes read by notify.publish_post
+    p.post_media_ids = media_ids
     ref = _notify("publish_post", p)
+    dry_run = ref is None and not env.BOT_TOKEN and env.APP_ENV == "dev"
+    if ref is None and not dry_run:
+        raise DomainError("publish_failed", "Telegram did not accept the post", 502)
     if ref:
         p.post_message_id, p.post_url = str(ref[0]), ref[1]
     p.published_at = now()
-    if ref:
-        record_publication(db, p, "tg", p.post_url, p.post_message_id)
-    _status(db, p, "published", actor, post_url=p.post_url)
-    db.commit()
-    _notify("property_published", p)
-    return p
-
-
-def published_by_generator(db: Session, pid: int, actor: User, post_url: str | None, message_id: str | None) -> Property:
-    """The agency post generator (/tools/post-generator?property_id=) published the object itself (watermark, topics,
-    owner info) and reports the post back: approve if still in review, save the link, notify the agent."""
-    p = _prop(db, pid, lock=True)
-    if actor.role not in STAFF:
-        raise forbidden("only operators publish")
-    _require_status(p, "review", "published")
     if p.status == "review":
-        p.reviewed_by, p.reviewed_at = actor.id, now()
-        log_event(db, "property", p.id, "approved", actor, via="post_generator")
-    p.post_url, p.post_message_id = post_url or p.post_url, message_id or p.post_message_id
-    p.published_at = now()
-    if post_url or message_id:
-        record_publication(db, p, "tg", post_url, message_id)
-    _status(db, p, "published", actor, post_url=p.post_url)
+        p.review_comment, p.reviewed_by, p.reviewed_at = comment, actor.id, now()
+        log_event(db, "property", p.id, "approved", actor, comment=comment)
+    record_publication(db, p, channel, p.post_url if ref else None, p.post_message_id if ref else None)
+    _status(db, p, "published", actor, post_url=p.post_url if ref else None, channel=channel,
+            **({"dry_run": True} if dry_run else {}))
     db.commit()
     _notify("property_published", p)
     return p
@@ -908,7 +914,6 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                       for m in media(db, p.id)]
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
-        d["post_text"] = post_text(db, p)
         d.update(card(db, p, user))
     else:
         k = ("media_count", p.id)

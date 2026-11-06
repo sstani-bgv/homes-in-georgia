@@ -203,15 +203,15 @@ export function PropertyBoard() {
 
 const LIVE = (Object.keys(PROPERTY_STATUS) as (keyof typeof PROPERTY_STATUS)[]).filter((s) => s !== 'archived');
 
-/** mine: the agent's own objects; archived: «Архив»; otherwise «База объектов» — every live object, for everyone
- * (owner contacts stay hidden by the API for other agents' objects). */
-export function PropertyList({ mine, archived, base = '' }: { mine?: boolean; archived?: boolean; base?: string }) {
+/** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
+ * otherwise «База объектов» — every live object, for everyone (owner contacts stay hidden by the API for other agents' objects). */
+export function PropertyList({ mine, archived, status: only, base = '' }: { mine?: boolean; archived?: boolean; status?: string; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const scope = archived ? 'archive' : mine ? 'mine' : 'all';
+  const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
   const { data, isLoading, error } = useQuery({
     queryKey: ['properties', 'list', scope, q, status],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status: archived ? 'archived' : status || (mine ? '' : LIVE.join(',')) }),
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : LIVE.join(',')) }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const items = itemsOf(data);
@@ -224,14 +224,14 @@ export function PropertyList({ mine, archived, base = '' }: { mine?: boolean; ar
           <Search size={16} />
           <input className="input" placeholder="Адрес, район, номер" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {!archived && (
+        {!archived && !only && (
           <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Все статусы</option>
             {(mine ? Object.keys(PROPERTY_STATUS) as typeof LIVE : LIVE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
       </div>
-      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : 'Объектов нет'} /> : (
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : (
         <>
           <div className="card hide-mobile">
             <div className="table-wrap">

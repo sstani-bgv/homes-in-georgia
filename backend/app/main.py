@@ -1,6 +1,5 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -17,7 +16,6 @@ from app.services import users
 from app.services.errors import DomainError
 
 log = logging.getLogger("app")
-STATIC = Path(__file__).parent / "static"
 DIST = REPO_ROOT / "frontend" / "dist"
 
 
@@ -65,11 +63,6 @@ def health():
         return {"ok": True, "db": True}
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "db": False}, status_code=503)
-
-
-@app.get("/tools/post-generator", include_in_schema=False)
-def post_generator():
-    return FileResponse(STATIC / "tools" / "post-generator.html", media_type="text/html")
 
 
 @app.get("/map", include_in_schema=False)

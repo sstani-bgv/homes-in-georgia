@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere,
+  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -67,7 +67,8 @@ export const api = {
     checklist: (id: number, checklist: Record<string, boolean>) => http.post<Property>(`/properties/${id}/checklist`, { checklist }),
     submit: (id: number) => http.post<Property>(`/properties/${id}/submit`),
     review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
-    publish: (id: number) => http.post<Property>(`/properties/${id}/publish`),
+    post: (id: number) => http.get<PostDraft>(`/properties/${id}/post`),
+    publish: (id: number, b?: { text?: string; media_ids?: number[]; channel?: string; comment?: string }) => then(http.post<Property>(`/properties/${id}/publish`, b), normProperty),
     archive: (id: number) => http.post<Property>(`/properties/${id}/archive`),
     elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
     adRemoved: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/removed`), normProperty),

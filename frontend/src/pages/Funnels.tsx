@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus } from 'lucide-react';
 import { api } from '../api';
+import { itemsOf } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Select, Tabs } from '../components/ui';
@@ -13,7 +14,7 @@ import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { DISTRICTS } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 
-type ObjTab = 'new' | 'board' | 'mine' | 'all' | 'archive';
+type ObjTab = 'new' | 'board' | 'review' | 'mine' | 'all' | 'archive';
 
 function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [f, setF] = useState({ address: '', district: '', price: '', bedrooms: '', source_url: '' });
@@ -44,15 +45,20 @@ export function ObjectsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as ObjTab) || (isStaff ? 'board' : 'new');
   const setTab = (t: ObjTab) => setParams({ tab: t }, { replace: true });
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(params.get('new') === '1');
+  // «На публикацию»: objects the agents sent («Готово — отправить оператору»); same query as the dashboard's tasks
+  const queue = useQuery({ queryKey: ['properties', 'list', 'review'], queryFn: () => api.properties.list({ status: 'review' }), enabled: isStaff });
   return (
     <>
       <PageHead title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'В работе' }, { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
+        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'В работе' },
+        ...(isStaff ? [{ value: 'review' as const, label: 'На публикацию', count: queue.data ? itemsOf(queue.data).length : undefined }] : []),
+        { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
       ]} />
       {tab === 'new' && <NewListings />}
       {tab === 'board' && <PropertyBoard />}
+      {tab === 'review' && <PropertyList key="review" status="review" />}
       {tab === 'mine' && <PropertyList mine />}
       {tab === 'all' && <PropertyList key="all" />}
       {tab === 'archive' && <PropertyList key="archive" archived />}

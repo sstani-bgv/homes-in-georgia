@@ -277,6 +277,48 @@ class NotifyTest(unittest.TestCase):
             for k in ("WORK_GROUP_CHAT_ID", "TOPIC_PHOTO", "PUBLISH_CHAT_ID"):
                 os.environ.pop(k, None)
 
+    def test_channel_publish_album_topics_watermark_owner(self):
+        """The card's «Опубликовать»: picked files in picked order, originals as documents, a watermarked album with
+        the linked caption, the owner's contact with the post link — each into its PUBLISH_TOPIC_*."""
+        import shutil
+        import tempfile
+        from app.config import settings
+        media_dir, saved = tempfile.mkdtemp(), settings.MEDIA_DIR
+        os.environ.update(PUBLISH_CHAT_ID="-100300", PUBLISH_TOPIC_ORIGINALS="2", PUBLISH_TOPIC_OWNER="22", PUBLISH_TOPIC_ALBUM="207")
+        try:
+            settings.MEDIA_DIR = media_dir
+            os.makedirs(os.path.join(media_dir, "properties"))
+            for n in ("a", "b"):
+                shutil.copy(Path(__file__).parent / "ref.jpg", os.path.join(media_dir, "properties", f"{n}.jpg"))
+            with db.tx() as c:
+                oid = c.execute("INSERT INTO owners (name, phone) VALUES ('Гиорги', '+995 555 12 34 56') RETURNING id").fetchone()[0]
+                pid = c.execute("INSERT INTO properties (status, owner_id, address) VALUES ('review', ?, 'Палиашвили 10') "
+                                "RETURNING id", (oid,)).fetchone()[0]
+                ids = [c.execute("INSERT INTO property_media (property_id, kind, path, position) VALUES (?, 'photo', ?, ?) RETURNING id",
+                                 (pid, f"properties/{n}.jpg", i)).fetchone()[0] for i, n in enumerate("ab")]
+            m = self.fake.mark()
+            ref = notify.publish_post({"id": pid, "owner_id": oid, "address": "Палиашвили 10", "post_media_ids": ids[::-1],
+                                       "post_text": "#Vake\n💰 850$\n\n🌟 Check all listings | Reviews"})
+            groups = [c for c in self.fake.calls(since=m) if c["method"] == "sendMediaGroup"]
+            originals, album = (next(g for g in groups if g["message_thread_id"] == t) for t in ("2", "207"))
+            self.assertEqual([x["type"] for x in originals["media"]], ["document", "document"])
+            self.assertEqual([x["type"] for x in album["media"]], ["photo", "photo"])
+            self.assertIn('<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a>', album["media"][0]["caption"])
+            self.assertEqual(album["media"][0]["parse_mode"], "HTML")
+            raw = (Path(media_dir) / "properties" / "b.jpg").read_bytes()
+            self.assertEqual(Path(originals["media"][0]["file"]).read_bytes(), raw)  # b first: the picked order, no watermark
+            self.assertNotEqual(Path(album["media"][0]["file"]).read_bytes(), raw)     # the album photo is watermarked
+            self.assertEqual(ref, (album["message_id"], f"https://t.me/c/300/{album['message_id']}"))
+            owner = self.last("sendMessage", -100300, m)
+            self.assertEqual(owner["message_thread_id"], "22")
+            self.assertIn("+995 555 12 34 56", owner["text"])
+            self.assertIn(f"https://t.me/c/300/{album['message_id']}", owner["text"])
+        finally:
+            settings.MEDIA_DIR = saved
+            shutil.rmtree(media_dir, ignore_errors=True)
+            for k in ("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ORIGINALS", "PUBLISH_TOPIC_OWNER", "PUBLISH_TOPIC_ALBUM"):
+                os.environ.pop(k, None)
+
     def test_never_raises(self):
         os.environ["BOT_TOKEN"] = ""
         try:

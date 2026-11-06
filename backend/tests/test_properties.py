@@ -131,22 +131,6 @@ def test_archive_cancels_retry(db, sent):
     assert db.get(Property, p.id).status == "archived"
 
 
-def test_published_by_post_generator(db, client, sent):
-    """B7b: the agency generator publishes itself and reports the post back → approved + published, agent notified."""
-    georgiy = make_user(db, "agent", "Георгий")
-    nino = make_user(db, "operator", "Нино")
-    p = Property(status="review", agent_id=georgiy.id, address="ул. Абашидзе 17", district="Ваке")
-    db.add(p)
-    db.commit()
-    body = {"post_url": "https://t.me/c/123/45", "message_id": "45"}
-    assert client.post(f"/api/properties/{p.id}/published", json=body, headers=auth(georgiy)).status_code == 403
-    r = client.post(f"/api/properties/{p.id}/published", json=body, headers=auth(nino)).json()
-    assert r["status"] == "published" and r["post_url"] == "https://t.me/c/123/45"
-    assert sent.of("property_published") and not sent.of("publish_post")  # the generator posted, not the server
-    hist = [e["action"] for e in client.get(f"/api/properties/{p.id}/history", headers=auth(nino)).json()]
-    assert "approved" in hist and hist[-1] == "published"
-
-
 def test_new_listing_filters(db, client):
     georgiy = make_user(db, "agent", "Георгий")
     make_listing(db, "ss1", source="ss.ge", price_usd=700, bedrooms=1, details='{"metro_ru": "Руставели"}')

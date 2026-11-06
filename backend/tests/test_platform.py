@@ -229,31 +229,6 @@ def test_reports_counters_and_texts(db, sent):
     assert len(sent.of("report_posted")) == 3
 
 
-def test_tools_proxy_allowlist(db, client, monkeypatch):
-    import httpx
-    ag = make_user(db, "agent")
-    seen = {}
-
-    class Fake:
-        def __init__(self, *a, **k): ...
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): ...
-        async def post(self, url, data=None, files=None):
-            seen.update(url=url, data=data, files=files)
-            return httpx.Response(200, json={"ok": True, "result": {"message_id": 5}})
-    monkeypatch.setattr(httpx, "AsyncClient", Fake)
-    r = client.post("/api/tools/telegram/sendPhoto", headers=auth(ag), data={"chat_id": "-100555", "caption": "hi"},
-                    files={"photo": ("a.jpg", b"img", "image/jpeg")})
-    assert r.json()["ok"] and seen["url"].endswith("/bot123456:TEST-TOKEN/sendPhoto") and seen["files"][0][0] == "photo"
-    assert client.post("/api/tools/telegram/sendPhoto", headers=auth(ag), data={"chat_id": "-1"}).status_code == 403
-    assert client.post("/api/tools/telegram/deleteMessage", headers=auth(ag), data={"chat_id": "-100555"}).status_code == 403
-    assert client.post("/api/tools/telegram/sendMessage", headers=auth(make_user(db, "recruit")),
-                       data={"chat_id": "-100555"}).status_code == 403
-    assert client.get("/api/tools/config", headers=auth(ag)).json()["chat_id"] == "-100555"
-    page = client.get("/tools/post-generator").text
-    assert "/api/tools/telegram/" in page and "api.telegram.org" not in page
-
-
 def test_ics_and_dashboard(db, client, sent):
     from app.services import ics, leads
     from tests.conftest import make_client, make_listing

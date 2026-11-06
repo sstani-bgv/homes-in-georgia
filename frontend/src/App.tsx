@@ -9,7 +9,6 @@ import { CabinetPage } from './pages/Cabinet';
 import { CalcPage } from './pages/Calc';
 import { CalendarPage, MCalendar } from './pages/Calendar';
 import { ContractsPage, MContracts } from './pages/Contracts';
-import { PostsPage } from './pages/Tools';
 import { DashboardPage } from './pages/Dashboard';
 import { DealsPage } from './pages/Deals';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
@@ -93,7 +92,7 @@ export function App() {
         <Route path="contracts" element={<ContractsPage />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="calc" element={<CalcPage />} />
-        <Route path="posts" element={<PostsPage />} />
+        <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="admin" element={<RequireAuth roles={['superadmin', 'admin']}><AdminPage /></RequireAuth>} />
         <Route path="me" element={<CabinetPage />} />

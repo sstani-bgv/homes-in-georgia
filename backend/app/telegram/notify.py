@@ -599,9 +599,13 @@ def agency_chat():
     return ch
 
 
-def media_paths(pid, tmp):
-    """[(kind, local path)] of the first 10 files that exist (MEDIA_STORAGE=s3: downloaded into the tmp dir)."""
-    rows = store.q("SELECT kind, path FROM property_media WHERE property_id = %s ORDER BY position, id", (pid,))
+def media_paths(pid, tmp, ids=None):
+    """[(kind, local path)] of the first 10 files that exist (MEDIA_STORAGE=s3: downloaded into the tmp dir).
+    ids: the operator's pick in album order (None = all, by position)."""
+    rows = store.q("SELECT id, kind, path FROM property_media WHERE property_id = %s ORDER BY position, id", (pid,))
+    if ids is not None:
+        by_id = {r["id"]: r for r in rows}
+        rows = [by_id[i] for i in ids if i in by_id]
     out = []
     for r in rows:
         if len(out) == 10:
@@ -611,30 +615,96 @@ def media_paths(pid, tmp):
     return out
 
 
+WATERMARK = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "watermark.png")
+# the agency footer lines of post_text() -> links (as the old HTML generator's buildTelegramHTML)
+FOOTER_LINKS = (
+    ("🌟 Check all listings | Reviews", '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | '
+                                       '<a href="https://t.me/reviews_rent_tbilisi">Reviews</a>'),
+    ("📍APARTMENTS ON MAP📍", '<a href="https://t.me/RentInTbilisi_bot/MAP?startapp=source=sale_in_tbilisi">📍APARTMENTS ON MAP📍</a>'),
+    ("📱 Instagram 🗳 FB 🎥 YouTube", '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '
+                                     '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">🗳 FB</a> '
+                                     '<a href="https://youtube.com/@rentintbilisi">🎥 YouTube</a>'),
+)
+
+
+def post_html(text):
+    out = html.escape(text or "", quote=False)
+    for plain, linked in FOOTER_LINKS:
+        out = out.replace(plain, linked)
+    return out
+
+
+def watermarked(path, tmp):
+    """The agency watermark over a photo (40 %, stretched like the old generator did) -> a new JPEG; the original
+    on any failure (no Pillow, odd format)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im, Image.open(WATERMARK) as wm:
+            im = im.convert("RGBA")
+            mark = wm.convert("RGBA").resize(im.size)
+            mark.putalpha(mark.getchannel("A").point(lambda a: a * 2 // 5))
+            out = os.path.join(tmp, "wm_" + os.path.basename(path) + ".jpg")
+            Image.alpha_composite(im, mark).convert("RGB").save(out, "JPEG", quality=92)
+            return out
+    except Exception:  # noqa: BLE001
+        log.warning("watermark failed for %s", path, exc_info=True)
+        return path
+
+
+def post_link(m, chat):
+    uname = (m.get("chat") or {}).get("username") or (chat.lstrip("@") if str(chat).startswith("@") else None)
+    if uname:
+        return f"https://t.me/{uname}/{m['message_id']}"
+    cid = str((m.get("chat") or {}).get("id") or chat)
+    return f"https://t.me/c/{cid[4:]}/{m['message_id']}" if cid.startswith("-100") else None
+
+
+def send_group(chat, thread, media, caption=None):
+    """[(photo|video|document, path)] -> one album (a single file goes as sendPhoto/sendVideo/sendDocument: an album
+    needs 2–10 items); the HTML caption on the first item. -> [message, ...] or None."""
+    files = {f"f{n}": p for n, (_, p) in enumerate(media)}
+    cap = {"caption": tg.clip(caption, 1024), "parse_mode": "HTML"} if caption else {}
+    if len(media) == 1:
+        kind = media[0][0]
+        m = tg.call({"photo": "sendPhoto", "video": "sendVideo"}.get(kind, "sendDocument"), files={kind: files["f0"]},
+                    chat_id=chat, message_thread_id=thread, **cap)
+        return [m] if m else None
+    items = [{"type": k, "media": f"attach://f{n}", **(cap if n == 0 else {})} for n, (k, _) in enumerate(media)]
+    return tg.call("sendMediaGroup", files=files, chat_id=chat, message_thread_id=thread, media=items)
+
+
 @safe
 def publish_post(prop):
-    """Posts the property to the agency channel: album (≤10 photos/videos) with the caption on the first item, or a
-    text post. Caption: prop.post_text (built by services.properties.publish) or the description.
-    -> (message_id, url) or None."""
+    """Posts the property to PUBLISH_CHAT_ID (else the agency channel), as the old HTML generator did: an album
+    (≤10 picked photos/videos, photos watermarked) with the caption on the first item, or a text post, into
+    PUBLISH_TOPIC_ALBUM; the files without watermark as documents into PUBLISH_TOPIC_ORIGINALS; the owner's contact
+    with the post link into PUBLISH_TOPIC_OWNER (topics only when set). Caption: prop.post_text (services.properties.
+    publish) or the description; the footer lines become links. -> (message_id, url) or None."""
     chat = agency_chat()
-    caption = g(prop, "post_text") or g(prop, "description") or prop_title(prop)
+    _, album_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ALBUM")
+    _, originals_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ORIGINALS")
+    _, owner_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_OWNER")
+    caption = post_html(g(prop, "post_text") or g(prop, "description") or prop_title(prop))
     with tempfile.TemporaryDirectory() as tmp:
-        media = media_paths(g(prop, "id"), tmp)
+        media = media_paths(g(prop, "id"), tmp, g(prop, "post_media_ids"))
+        if media and originals_topic:
+            send_group(chat, originals_topic, [("document", p) for _, p in media])
         if media:
-            files, items = {}, []
-            for n, (kind, path) in enumerate(media):
-                files[f"f{n}"] = path
-                items.append({"type": "video" if kind == "video" else "photo", "media": f"attach://f{n}",
-                              **({"caption": tg.clip(caption, 1024, html=False)} if n == 0 else {})})
-            res = tg.call("sendMediaGroup", files=files, chat_id=chat, media=items)
+            res = send_group(chat, album_topic, [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media], caption)
             m = res[0] if res else None
         else:
-            m = tg.send(chat, tg.plain_to_html(caption, 4096))
+            m = tg.send(chat, caption, thread_id=album_topic)
     if not m:
         return None
-    mid = m["message_id"]
-    uname = (m.get("chat") or {}).get("username") or (chat.lstrip("@") if chat.startswith("@") else None)
-    return mid, (f"https://t.me/{uname}/{mid}" if uname else None)
+    url = post_link(m, chat)
+    owner = store.q("SELECT name, phone FROM owners WHERE id = %s", (g(prop, "owner_id"),)) if g(prop, "owner_id") else []
+    if owner_topic and owner and (owner[0]["name"] or owner[0]["phone"]):
+        o = owner[0]
+        tg.send(chat, "\n".join(x for x in ("🏠 <b>Owner Information</b>", g(prop, "address") and f"📍 {e(g(prop, 'address'))}",
+                                            o["name"] and f"👤 {e(o['name'])}", o["phone"] and f"📞 {e(o['phone'])}",
+                                            url and f'🔗 <a href="{e(url)}">Ссылка на объявление</a>') if x),
+                thread_id=owner_topic)
+    return m["message_id"], url
 
 
 @safe

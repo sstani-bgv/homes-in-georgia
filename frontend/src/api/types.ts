@@ -135,6 +135,9 @@ export interface Property {
   updated_at?: string;
 }
 
+/** GET /properties/:id/post: the channel caption built from the object (services.properties.post_text). */
+export interface PostDraft { text: string; hashtags: string[]; channels: string[] }
+
 export interface Publication { id: number; channel: string; status: 'draft' | 'published' | 'removed'; url?: string | null; message_id?: string | null; published_at?: string | null; removed_at?: string | null }
 export interface PropertyAd { listing_id: string; source?: string | null; status?: string | null; url?: string | null; price_usd?: number | null; first_seen?: string | null; last_seen?: string | null; origin: boolean; removed_checked_at?: string | null }
 export interface PropertyDeal { id: number; status: string; deal_type?: string | null; price?: number | null; agent?: string | null; rent_from?: string | null; rent_to?: string | null; created_at?: string | null }

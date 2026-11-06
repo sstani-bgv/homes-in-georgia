@@ -1,10 +1,10 @@
-// Property page: stepper (C2–C4), operator review (B7a), publish (B7b), and the full object card: gallery, parameters,
+// Property page: stepper (C2–C4), operator review (B7a), the post generator + publish (B7b), and the full object card: gallery, parameters,
 // owner, where it is published, its ads on other sites, deals, history. Used by /objects/:id and /m/properties/:id.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Media, Property } from '../../api/types';
@@ -184,7 +184,7 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   });
   const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: () => qc.invalidateQueries({ queryKey: ['property', p.id] }) });
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
-  const submit = useMutation({ mutationFn: () => api.properties.submit(p.id), onSuccess: (r) => { set(r); toast('Отправлено оператору на проверку'); }, onError: (e) => toast(errText(e), true) });
+  const submit = useMutation({ mutationFn: () => api.properties.submit(p.id), onSuccess: (r) => { set(r); toast('Отправлено оператору'); }, onError: (e) => toast(errText(e), true) });
   const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
 
   return (
@@ -215,9 +215,13 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
         </div>
       </div>
       {canEdit && (
-        <Button size="lg" variant="ok" disabled={!media.length} loading={submit.isPending} onClick={() => submit.mutate()}>
-          <CheckCircle2 size={18} />Фото и видео сняты · на проверку
-        </Button>
+        <>
+          <div className="muted" style={{ fontSize: 12 }}>После отправки фото, видео и чек-лист закрываются: дальше объектом занимается оператор. Если нужно что-то переснять, он вернёт объект с комментарием.</div>
+          <Button size="lg" variant="ok" disabled={!media.length} loading={submit.isPending}
+            onClick={() => { if (window.confirm('Отправить объект оператору? Фото, видео и чек-лист больше нельзя будет менять.')) submit.mutate(); }}>
+            <Send size={18} />Готово — отправить оператору
+          </Button>
+        </>
       )}
     </div>
   );
@@ -371,12 +375,95 @@ function Deals({ p, compact }: { p: Property; compact?: boolean }) {
   );
 }
 
+const CHANNEL_LABEL: Record<string, string> = { tg: 'Telegram-канал' };
+const ALBUM_MAX = 10; // Telegram album limit
+const CAPTION_MAX = 1024; // Telegram caption limit for a post with media
+
+/** The post generator in the card (replaces the agency's HTML generator): the caption built by the backend from the
+ * object (post_text), editable; the files to post, picked and ordered; the channel (TG only for now). */
+function PostComposer({ p }: { p: Property }) {
+  const { toast, set } = useProp(p.id);
+  const draft = useQuery({ queryKey: ['property-post', p.id], queryFn: () => api.properties.post(p.id) });
+  const [edited, setEdited] = useState<string | null>(null); // null = the generated text
+  const files = p.media || [];
+  const [order, setOrder] = useState<number[]>(() => files.map((m) => m.id));
+  const [off, setOff] = useState<Set<number>>(() => new Set());
+  const byId = new Map(files.map((m) => [m.id, m]));
+  const ids = [...order.filter((id) => byId.has(id)), ...files.filter((m) => !order.includes(m.id)).map((m) => m.id)];
+  const picked = ids.filter((id) => !off.has(id)).slice(0, ALBUM_MAX);
+  const text = edited ?? draft.data?.text ?? '';
+  const tags = [...new Set(text.match(/#[\p{L}\p{N}_]+/gu) || [])];
+  const blocked = !!p.exclusive_conflict?.length;
+  const publish = useMutation({
+    mutationFn: () => api.properties.publish(p.id, { text, media_ids: picked, channel: 'tg' }),
+    onSuccess: (r) => { set(r); toast('Опубликовано: агенту ушла ссылка на пост'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const move = (i: number, d: number) => {
+    const next = [...ids];
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    setOrder(next);
+  };
+  const toggle = (id: number) => setOff((o) => { const n = new Set(o); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  if (draft.isLoading) return <Loading />;
+  if (draft.error) return <ErrorBox error={draft.error} />;
+  return (
+    <div className="col">
+      <div className="row row-wrap gap-sm">
+        <span className="label">Канал</span>
+        {(draft.data?.channels || ['tg']).map((c) => <span key={c} className="chip active"><Send size={14} />{CHANNEL_LABEL[c] || c}</span>)}
+      </div>
+      <Field label="Текст поста" hint="Собран из полей объекта. Допишите, если нужно: метро, удобства, животные, сроки.">
+        <Textarea value={text} onChange={(e) => setEdited(e.target.value)} rows={16} style={{ fontFamily: 'inherit', lineHeight: 1.45 }} />
+      </Field>
+      <div className="row row-between row-wrap gap-sm">
+        <div className="row row-wrap gap-sm">
+          {tags.map((t) => <Badge key={t} tone="grey">{t}</Badge>)}
+          {edited !== null && <Button size="sm" variant="ghost" onClick={() => setEdited(null)}><RotateCcw size={14} />Исходный текст</Button>}
+        </div>
+        <span className={picked.length && text.length > CAPTION_MAX ? '' : 'faint'} style={{ fontSize: 12, fontWeight: 700, color: picked.length && text.length > CAPTION_MAX ? 'var(--red)' : undefined }}>
+          {text.length}{picked.length ? ` / ${CAPTION_MAX}` : ''}
+        </span>
+      </div>
+      {picked.length > 0 && text.length > CAPTION_MAX && <div className="alert alert-warn">Подпись к альбому длиннее {CAPTION_MAX} символов: Telegram обрежет конец.</div>}
+      <div>
+        <div className="row row-between"><span className="label">Фото и видео в посте</span><span className="muted num" style={{ fontWeight: 700 }}>{picked.length}/{Math.min(ids.length, ALBUM_MAX)}</span></div>
+        <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>Нажмите на файл, чтобы убрать его из поста; стрелками меняется порядок. Первый файл — обложка. На фото ставится водяной знак.</div>
+        {!ids.length ? <div className="muted" style={{ fontSize: 13 }}>Файлов нет: уйдёт текстовый пост</div> : (
+          <div className="photo-strip">
+            {ids.map((id, i) => {
+              const m = byId.get(id)!;
+              const n = picked.indexOf(id);
+              return (
+                <div className="ph" key={id} onClick={() => (n >= 0 || picked.length < ALBUM_MAX) && toggle(id)}
+                  style={{ cursor: 'pointer', opacity: n >= 0 ? 1 : 0.35, outline: n === 0 ? '3px solid var(--brand)' : undefined }}
+                  role="checkbox" aria-checked={n >= 0} aria-label={`Файл ${i + 1}${m.room ? `, ${m.room}` : ''}`}>
+                  {m.kind === 'video' ? <video src={mediaUrl(m.url || m.path)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={mediaUrl(m.url || m.path)} alt={m.room || ''} loading="lazy" />}
+                  <span className="room badge badge-blue">{n >= 0 ? (n === 0 ? '1 · обложка' : n + 1) : 'не в посте'}</span>
+                  <span className="row" style={{ position: 'absolute', right: 4, top: 4, gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                    {i > 0 && <button type="button" className="btn btn-secondary icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={() => move(i, -1)} aria-label="Раньше"><ChevronLeft size={14} /></button>}
+                    {i < ids.length - 1 && <button type="button" className="btn btn-secondary icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={() => move(i, 1)} aria-label="Позже"><ChevronRight size={14} /></button>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {blocked && <div className="alert alert-warn">Эксклюзив ещё висит на других сайтах: публикация закрыта до «Проверено: снято».</div>}
+      <Button variant="ok" size="lg" disabled={blocked || !text.trim()} loading={publish.isPending} onClick={() => publish.mutate()}>
+        <Send size={18} />Опубликовать
+      </Button>
+    </div>
+  );
+}
+
 function ReviewStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [comment, setComment] = useState('');
   const missing = ROOMS.slice(0, 6).filter((r) => !(p.checklist || {})[r] && !(p.media || []).some((m) => m.room === r));
-  const review = useMutation({
-    mutationFn: (approve: boolean) => api.properties.review(p.id, approve, comment),
+  const back = useMutation({
+    mutationFn: () => api.properties.review(p.id, false, comment),
     onSuccess: (r) => { set(r); toast('Возвращено агенту'); },
     onError: (e) => toast(errText(e), true),
   });
@@ -389,18 +476,20 @@ function ReviewStep({ p }: { p: Property }) {
         {missing.length ? <div className="alert alert-warn">Не сняты: {missing.join(', ')}</div> : <div className="alert alert-ok">Все основные комнаты сняты</div>}
         {p.owner?.is_agent && <div className="alert alert-warn">Телефон собственника отмечен как агентский</div>}
       </div>
-      <MediaGrid p={p} />
-      <div className="muted" style={{ fontSize: 12 }}>Генератор откроется с полями, фото и видео объекта. После «Опубликовать в канал» объект сам станет «Опубликован», агенту придёт ссылка.</div>
-      <Field label="Комментарий агенту"><Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что переснять или поправить" /></Field>
-      {!!p.exclusive_conflict?.length && <div className="alert alert-warn">Эксклюзив ещё висит на других сайтах: публикация закрыта до «Проверено: снято».</div>}
-      <div className="row row-wrap">
-        {/* publishing goes through the agency generator (watermark, topics, owner info); it reports the post back */}
-        {p.exclusive_conflict?.length ? <Button variant="ok" size="lg" disabled><CheckCircle2 size={18} />Одобрить → генератор постов</Button>
-          : <a className="btn btn-ok btn-lg" href={`/tools/post-generator?property_id=${p.id}`} target="_blank" rel="noreferrer"><CheckCircle2 size={18} />Одобрить → генератор постов</a>}
-        <Button variant="danger" size="lg" disabled={!comment.trim()} loading={review.isPending} onClick={() => review.mutate(false)}>Вернуть агенту</Button>
-      </div>
+      <div className="divider" />
+      <PostComposer p={p} />
+      <div className="divider" />
+      <Field label="Вернуть агенту" hint="Агент получит комментарий в Telegram и снова сможет загрузить фото"><Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что переснять или поправить" /></Field>
+      <div className="row"><Button variant="danger" disabled={!comment.trim()} loading={back.isPending} onClick={() => back.mutate()}>Вернуть агенту</Button></div>
     </div>
   );
+}
+
+/** A published object: staff can post it again (price changed, new photos) with the same generator. */
+function Republish({ p }: { p: Property }) {
+  const [open, setOpen] = useState(false);
+  return open ? <div className="col"><div className="divider" /><PostComposer p={p} /></div>
+    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />Опубликовать повторно</Button>;
 }
 
 function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
@@ -454,28 +543,26 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const { toast, set } = useProp(id);
   const [edit, setEdit] = useState(false);
   const archive = useMutation({ mutationFn: () => api.properties.archive(id), onSuccess: (r) => { set(r); toast('Объект в архиве'); } });
-  const publish = useMutation({ mutationFn: () => api.properties.publish(id), onSuccess: (r) => { set(r); toast('Опубликовано'); }, onError: (e) => toast(errText(e), true) });
   const step = useMemo(() => (p ? stepOf(p) : 0), [p]);
 
   if (isLoading) return <Loading />;
   if (error || !p) return <ErrorBox error={error} />;
   const mine = p.agent_id === user?.id || p.agent?.id === user?.id;
   const canWork = mine || isStaff;
-  const generator = `/tools/post-generator?property_id=${p.id}`;
 
   let action: React.ReactNode = null;
   if (['taken', 'call_failed'].includes(p.status)) action = canWork ? <CallStep p={p} /> : null;
   else if (p.status === 'owner_confirmed') action = canWork ? <ShootStep p={p} /> : null;
   else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <MediaStep p={p} canEdit={canWork} />;
-  else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">На проверке у оператора · обычно до 1 часа</div>;
+  else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">Отправлено оператору · фото и чек-лист закрыты. Оператор проверит и опубликует, обычно до 1 часа. Если нужно что-то переснять, объект вернётся к вам с комментарием.</div>;
   else if (p.status === 'agent_marked') action = <div className="alert alert-info">Ответил агент · объект остаётся в базе с пометкой «агент»</div>;
   else if (['published', 'rented'].includes(p.status)) action = (
     <div className="col">
       <div className="alert alert-ok">Опубликовано {fmtDateTime(p.published_at)}</div>
       <div className="row row-wrap">
         {p.post_url && <a className="btn" href={p.post_url} target="_blank" rel="noreferrer"><ExternalLink size={16} />Пост в канале</a>}
-        {isStaff && <a className="btn btn-secondary" href={generator} target="_blank" rel="noreferrer"><Wand2 size={16} />Открыть генератор постов</a>}
       </div>
+      {isStaff && p.status === 'published' && <Republish p={p} />}
     </div>
   );
   // the media / review steps show the files with their own controls
@@ -512,12 +599,6 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {action}
               {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <OwnerOutcomes p={p} />}
             </Card>
-          )}
-          {isStaff && p.status === 'review' && (
-            <div className="row row-wrap">
-              <a className="btn btn-secondary" href={generator} target="_blank" rel="noreferrer"><Wand2 size={16} />Открыть генератор постов</a>
-              <Button variant="ghost" disabled={!!p.exclusive_conflict?.length} loading={publish.isPending} onClick={() => publish.mutate()}>Опубликовать без генератора</Button>
-            </div>
           )}
           <ExclusiveConflict p={p} />
           {!mediaInAction && <Gallery p={p} />}

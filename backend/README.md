@@ -5,7 +5,7 @@ Run everything from `backend/` with the shared venv (`../.venv/bin/python`); con
 ```
 cd backend
 ../.venv/bin/alembic upgrade head                      # schema (+ default settings rows)
-../.venv/bin/uvicorn app.main:app --reload --port 8000 # API on /api, SPA from ../frontend/dist, /tools/post-generator
+../.venv/bin/uvicorn app.main:app --reload --port 8000 # API on /api, SPA from ../frontend/dist
 ../.venv/bin/python -m app.worker                      # scheduler loop (every 30 s); --once for a single pass
 ../.venv/bin/python -m app.importers.sheets_csv ../data/legacy-sheets   # Google Sheets CSV export → Postgres (idempotent)
 ../.venv/bin/python -m app.seed_demo                   # demo data (Нино / Георгий / Анна ...)
@@ -75,7 +75,7 @@ upload_media(db, pid, files: list[(filename, bytes)], room: str | None, actor) -
 delete_media(db, pid, mid, actor); set_checklist(db, pid, checklist: dict, actor)
 submit_for_review(db, pid, agent) -> Property                 # notify.property_review_request
 review(db, pid, operator, approve: bool, comment=None) -> Property   # approve → publish(); else returned
-publish(db, pid, actor) -> Property     # notify.publish_post(prop) -> (message_id, url) | None, then property_published
+publish(db, pid, actor, text=None, media_ids=None, channel='tg') -> Property  # notify.publish_post(prop), then property_published
 post_text(db, prop) -> str              # channel caption
 check_duplicate(db, phone=None, address=None, url=None, cadastral=None) -> {"level": none|warn|danger, "results": [...]}
 upsert_owner(db, name, phone, address=None, link=None, is_agent=False, actor=None) -> (Owner, created)
@@ -102,7 +102,7 @@ Services call `app.telegram.notify.<fn>` **after commit** with ORM objects (Lead
 Client). Job handlers in `app/worker.py` call: `sla_warning(lead, stage)`, `sla_overdue(lead, stage)`,
 `property_call_retry(prop)`, `viewing_reminder(lead)`, `post_viewing_survey(lead)`, `t14_client(deal)`,
 `t14_agent(deal)`, `contract_expiry(deal, days)`; `thinking_followup` re-uses `post_viewing_survey(lead)`.
-`client_late` calls `viewing_update(lead, "late")`. `publish(prop)` sets a transient `prop.post_text` before
+`client_late` calls `viewing_update(lead, "late")`. `publish(prop)` sets transient `prop.post_text` and `prop.post_media_ids` before
 `publish_post(prop)`. `Report.posts` = `[{"topic", "text"}]` (Telegram HTML, apps-script texts; `general` can post to
 several topics), `Report.text` = plain-text version of the same.
 

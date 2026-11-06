@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Building2, Calculator, CalendarDays, CircleUser, ClipboardList, Eye, FileText, Handshake, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
-  Send, Settings, Trophy, UsersRound,
+  Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../api';
@@ -27,14 +27,13 @@ export const NAV: NavItem[] = [
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
   { to: '/calc', label: 'Калькулятор', icon: Calculator },
-  { to: '/posts', label: 'Публикации', icon: Send },
   { to: '/admin', label: 'Управление', icon: Settings, roles: ['superadmin', 'admin'] },
   { to: '/me', label: 'Кабинет', icon: CircleUser },
 ];
 
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
 const QUICK: { to: string; title: string; sub: string; icon: LucideIcon }[] = [
-  { to: '/posts', title: 'Объект', sub: 'Создать публикацию', icon: Plus },
+  { to: '/objects?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
   { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },
   { to: '/contracts', title: 'Договор', sub: 'Создать договор', icon: FileText },
   { to: '/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },

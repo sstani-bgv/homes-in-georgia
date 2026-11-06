@@ -2,7 +2,7 @@
 
 Единая система агентства. Заменяет Google Sheets, Apps Script, CRM, мини-аппы и бот-прототип.
 
-- **backend/**: FastAPI + PostgreSQL. Здесь обе воронки, сделки и комиссии, отчёты, T0/T14, сроки (SLA) и напоминания (worker), импорт из Google Sheets, прокси для генератора постов.
+- **backend/**: FastAPI + PostgreSQL. Здесь обе воронки, сделки и комиссии, отчёты, T0/T14, сроки (SLA) и напоминания (worker), импорт из Google Sheets, публикация объектов в TG-канал.
 - **frontend/**: CRM на React в дизайн-системе агентства и мини-апп для агентов в Telegram (`/m/*`).
 - **bot/**: бот-подборщик, работает на общей базе. Анкета клиента, ❤️ → заявка, группа операторов, слоты времени, контакты, итог просмотра, T14.
 - **deploy/**: `docker-compose.yml` (db, api, worker, bot, refresh). Все ключи берутся только из `.env`.
@@ -66,8 +66,8 @@ cd frontend && npm run dev                          # фронт с hot reload, 
 ## Тесты
 
 ```bash
-cd backend && ../.venv/bin/python -m pytest -q                      # 84 теста (S3-тест: TEST_S3_* → локальный MinIO)
-cd bot && ../.venv/bin/python -m unittest discover -s test          # 103 теста, e2e через fake Bot API
+cd backend && ../.venv/bin/python -m pytest -q                      # 86 тестов (S3-тест: TEST_S3_* → локальный MinIO)
+cd bot && ../.venv/bin/python -m unittest discover -s test          # 104 теста, e2e через fake Bot API
 cd frontend && npm run build                                        # проверка типов + сборка
 ```
 

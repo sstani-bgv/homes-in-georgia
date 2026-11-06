@@ -57,7 +57,7 @@ WORK_GROUP_CHAT_ID=              # agency work group with topics (old Apps Scrip
 TOPIC_PHOTO= TOPIC_SHOWING= TOPIC_STICKERS= TOPIC_DEAL= TOPIC_T14= TOPIC_NEWS= TOPIC_LISTINGS= TOPIC_GENERAL= TOPIC_DAILY=
 AGENCY_CHANNEL=rent_tbilisi_ge
 AGENCY_CHANNEL_ID= DEALS_CHANNEL_ID= NEWS_CHAT_ID= TOPIC_DEAL_EXTRA= TOPIC_PHOTO_QUEUE=   # inbound updates (services/inbound.py)
-PUBLISH_CHAT_ID= PUBLISH_TOPIC_ORIGINALS= PUBLISH_TOPIC_OWNER= PUBLISH_TOPIC_ALBUM=   # post generator targets
+PUBLISH_CHAT_ID= PUBLISH_TOPIC_ORIGINALS= PUBLISH_TOPIC_OWNER= PUBLISH_TOPIC_ALBUM=   # channel publish: chat + topics
 SUPERADMIN_TG_IDS=               # comma-separated; bootstrap superadmins
 ADMIN_BOOTSTRAP_LOGIN= ADMIN_BOOTSTRAP_PASSWORD=     # first desk login, created on startup if no superadmin
 LLM_PROVIDER=openai  OPENAI_API_KEY=  OPENAI_BASE_URL=  LLM_MODEL=
@@ -134,7 +134,7 @@ The object is the main entity (one real flat); ads and our posts attach to it (m
 first_seen_at, last_seen_at, created_at. properties.listing_id stays the "origin" ad; `services.properties.link_listing`.
 `property_publications`: id, property_id FK CASCADE, channel TEXT (only `tg` now; site/ig/fb later, no migration),
 status (draft|published|removed), url, message_id, published_at, removed_at, created_at. Written by publish /
-published_by_generator (`record_publication`); post_url/post_message_id on properties are kept for compat.
+`record_publication`); post_url/post_message_id on properties are kept for compat.
 `channel_posts.property_id` FK NULL: an agency channel post matched to our publication by link (exact only).
 Auto-matching (migration 0008, `services/matching.py`): every new listing (bot `db.sync` → `matching.process`) gets a
 verdict per object: same (link / cadastral / 2+ dHash photos / owner phone + address) → linked to the object itself;
@@ -233,7 +233,8 @@ raise — it logs failures).
 - `schedule_shoot(db, pid, agent, shoot_at) -> (Property, dup_check)` (owner dedup by phone_norm/address_norm → 'added'|'exists')
 - `upload_media(db, pid, files, room)`, `set_checklist`, `submit_for_review(db, pid, agent)`
 - `review(db, pid, operator, approve: bool, comment)` (approve → publish; return → agent notified)
-- `publish(db, pid, actor)` (builds channel post text in the agency format, sends via notify.publish_post, stores post_url; notify agent C5)
+- `publish(db, pid, actor, text=None, media_ids=None, channel="tg", comment=None)` (stage 5, the card's post generator: caption = edited text or post_text() in the agency format, the picked media in order; publishing a `review` object approves it; sends via notify.publish_post, records the publication, notifies the agent C5; Telegram failure → 502 `publish_failed`, nothing changes; dev without BOT_TOKEN → dry run recorded without a link)
+- the agent's media and checklist are read-only after `/submit` (409 `submitted`) until the operator returns the object
 - `check_duplicate(db, phone, address, url, cadastral)` (port of apps-script checkProperty + legacy lib-repository rules)
 `deals.py`: `calc(...)`, `create(db, data, actor)`, `confirm(db, deal_id, actor)`, `cancel`, `rented_text(deal)`
 `evaluations.py`, `reports.py` (save + topic post + counters), `users.py` (level logic, promote recruit → agent),
@@ -263,7 +264,8 @@ t14_agent(deal) / contract_expiry(deal, days)
 property_call_retry(prop)            C2a reminder
 property_review_request(prop)        to operators
 property_returned(prop) / property_published(prop)     to agent (C5 with post link)
-publish_post(prop) -> (message_id, url) | None   posts to AGENCY channel (album + caption) — returns post ref
+publish_post(prop) -> (message_id, url) | None   PUBLISH_CHAT_ID (else the agency channel): originals as documents → PUBLISH_TOPIC_ORIGINALS,
+                                                 watermarked album + linked caption → PUBLISH_TOPIC_ALBUM, owner contact → PUBLISH_TOPIC_OWNER
 report_posted(report)                topic post (texts from apps-script notifyTopic)
 ```
 Callback data prefixes handled by the bot: `lg:` (group), `ls:` (slots), `lv:` (viewing), `lo:` (outcome),
@@ -280,7 +282,8 @@ Funnel 1: `GET /listings/new?q=&source=&flag=&known=` (known=1 also shows ads al
 `GET /properties?status=&agent_id=&q=&mine=1`, `GET /properties/board` (by status), `POST /properties` (manual or
 `{listing_id}` = Беру в работу), `GET /properties/{id}`, `PATCH /properties/{id}`, `POST /properties/{id}/call`
 `{reached}`, `/owner` `{is_owner, owner_name, owner_phone}`, `/shoot` `{shoot_at}`, `/media` (multipart files, room),
-`DELETE /properties/{id}/media/{mid}`, `/checklist`, `/submit`, `/review` `{approve, comment}`, `/publish`,
+`DELETE /properties/{id}/media/{mid}`, `/checklist`, `/submit`, `/review` `{approve, comment}`, `GET /properties/{id}/post`
+(staff: `{text, hashtags, channels}` — the caption built from the object), `/publish` `{text?, media_ids?, channel?, comment?}`,
 `/archive`, `GET /properties/{id}/history`, `POST /properties/check-duplicate {phone,address,url,cadastral}`.
 Owners: `GET /owners?q=`, `POST /owners`, `PATCH /owners/{id}`.
 Funnel 2: `GET /leads?status=&agent_id=&operator_id=&q=`, `GET /leads/board`, `GET /leads/{id}` (with client profile,
@@ -297,8 +300,6 @@ Content: `GET/POST/DELETE /ticker`, `GET /news`, `GET /channel-posts?hashtag=&di
 dashboard metrics toggles), `GET/POST/PATCH /sources` (listing sources), `GET /addresses`.
 Catalog moderation (bot prototype "Проверка"): `GET /moderation`, `POST /moderation/{listing_id} {approve}`.
 Media: `GET /media/{path}` (auth; MEDIA_STORAGE=s3 → 307 to a presigned or S3_PUBLIC_URL link), `GET /listing-photos/{listing_id}/{n}`.
-Tools: `POST /tools/telegram/{method}` — server-side proxy for the legacy post generator (allow-listed methods
-sendMessage/sendPhoto/sendMediaGroup/sendVideo/sendDocument and allow-listed chat ids from env; role ≥ agent).
 Public (no auth): `GET /public/ics/{token}` (viewing calendar file), `GET /health`.
 
 ## 8. Frontend (React) — design system

@@ -80,10 +80,6 @@ class Settings(BaseSettings):
     def contract_remind_days(self) -> list[int]:
         return [int(x) for x in self.CONTRACT_REMIND_DAYS.split(",") if x.strip().isdigit()]
 
-    @property
-    def publish_chat_ids(self) -> set[str]:
-        return {x for x in (self.PUBLISH_CHAT_ID, self.WORK_GROUP_CHAT_ID, self.OPERATORS_CHAT_ID) if x}
-
 
 @lru_cache
 def get_settings() -> Settings:

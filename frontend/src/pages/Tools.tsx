@@ -1,25 +1,11 @@
 // Old CRM tools that had no React screen yet:
-//  · «tab-posts» — the post generator (served by the backend at /tools/post-generator), embedded here;
 //  · «Property Check» (reports → openCheckProperty) — owner/property duplicate search via POST /api/properties/check-duplicate.
 import { useState } from 'react';
-import { ExternalLink, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { api } from '../api';
 import { errText, useToast } from '../components/toast';
-import { Badge, Button, Card, Field, Input, PageHead } from '../components/ui';
+import { Badge, Button, Card, Field, Input } from '../components/ui';
 import { fmtDate } from '../lib/format';
-
-const GENERATOR = '/tools/post-generator';
-
-export function PostsPage() {
-  return (
-    <>
-      <PageHead label="Публикации" title="Генератор постов" actions={<a className="btn btn-secondary" href={GENERATOR} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} />Открыть отдельно</a>} />
-      <div className="card" style={{ overflow: 'hidden', height: 'calc(100vh - 190px)', minHeight: 520 }}>
-        <iframe src={GENERATOR} title="Генератор публикаций" style={{ width: '100%', height: '100%', border: 0, display: 'block' }} />
-      </div>
-    </>
-  );
-}
 
 type DupRow = { source?: string; owner?: string | null; phone?: string | null; address?: string | null; link?: string | null; status?: string; rent_to?: string | null;
   phone_match?: boolean; addr_match?: boolean; url_match?: boolean; cadastral_match?: boolean; property_id?: number; deal_id?: number; is_agent?: boolean };

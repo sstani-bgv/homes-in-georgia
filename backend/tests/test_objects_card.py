@@ -6,6 +6,7 @@ from sqlalchemy import select, text
 
 from app.db import engine
 from app.models import ChannelPost, Deal, Property, PropertyListing, PropertyPublication
+from app.services.properties import record_publication
 from tests.conftest import BACKEND, TEST_URL, auth, make_listing, make_user
 
 
@@ -50,13 +51,14 @@ def test_take_links_listing_and_publish_writes_publication(db, client):
     r = client.post(f"/api/properties/{pid}/publish", headers=auth(nino)).json()
     assert r["publications"] == [{**r["publications"][0], "channel": "tg", "status": "published",
                                   "url": "https://t.me/rent_tbilisi_ge/777", "message_id": "777"}]
-    # the post generator reports a post: same message id updates the row, a new post adds one
-    body = {"post_url": "https://t.me/rent_tbilisi_ge/777", "message_id": "777"}
-    client.post(f"/api/properties/{pid}/published", json=body, headers=auth(nino))
+    # the same post reported again updates its row, a new post adds one and links the matching channel post
+    p = db.get(Property, pid)
+    record_publication(db, p, "tg", "https://t.me/rent_tbilisi_ge/777", "777")
     db.add(ChannelPost(message_id="wg:45", link="https://t.me/c/123/45"))
+    db.flush()
+    record_publication(db, p, "tg", "https://t.me/c/123/45", "45")
     db.commit()
-    r = client.post(f"/api/properties/{pid}/published", json={"post_url": "https://t.me/c/123/45", "message_id": "45"},
-                    headers=auth(nino)).json()
+    r = client.get(f"/api/properties/{pid}", headers=auth(nino)).json()
     assert sorted(x["message_id"] for x in r["publications"]) == ["45", "777"]
     db.expire_all()
     assert db.scalar(select(ChannelPost.property_id).where(ChannelPost.message_id == "wg:45")) == pid

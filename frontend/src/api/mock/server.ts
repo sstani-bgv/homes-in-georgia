@@ -262,6 +262,12 @@ on('POST', '/properties/:id/review', (m, b) => {
   } else { p.status = 'returned'; propEvent(p.id, 'returned', `Возвращено агенту: ${b.comment || ''}`, u); }
   return propOut(p, u);
 });
+on('GET', '/properties/:id/post', (m) => {
+  const p = getProp(Number(m[1]));
+  const text = [`#${p.district || 'Tbilisi'}`, p.address ? `📍${p.address}` : '', '', `🏢 ${p.bedrooms ? `#${p.bedrooms}Bed ` : ''}#Apartment for #Rent`, '',
+    p.price ? `💰 ${p.price}$ + Deposit ${p.price}$` : '', '0% Commission'].join('\n');
+  return { text, hashtags: text.match(/#\w+/g) || [], channels: ['tg'] };
+});
 on('POST', '/properties/:id/publish', (m) => {
   const u = currentUser(); const p = getProp(Number(m[1]));
   p.status = 'published'; p.published_at = new Date().toISOString(); p.post_url = 'https://t.me/rent_tbilisi_ge/1299';
