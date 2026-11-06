@@ -245,6 +245,17 @@ raise — it logs failures).
   deposit, sale_price, headline; vocabulary POST_ONE/POST_MANY/POST_NUM), `📍[address](maps link)` (notify.post_html
   makes it a link), the agent's `users.agent_tag` (unique, `GET /users/agent-tag-suggestion`; inbound.resolve_agent
   looks it up before the `agent_tags` setting)
+- stage 6: `properties.verified_at` = the first operator publish (review approve). After it an agent's change of
+  `LOCKED_AFTER_VERIFY` (owner name/phone and so the owner binding, address, cadastral code, ad link `source_url`, exclusive,
+  price/currency, post_fields deposit/sale_price) is not applied: `PATCH /properties/{id}` applies the rest and returns
+  `change_request` («Запрос оператору», table `change_requests`: entity, entity_id, kind edit|archive|transfer_owner|delete,
+  payload {field: {old, new}}, reason, status pending|approved|rejected, decided_by/at, decision_comment). Agent owner
+  transfer: `POST /properties/{id}/transfer-request`. Queue: `GET /change-requests?status=pending` (staff: all, agent: own),
+  `POST /change-requests/{id}/decide {approve, comment}` (staff; reject needs a comment) → applied through apply_update /
+  archive / transfer_owner, events `change_requested` / `change_request_approved|rejected`, notify.change_request_new (operators)
+  and change_request_decided (the agent). Archive: `POST /properties/{id}/archive {reason, comment, duplicate_of}`, reasons
+  `models.ARCHIVE_REASONS` (other → comment, duplicate → duplicate_of required), fields archive_reason/archive_comment/archived_at;
+  refused → owner_refused, rented-self → rented_by_owner, confirmed deal → rented_by_us. Objects are never deleted.
 - `check_duplicate(db, phone, address, url, cadastral)` (port of apps-script checkProperty + legacy lib-repository rules)
 `deals.py`: `calc(...)`, `create(db, data, actor)`, `confirm(db, deal_id, actor)`, `cancel`, `rented_text(deal)`
 `evaluations.py`, `reports.py` (save + topic post + counters), `users.py` (level logic, promote recruit → agent),

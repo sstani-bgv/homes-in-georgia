@@ -25,6 +25,17 @@ export const OUTCOME_LABEL: Record<string, string> = {
   rented: 'Снимает', refused: 'Не подошло', thinking: 'Думает', reschedule: 'Перенос',
 };
 export const REFUSAL_LABEL: Record<string, string> = { price: 'Цена', location: 'Расположение', condition: 'Состояние', other: 'Другое' };
+/** why an object is in the archive (backend models.ARCHIVE_REASONS) */
+export const ARCHIVE_REASON: Record<string, string> = {
+  owner_refused: 'Собственник отказался', rented_by_us: 'Сдали мы', rented_by_owner: 'Сдал сам', not_actual: 'Неактуально', duplicate: 'Дубль', other: 'Другое',
+};
+/** «Запрос оператору» (stage 6): kinds and field names (backend services/change_requests.py, properties.LOCKED_AFTER_VERIFY) */
+export const CR_KIND: Record<string, string> = { edit: 'Изменение полей', archive: 'В архив', transfer_owner: 'Передать собственника', delete: 'Удаление → архив' };
+export const CR_FIELD: Record<string, string> = {
+  owner_name: 'Собственник', owner_phone: 'Телефон собственника', address: 'Адрес', cadastral_code: 'Кадастр', source_url: 'Ссылка на объявление',
+  is_exclusive: 'Эксклюзив', price: 'Цена', currency: 'Валюта', deposit: 'Залог', sale_price: 'Цена продажи',
+  archive_reason: 'Причина архива', archive_comment: 'Комментарий', duplicate_of: 'Дубль объекта', owner_agent: 'Агент собственника',
+};
 
 export const SOURCE_LABEL: Record<string, string> = {
   ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', instagram: 'Instagram', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',

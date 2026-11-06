@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft,
+  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -53,7 +53,7 @@ export const api = {
     take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),
     create: (b: Partial<Property>) => http.post<Property>('/properties', b),
     get: (id: number) => then(http.get<Property>(`/properties/${id}`), normProperty),
-    update: (id: number, b: Partial<Property> & { owner_name?: string; owner_phone?: string }) => http.patch<Property>(`/properties/${id}`, b),
+    update: (id: number, b: Partial<Property> & { owner_name?: string; owner_phone?: string; reason?: string }) => http.patch<Property>(`/properties/${id}`, b),
     call: (id: number, reached: boolean) => http.post<Property>(`/properties/${id}/call`, { reached }),
     owner: (id: number, b: { is_owner: boolean; owner_name?: string; owner_phone?: string }) =>
       http.post<Property>(`/properties/${id}/owner`, b),
@@ -71,7 +71,10 @@ export const api = {
     review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
     post: (id: number) => http.get<PostDraft>(`/properties/${id}/post`),
     publish: (id: number, b?: { text?: string; media_ids?: number[]; channel?: string; comment?: string }) => then(http.post<Property>(`/properties/${id}/publish`, b), normProperty),
-    archive: (id: number) => http.post<Property>(`/properties/${id}/archive`),
+    /** reason: ARCHIVE_REASON key; a verified object's agent gets change_request back instead */
+    archive: (id: number, b: { reason: string; comment?: string; duplicate_of?: number | null }) => http.post<Property>(`/properties/${id}/archive`, b),
+    /** agent's «Запрос оператору»: move the owner to another agent (staff: moved right away, change_request null) */
+    transferRequest: (id: number, agent_id: number, reason?: string) => http.post<{ change_request: ChangeRequest | null }>(`/properties/${id}/transfer-request`, { agent_id, reason }),
     elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
     adRemoved: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/removed`), normProperty),
     refused: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/refused`, { comment }),
@@ -80,6 +83,11 @@ export const api = {
     history: (id: number) => then(http.get<L<EventItem>>(`/properties/${id}/history`), (d) => normPage(d, normEvent)),
     checkDuplicate: (b: { phone?: string; address?: string; url?: string; cadastral?: string }) =>
       http.post<{ status?: string; matches?: unknown[]; [k: string]: unknown }>('/properties/check-duplicate', b),
+  },
+
+  changeRequests: {
+    list: (status = 'pending') => http.get<Page<ChangeRequest>>('/change-requests', { status }),
+    decide: (id: number, approve: boolean, comment?: string) => http.post<ChangeRequest>(`/change-requests/${id}/decide`, { approve, comment }),
   },
 
   owners: {

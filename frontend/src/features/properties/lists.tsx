@@ -10,7 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
-import { PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
+import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
 const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', tg: 'Telegram' };
@@ -236,7 +236,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
           <div className="card hide-mobile">
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>#</th><th>Адрес</th><th>Цена</th><th>Агент</th><th>Статус</th><th>Обновлён</th></tr></thead>
+                <thead><tr><th>#</th><th>Адрес</th><th>Цена</th><th>Агент</th><th>Статус</th>{archived && <th>Причина</th>}<th>Обновлён</th></tr></thead>
                 <tbody>
                   {items.map((p) => (
                     <tr key={p.id} className="clickable" onClick={() => navigate(link(p.id))}>
@@ -245,6 +245,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
                       <td className="num" style={{ fontWeight: 700 }}>{money(p.price, p.currency || 'USD')}</td>
                       <td>{p.agent?.name || '—'}</td>
                       <td><div className="row row-wrap gap-sm"><PropertyStatusBadge status={p.status} /><ExclusiveConflictBadge p={p} /></div></td>
+                      {archived && <td>{ARCHIVE_REASON[p.archive_reason || ''] || '—'}{p.archive_comment && <div className="muted" style={{ fontSize: 12 }}>{p.archive_comment}</div>}</td>}
                       <td className="muted">{ago(p.updated_at || p.created_at)}</td>
                     </tr>
                   ))}
@@ -256,6 +257,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
             {items.map((p) => (
               <div key={p.id}>
                 <PropertyMiniCard p={p} to={link(p.id)} />
+                {archived && p.archive_reason && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>Причина: {ARCHIVE_REASON[p.archive_reason] || p.archive_reason}{p.archive_comment ? ` · ${p.archive_comment}` : ''}</div>}
               </div>
             ))}
           </div>

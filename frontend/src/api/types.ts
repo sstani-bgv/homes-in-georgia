@@ -142,8 +142,27 @@ export interface Property {
   deals?: PropertyDeal[];
   /** exclusive objects: live outside ads → «Эксклюзив висит на …», publishing as exclusive is blocked */
   exclusive_conflict?: ExternalAd[];
+  /** stage 6: the operator's first approve / publish; after it locked_fields go through «Запрос оператору» for the agent */
+  verified_at?: string | null;
+  locked_fields?: string[];
+  /** full card, staff and the object's agent: pending «Запросы оператору» */
+  change_requests?: ChangeRequest[];
+  /** PATCH / archive: the request this call created instead of applying (locked fields after verification) */
+  change_request?: ChangeRequest | null;
+  archive_reason?: string | null;
+  archive_comment?: string | null;
+  archived_at?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface ChangeRequest {
+  id: number; entity: string; entity_id: number; kind: 'edit' | 'archive' | 'transfer_owner' | 'delete';
+  status: 'pending' | 'approved' | 'rejected'; reason?: string | null;
+  changes: { field: string; old: unknown; new: unknown }[];
+  requested_by: { id: number | null; name: string | null }; decided_by?: { id: number; name: string | null } | null;
+  decided_at?: string | null; decision_comment?: string | null; created_at: string;
+  property?: { id: number; address?: string | null; status: PropertyStatus } | null;
 }
 
 /** GET /properties/:id/post: the channel caption built from the object (services.properties.post_text). */

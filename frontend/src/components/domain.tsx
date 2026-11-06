@@ -7,7 +7,7 @@ import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
 import { mediaUrl } from '../api/client';
 import { Badge, ErrorBox, KV, Loading, Modal, useNow } from './ui';
-import { LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
+import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
 
 const SLA_DEFAULT: Record<string, number> = { operator_take: 5, agent_slots: 30, slots_to_client: 60 };
 
@@ -236,6 +236,8 @@ const ACTION_TEXT: Record<string, string> = {
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',
   approved: 'Одобрено', returned: 'Возвращено агенту', published: 'Опубликовано в канале', archived: 'В архив', status: 'Смена статуса',
   owner_transferred: 'Собственник передан агенту', owner_agent_override: 'Оператор привязал собственника другого агента',
+  change_requested: 'Запрос оператору', change_request_approved: 'Запрос одобрен', change_request_rejected: 'Запрос отклонён',
+  rent_cancelled: 'Сделка отменена · снова на рынке',
   listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято',
 };
 const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked'];
@@ -243,9 +245,10 @@ function eventText(e: EventItem): string {
   const base = ACTION_TEXT[e.action] || e.action;
   const d = e.data || {};
   const outcome = d.outcome ? OUTCOME_LABEL[d.outcome as string] || (d.outcome as string) : '';
-  const reason = d.reason ? REFUSAL_LABEL[d.reason as string] || (d.reason as string) : '';
+  const reason = d.reason ? ARCHIVE_REASON[d.reason as string] || REFUSAL_LABEL[d.reason as string] || (d.reason as string) : '';
+  const kind = e.action.startsWith('change_request') && d.kind ? CR_KIND[d.kind as string] || (d.kind as string) : '';
   const source = AD_EVENTS.includes(e.action) && d.source ? SOURCE_LABEL[d.source as string] || (d.source as string) : '';
-  const extra = (d.comment || d.note || d.to || [outcome, reason, source].filter(Boolean).join(', ') || '') as string;
+  const extra = (d.comment || d.note || d.to || [outcome, reason, source, kind].filter(Boolean).join(', ') || '') as string;
   return extra ? `${base}: ${extra}` : base;
 }
 

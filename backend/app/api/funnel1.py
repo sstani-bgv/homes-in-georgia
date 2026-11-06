@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
+from app.services import change_requests as CR
 from app.services import matching
 from app.services import properties as P
 from app.services.leads import ACTIVE
@@ -104,6 +105,7 @@ class PropertyIn(BaseModel):
     owner_name: str | None = None
     owner_phone: str | None = None
     post_fields: dict | None = None  # services.properties.POST_ONE / POST_MANY / POST_NUM
+    reason: str | None = None  # why: goes with a «Запрос оператору» for locked fields (stage 6)
 
 
 class CallIn(BaseModel):
@@ -173,7 +175,14 @@ def properties_get(pid: int, db: Session = Depends(get_db, scope="function"), us
 def properties_patch(pid: int, body: PropertyIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     data = body.model_dump(exclude_unset=True)
     data.pop("listing_id", None)
-    return P.out(db, P.update(db, pid, data, user), user, full=True)
+    p = P.update(db, pid, data, user, data.pop("reason", None))
+    return _with_request(db, p, user)
+
+
+def _with_request(db: Session, p: Property, user: User) -> dict:
+    """The card, plus the «Запрос оператору» this call created (locked fields after verification), if any."""
+    cr = getattr(p, "change_request", None)
+    return {**P.out(db, p, user, full=True), "change_request": CR.outs(db, [cr])[0] if cr is not None else None}
 
 
 @router.post("/properties/{pid}/call")
@@ -281,9 +290,39 @@ def properties_ad_removed(pid: int, listing_id: str, db: Session = Depends(get_d
     return P.out(db, P.ad_removed(db, pid, listing_id, user), user, full=True)
 
 
+class ArchiveIn(BaseModel):
+    reason: str | None = None  # models.ARCHIVE_REASONS
+    comment: str | None = None
+    duplicate_of: int | None = None
+
+
 @router.post("/properties/{pid}/archive")
-def properties_archive(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return P.out(db, P.archive(db, pid, user), user, full=True)
+def properties_archive(pid: int, body: ArchiveIn | None = None, db: Session = Depends(get_db, scope="function"),
+                       user: User = Depends(current_user)):
+    b = body or ArchiveIn()
+    return _with_request(db, P.archive(db, pid, user, b.reason, b.comment, b.duplicate_of), user)
+
+
+# ---------------------------------------------------------------- «Запросы» (stage 6)
+
+class DecideIn(BaseModel):
+    approve: bool
+    comment: str | None = None
+
+
+@router.get("/change-requests")
+def change_requests_list(status: str | None = "pending", limit: int = 100, offset: int = 0,
+                         db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    stmt = CR.query(db, user, status)
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = list(db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset))))
+    return {"items": CR.outs(db, rows), "total": total}
+
+
+@router.post("/change-requests/{rid}/decide")
+def change_requests_decide(rid: int, body: DecideIn, db: Session = Depends(get_db, scope="function"),
+                           user: User = Depends(require_roles(*STAFF_ROLES))):
+    return CR.outs(db, [CR.decide(db, rid, user, body.approve, body.comment)])[0]
 
 
 @router.get("/properties/{pid}/history")
@@ -363,3 +402,11 @@ def owners_transfer(oid: int, body: TransferIn, db: Session = Depends(get_db, sc
                     user: User = Depends(require_roles(*STAFF_ROLES))):
     """«Передать собственника агенту…» (stage 6.5): the owner and his live objects move to another agent."""
     return owner_out(P.transfer_owner(db, oid, body.agent_id, user, body.reason))
+
+
+@router.post("/properties/{pid}/transfer-request")
+def properties_transfer_request(pid: int, body: TransferIn, db: Session = Depends(get_db, scope="function"),
+                                user: User = Depends(current_user)):
+    """An agent's «Запрос оператору» to move the object's owner to another agent (staff: transferred right away)."""
+    cr = CR.request_transfer(db, pid, body.agent_id, user, body.reason)
+    return {"change_request": CR.outs(db, [cr])[0] if cr else None}

@@ -11,10 +11,11 @@ import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { NewListings, PropertyBoard, PropertyList } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
+import { ChangeRequestQueue } from '../features/properties/requests';
 import { DISTRICTS } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 
-type ObjTab = 'new' | 'board' | 'review' | 'mine' | 'all' | 'archive';
+type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archive';
 
 function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [f, setF] = useState({ address: '', district: '', price: '', bedrooms: '', source_url: '' });
@@ -48,17 +49,20 @@ export function ObjectsPage() {
   const [manual, setManual] = useState(params.get('new') === '1');
   // «На публикацию»: objects the agents sent («Готово — отправить оператору»); same query as the dashboard's tasks
   const queue = useQuery({ queryKey: ['properties', 'list', 'review'], queryFn: () => api.properties.list({ status: 'review' }), enabled: isStaff });
+  const requests = useQuery({ queryKey: ['change-requests', 'pending'], queryFn: () => api.changeRequests.list('pending'), enabled: isStaff });
   return (
     <>
       <PageHead title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'В работе' },
-        ...(isStaff ? [{ value: 'review' as const, label: 'На публикацию', count: queue.data ? itemsOf(queue.data).length : undefined }] : []),
+        ...(isStaff ? [{ value: 'review' as const, label: 'На публикацию', count: queue.data ? itemsOf(queue.data).length : undefined },
+          { value: 'requests' as const, label: 'Запросы', count: requests.data?.total }] : []),
         { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
       ]} />
       {tab === 'new' && <NewListings />}
       {tab === 'board' && <PropertyBoard />}
       {tab === 'review' && <PropertyList key="review" status="review" />}
+      {tab === 'requests' && <ChangeRequestQueue />}
       {tab === 'mine' && <PropertyList mine />}
       {tab === 'all' && <PropertyList key="all" />}
       {tab === 'archive' && <PropertyList key="archive" archived />}

@@ -9,6 +9,9 @@ PROPERTY_STATUSES = ("new", "taken", "call_failed", "owner_confirmed", "agent_ma
 # where we publish an object; plain strings so the site / IG / FB join later without a migration
 PUBLICATION_CHANNELS = ("tg",)
 PUBLICATION_STATUSES = ("draft", "published", "removed")
+# why an object is in the archive (stage 6); duplicate → properties.duplicate_of, other → archive_comment is required
+ARCHIVE_REASONS = {"owner_refused": "Собственник отказался", "rented_by_us": "Сдали мы", "rented_by_owner": "Сдал сам",
+                   "not_actual": "Неактуально", "duplicate": "Дубль", "other": "Другое"}
 
 
 class Owner(Base):
@@ -65,6 +68,11 @@ class Property(Base):
     published_at = Column(DateTime(timezone=True))
     post_url = Column(Text)
     post_message_id = Column(Text)
+    # stage 6: the first operator approve / publish; after it the agent changes key fields only via a change request
+    verified_at = Column(DateTime(timezone=True))
+    archive_reason = Column(Text)  # ARCHIVE_REASONS
+    archive_comment = Column(Text)
+    archived_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     # + text_embedding / photo_embedding vector(768) (migration 0006): not mapped, raw SQL in app/embeddings.py
@@ -124,6 +132,25 @@ class PropertyPublication(Base):
     message_id = Column(Text)
     published_at = Column(DateTime(timezone=True))
     removed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChangeRequest(Base):
+    """«Запрос оператору» (stage 6): an agent's change the operator approves or rejects (app/services/change_requests.py).
+    payload: {field: {"old": …, "new": …}} for kind=edit; the kind's own fields otherwise."""
+    __tablename__ = "change_requests"
+    __table_args__ = (Index("change_requests_status_idx", "status"), Index("change_requests_entity_idx", "entity", "entity_id"))
+    id = Column(Integer, primary_key=True)
+    entity = Column(Text, nullable=False)  # property | owner
+    entity_id = Column(Integer, nullable=False)
+    kind = Column(Text, nullable=False)  # edit | archive | transfer_owner | delete
+    payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    reason = Column(Text)
+    status = Column(Text, nullable=False, server_default="pending")  # pending | approved | rejected
+    requested_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at = Column(DateTime(timezone=True))
+    decision_comment = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

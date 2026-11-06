@@ -252,7 +252,7 @@ def test_lead_detail_owner_call_for_operator_and_assigned_agent(db, client):
 def test_retake_archived_and_agent_mark_keeps_owner(db, sent):
     ag = make_user(db, "agent")
     p = properties.take(db, make_listing(db).id, ag)
-    properties.archive(db, p.id, ag)
+    properties.archive(db, p.id, ag, "not_actual")
     assert properties.take(db, p.listing_id, ag).status == "taken"
 
     properties.owner_or_agent(db, p.id, ag, True, "Нана", "599 11 22 33")

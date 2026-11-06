@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import settings as env
-from app.models import (FIELD, PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
+from app.models import (ARCHIVE_REASONS, FIELD, PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
                         PropertyListing, PropertyMedia, PropertyPublication, User)
 from app.services import jobs
 from app.services import users as users_svc
@@ -33,6 +33,13 @@ BOARD = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_sched
 EDITABLE = ("address", "district", "cadastral_code", "price", "currency", "bedrooms", "rooms", "area", "floor",
             "total_floors", "description", "is_exclusive", "source_url", "source_type", "checklist", "shoot_at",
             "post_fields")
+# Stage 6: once the operator has verified the object (verified_at), the agent can't change these himself: everything a
+# cheat could use (owner contact and binding, address, cadastral code, the ad link, exclusive, price and deposit). His
+# edit of them becomes a «Запрос оператору» (services/change_requests.py); archiving does too. deposit / sale_price are
+# keys of post_fields; the other post fields (amenities, description, headline…) stay his, logged as usual.
+LOCKED_AFTER_VERIFY = ("owner_name", "owner_phone", "address", "cadastral_code", "source_url", "is_exclusive", "price",
+                       "currency", "deposit", "sale_price")
+POST_LOCKED = ("deposit", "sale_price")
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif"}
 MAX_UPLOAD = 300 * 1024 * 1024
@@ -284,6 +291,7 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
             if existing.agent_id and existing.status != "archived":
                 raise DomainError("taken_by_other", "object already taken by another agent")
             existing.agent_id, existing.taken_at = agent.id, now()
+            existing.archive_reason = existing.archive_comment = existing.archived_at = None
             _bind_owner(db, existing, db.get(Owner, existing.owner_id) if existing.owner_id else None, agent)
             _status(db, existing, "taken", agent, "taken")
             db.commit()
@@ -347,9 +355,73 @@ def _apply(p: Property, data: dict):
         setattr(p, k, v)
 
 
-def update(db: Session, pid: int, data: dict, actor: User) -> Property:
+def is_locked_for(p: Property, user: User) -> bool:
+    """The agent's key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY)."""
+    return user.role not in STAFF and p.verified_at is not None
+
+
+def _current(db: Session, p: Property, k: str):
+    if k in ("owner_name", "owner_phone"):
+        o = db.get(Owner, p.owner_id) if p.owner_id else None
+        return (o.name if k == "owner_name" else o.phone) if o else None
+    return (p.post_fields or {}).get(k) if k in POST_LOCKED else getattr(p, k)
+
+
+def _norm(k: str, v):
+    """Comparable, JSON-safe value of a locked field."""
+    if k == "price":
+        n = _num(v)
+        return float(n) if n is not None else None
+    if k in POST_LOCKED:
+        n = _num(v)
+        return int(n) if n is not None else None
+    if k == "is_exclusive":
+        return bool(v)
+    return (str(v).strip() or None) if v is not None else None
+
+
+def split_locked(db: Session, p: Property, data: dict) -> tuple[dict, dict]:
+    """(what the agent may apply now, {field: {old, new}} that needs the operator). Unchanged locked fields are dropped."""
+    data, locked = dict(data), {}
+    if isinstance(data.get("post_fields"), dict):
+        pf = clean_post_fields(data["post_fields"])
+        for k in POST_LOCKED:
+            old, new = _norm(k, _current(db, p, k)), _norm(k, pf.get(k))
+            if old != new:
+                locked[k] = {"old": old, "new": new}
+            pf.pop(k, None)
+            if old is not None:
+                pf[k] = old
+        data["post_fields"] = pf
+    for k in LOCKED_AFTER_VERIFY:
+        if k in data and k not in POST_LOCKED:
+            old, new = _norm(k, _current(db, p, k)), _norm(k, data.pop(k))
+            if old != new and not (k in ("owner_name", "owner_phone") and new is None):  # empty = "don't touch" there
+                locked[k] = {"old": old, "new": new}
+    return data, locked
+
+
+def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = None) -> Property:
+    """Edit from the card. After verification an agent's change of LOCKED_AFTER_VERIFY fields is not applied but sent as
+    a «Запрос оператору» (p.change_request is set then); the rest is applied as usual."""
     p = _prop(db, pid)
     _require_owner(p, actor)
+    locked = {}
+    if is_locked_for(p, actor):
+        data, locked = split_locked(db, p, data)
+    apply_update(db, p, data, actor)
+    p.change_request = None  # transient, read by the API
+    if locked:
+        from app.services import change_requests  # local: change_requests imports this module
+        p.change_request = change_requests.create(db, "property", p.id, "edit", locked, actor, reason)
+    db.commit()
+    if p.change_request is not None:
+        _notify("change_request_new", p.change_request)
+    return p
+
+
+def apply_update(db: Session, p: Property, data: dict, actor: User) -> None:
+    """No commit (an approved change request applies through here too)."""
     was_exclusive = p.is_exclusive
     _apply(p, data)
     _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor)
@@ -357,10 +429,9 @@ def update(db: Session, pid: int, data: dict, actor: User) -> Property:
         for a in external_ads(db, [p.id]).get(p.id, []):
             log_event(db, "property", p.id, "exclusive_conflict", actor, **a)
     p.updated_at = now()
-    log_event(db, "property", p.id, "updated", actor,
-              fields=sorted(k for k in data if k in EDITABLE or k in ("owner_name", "owner_phone")))
-    db.commit()
-    return p
+    fields = sorted(k for k in data if k in EDITABLE or k in ("owner_name", "owner_phone"))
+    if fields:
+        log_event(db, "property", p.id, "updated", actor, fields=fields)
 
 
 def _set_owner_contact(db: Session, p: Property, name: str | None, phone: str | None, actor: User) -> None:
@@ -391,16 +462,13 @@ def owner_refused(db: Session, pid: int, agent: User, comment: str | None = None
     p = _prop(db, pid, lock=True)
     _require_owner(p, agent)
     _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
-    _status(db, p, "archived", agent, "owner_refused", comment=(comment or "").strip() or None)
-    p.next_call_at = None
+    _archive_now(db, p, agent, "owner_refused", comment, action="owner_refused")
     o = db.get(Owner, p.owner_id) if p.owner_id else None
     if o is not None and o.agent_id == p.agent_id and not db.scalar(select(Property.id).where(  # he never became ours
             Property.owner_id == o.id, Property.id != p.id, Property.agent_id == o.agent_id,
             Property.status != "archived").limit(1)):
         o.agent_id = None
         log_event(db, "owner", o.id, "agent_released", agent, property_id=p.id)
-    for kind in ("call_retry", "owner_followup"):
-        jobs.cancel(db, kind, p.id)
     db.commit()
     return p
 
@@ -426,10 +494,7 @@ def owner_rented_self(db: Session, pid: int, agent: User, comment: str | None = 
     p = _prop(db, pid, lock=True)
     _require_owner(p, agent)
     _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
-    p.next_call_at = None
-    for kind in ("call_retry", "owner_followup"):
-        jobs.cancel(db, kind, p.id)
-    _status(db, p, "archived", agent, "owner_rented_self", comment=(comment or "").strip() or None)
+    _archive_now(db, p, agent, "rented_by_owner", comment, action="owner_rented_self")
     listing = db.get(Listing, p.listing_id) if p.listing_id else None
     if listing:
         listing.decision, listing.status, listing.status_reason = "rejected", "rejected", "сдал сам"
@@ -449,12 +514,57 @@ def refusals_for(db: Session, listing_ids: list[str]) -> dict[str, dict]:
     return out
 
 
-def archive(db: Session, pid: int, actor: User) -> Property:
-    p = _prop(db, pid)
+def check_archive(db: Session, p: Property, reason: str | None, comment: str | None, duplicate_of: int | None) -> dict:
+    """Validated archive fields: a reason of ARCHIVE_REASONS; «Другое» needs a comment, «Дубль» the object it duplicates."""
+    comment = (comment or "").strip() or None
+    if reason not in ARCHIVE_REASONS:
+        raise DomainError("bad_reason", "Укажите причину архивации")
+    if reason == "other" and not comment:
+        raise DomainError("comment_required", "Для «Другое» нужен комментарий")
+    dup = None
+    if reason == "duplicate":
+        dup = int(duplicate_of) if str(duplicate_of or "").strip().lstrip("#").isdigit() else None
+        if dup is None or dup == p.id or db.get(Property, dup) is None:
+            raise DomainError("bad_duplicate", "Укажите номер объекта, дублем которого является этот")
+    return {"reason": reason, "comment": comment, "duplicate_of": dup}
+
+
+def _archive_now(db: Session, p: Property, actor: User | None, reason: str, comment: str | None = None,
+                 duplicate_of: int | None = None, action: str | None = None) -> None:
+    """Into the archive with a reason (ARCHIVE_REASONS); reminders are cancelled. No commit, no validation."""
+    p.archive_reason, p.archive_comment, p.archived_at = reason, (comment or "").strip() or None, now()
+    if duplicate_of:
+        p.duplicate_of = duplicate_of
+    p.next_call_at = None
+    for kind in ("call_retry", "owner_followup"):
+        jobs.cancel(db, kind, p.id)
+    _status(db, p, "archived", actor, action, reason=reason, comment=p.archive_comment,
+            **({"duplicate_of": duplicate_of} if duplicate_of else {}))
+
+
+def archive(db: Session, pid: int, actor: User, reason: str | None = None, comment: str | None = None,
+            duplicate_of: int | None = None) -> Property:
+    """«В архив» with a mandatory reason. Objects are never deleted. Staff (and the agent before verification) archive
+    right away; a verified object's agent sends a «Запрос оператору» (p.change_request)."""
+    p = _prop(db, pid, lock=True)
     _require_owner(p, actor)
-    _status(db, p, "archived", actor)
-    jobs.cancel(db, "call_retry", p.id)
+    if p.status == "archived":
+        raise DomainError("bad_status", "Объект уже в архиве")
+    a = check_archive(db, p, reason, comment, duplicate_of)
+    p.change_request = None
+    if is_locked_for(p, actor):
+        from app.services import change_requests
+        payload = {"archive_reason": {"old": p.archive_reason, "new": a["reason"]}}
+        if a["comment"]:
+            payload["archive_comment"] = {"old": None, "new": a["comment"]}
+        if a["duplicate_of"]:
+            payload["duplicate_of"] = {"old": p.duplicate_of, "new": a["duplicate_of"]}
+        p.change_request = change_requests.create(db, "property", p.id, "archive", payload, actor, a["comment"])
+    else:
+        _archive_now(db, p, actor, a["reason"], a["comment"], a["duplicate_of"])
     db.commit()
+    if p.change_request is not None:
+        _notify("change_request_new", p.change_request)
     return p
 
 
@@ -556,7 +666,8 @@ def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
         log_event(db, "property", p.id, "owner_agent_override", actor, owner_id=o.id, owner_agent_id=o.agent_id)
 
 
-def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, reason: str | None = None) -> Owner:
+def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, reason: str | None = None,
+                   commit: bool = True) -> Owner:
     """«Передать собственника агенту…»: staff only (stage 6's agent «Запрос оператору» is approved through here, e.g. the
     agent left). The owner and his live objects of the previous agent move to the new one; every object of the owner
     and the owner himself get a history event."""
@@ -579,7 +690,8 @@ def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, 
         if moved:
             p.agent_id, p.updated_at = to.id, now()
         log_event(db, "property", p.id, "owner_transferred", by_user, owner_id=o.id, moved=moved, **data)
-    db.commit()
+    if commit:
+        db.commit()
     return o
 
 
@@ -894,6 +1006,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
     if ref:
         p.post_message_id, p.post_url = str(ref[0]), ref[1]
     p.published_at = now()
+    p.verified_at = p.verified_at or p.published_at
     if p.status == "review":
         p.review_comment, p.reviewed_by, p.reviewed_at = comment, actor.id, now()
         log_event(db, "property", p.id, "approved", actor, comment=comment)
@@ -908,13 +1021,15 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
 def mark_rented(db: Session, pid: int, actor: User | None) -> None:
     p = db.get(Property, pid)
     if p and p.status != "rented":
-        _status(db, p, "rented", actor)
+        p.archive_reason = "rented_by_us"
+        _status(db, p, "rented", actor, reason="rented_by_us")
 
 
 def unmark_rented(db: Session, pid: int, actor: User | None) -> None:
     """Confirmed deal cancelled → the object is back on the market."""
     p = db.get(Property, pid)
     if p and p.status == "rented":
+        p.archive_reason = None
         _status(db, p, "published", actor, "rent_cancelled")
 
 
@@ -1052,8 +1167,9 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                                     "address", "district", "cadastral_code", "currency", "bedrooms", "rooms", "floor",
                                     "total_floors", "description", "is_exclusive", "checklist", "ai_flags",
                                     "duplicate_of", "dup_check", "review_comment", "reviewed_by", "post_url",
-                                    "post_message_id", "owner_id", "post_fields")}
-    for c in ("taken_at", "next_call_at", "shoot_at", "reviewed_at", "published_at", "created_at", "updated_at"):
+                                    "post_message_id", "owner_id", "post_fields", "archive_reason", "archive_comment")}
+    for c in ("taken_at", "next_call_at", "shoot_at", "reviewed_at", "published_at", "verified_at", "archived_at",
+              "created_at", "updated_at"):
         v = getattr(p, c)
         d[c] = v.isoformat() if v else None
     d["price"] = float(p.price) if p.price is not None else None
@@ -1061,6 +1177,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     ref = lambda u: {"id": u.id, "name": u.name, "username": u.username, "agent_tag": u.agent_tag} if u else None  # noqa: E731
     d["agent"] = ref(agent)
     d["locked"] = bool(p.agent_id) and p.agent_id != user.id and user.role not in STAFF
+    d["locked_fields"] = list(LOCKED_AFTER_VERIFY) if is_locked_for(p, user) else []
     owner = get(Owner, p.owner_id)
     if owner:
         visible = can_see_owner(p, user)
@@ -1080,6 +1197,9 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
         d.update(card(db, p, user))
+        if can_see_owner(p, user):
+            from app.services import change_requests
+            d["change_requests"] = change_requests.outs(db, change_requests.pending_for(db, p))
     else:
         k = ("media_count", p.id)
         if k not in cache:

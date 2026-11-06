@@ -126,7 +126,7 @@ def test_archive_cancels_retry(db, sent):
     ag = make_user(db, "agent")
     p = properties.take(db, make_listing(db, "ss9").id, ag)
     properties.call_result(db, p.id, ag, False)
-    properties.archive(db, p.id, ag)
+    properties.archive(db, p.id, ag, "not_actual")
     assert not jobs.pending(db, "call_retry", p.id)
     assert db.get(Property, p.id).status == "archived"
 

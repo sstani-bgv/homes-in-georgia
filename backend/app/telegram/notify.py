@@ -595,6 +595,44 @@ def property_published(prop):
                 kb([[url_btn("📢 Пост в канале", g(prop, "post_url"))]]))
 
 
+# «Запрос оператору» (stage 6): field names as the CRM shows them
+CR_KIND = {"edit": "Изменение полей", "archive": "В архив", "transfer_owner": "Передать собственника", "delete": "Удаление → архив"}
+CR_FIELD = {"owner_name": "Собственник", "owner_phone": "Телефон собственника", "address": "Адрес", "cadastral_code": "Кадастр",
+            "source_url": "Ссылка на объявление", "is_exclusive": "Эксклюзив", "price": "Цена", "currency": "Валюта",
+            "deposit": "Залог", "sale_price": "Цена продажи", "archive_reason": "Причина", "archive_comment": "Комментарий",
+            "duplicate_of": "Дубль объекта", "owner_agent": "Агент собственника"}
+
+
+def cr_changes(cr):
+    fmt = lambda v: "—" if v in (None, "") else ("да" if v is True else "нет" if v is False else v)  # noqa: E731
+    return "\n".join(f"• {e(CR_FIELD.get(k, k))}: {e(fmt(v.get('old')))} → <b>{e(fmt(v.get('new')))}</b>"
+                     for k, v in (g(cr, "payload") or {}).items() if isinstance(v, dict))
+
+
+@safe
+def change_request_new(cr):
+    """To the operators: a new request in «Запросы»."""
+    pid, who = g(cr, "entity_id"), store.user(g(cr, "requested_by")) or {}
+    reason = g(cr, "reason")
+    to_operators("change_request", g(cr, "id"),
+                 f"✋ <b>Запрос оператору · объект #{pid}</b>\n{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))} · {e(staff_name(who))}\n"
+                 f"{cr_changes(cr)}" + (f"\n\nПричина: {e(reason)}" if reason else ""),
+                 lambda private: kb([[app_btn("🏠 Открыть объект", links.property_app(pid), private)]]))
+
+
+@safe
+def change_request_decided(cr):
+    """To the agent who asked: approved / rejected with the operator's comment."""
+    u = store.user(g(cr, "requested_by")) or {}
+    if not u.get("tg_id"):
+        return
+    ok = g(cr, "status") == "approved"
+    comment = g(cr, "decision_comment")
+    tg.send(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
+            f"{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))}\n{cr_changes(cr)}" + (f"\n\nКомментарий оператора: {e(comment)}" if comment else ""),
+            kb([[app_btn("🏠 Открыть объект", links.property_app(g(cr, "entity_id")))]]))
+
+
 def agency_chat():
     ch = conf("PUBLISH_CHAT_ID").strip() or "@" + conf("AGENCY_CHANNEL", "rent_tbilisi_ge").lstrip("@")
     return ch

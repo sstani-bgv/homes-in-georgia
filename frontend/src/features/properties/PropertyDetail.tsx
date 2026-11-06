@@ -12,8 +12,11 @@ import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
+import { RequestRow } from './requests';
+
+const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
 export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Ванная', 'Балкон', 'Вид из окна', 'Подъезд'];
 const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Фото', 'Проверка', 'Публикация'];
@@ -496,27 +499,28 @@ function Republish({ p }: { p: Property }) {
 const agentLabel = (a?: { name: string; agent_tag?: string | null } | null) => (a ? `${a.name}${a.agent_tag ? ` · #${a.agent_tag}` : ''}` : '—');
 
 /** «Передать собственника агенту…» (staff): the owner and his live objects move to another agent, with a history event. */
-function OwnerTransfer({ p }: { p: Property }) {
+function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
   const { toast, qc } = useProp(p.id);
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState('');
   const [reason, setReason] = useState('');
   const agents = useQuery({ queryKey: ['users', 'field'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: open });
   const m = useMutation({
-    mutationFn: () => api.owners.transfer(p.owner!.id, Number(to), reason),
-    onSuccess: () => { ['property', 'property-history', 'property-post'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Собственник передан агенту'); setOpen(false); },
+    mutationFn: async () => { await (request ? api.properties.transferRequest(p.id, Number(to), reason) : api.owners.transfer(p.owner!.id, Number(to), reason)); },
+    onSuccess: () => { ['property', 'property-history', 'property-post'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(request ? REQUEST_SENT : 'Собственник передан агенту'); setOpen(false); },
     onError: (e) => toast(errText(e), true),
   });
   const options = itemsOf(agents.data).filter((u) => u.id !== p.owner?.agent?.id).map((u) => ({ value: u.id, label: agentLabel(u) }));
   return (
     <>
-      <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />Передать собственника агенту…</Button>
+      <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />{request ? 'Запрос: передать собственника…' : 'Передать собственника агенту…'}</Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Передать собственника агенту">
         <div className="col gap-lg">
           <div className="muted" style={{ fontSize: 13 }}>Сейчас: {agentLabel(p.owner?.agent)}. Вместе с собственником перейдут его объекты в работе у прежнего агента. Передача запишется в историю.</div>
+          {request && <div className="alert alert-info" style={{ fontSize: 13 }}>Передачу проверит оператор: запрос уйдёт в «Запросы».</div>}
           <Field label="Новый агент"><Select value={to} placeholder="—" onChange={(e) => setTo(e.target.value)} options={options} /></Field>
           <Field label="Причина"><Input value={reason} placeholder="Например: агент ушёл из агентства" onChange={(e) => setReason(e.target.value)} /></Field>
-          <Button block disabled={!to} loading={m.isPending} onClick={() => m.mutate()}>Передать</Button>
+          <Button block disabled={!to} loading={m.isPending} onClick={() => m.mutate()}>{request ? 'Отправить запрос' : 'Передать'}</Button>
         </div>
       </Modal>
     </>
@@ -601,7 +605,15 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
   const [f, setF] = useState<Form>({});
   const v: Form = { ...p, owner_name: p.owner?.name || '', owner_phone: p.owner?.phone || '', ...f };
   const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
-  const save = useMutation({ mutationFn: () => api.properties.update(p.id, f), onSuccess: (r) => { set(r); toast('Сохранено'); onClose(); setF({}); }, onError: (e) => toast(errText(e), true) });
+  const [reason, setReason] = useState('');
+  const save = useMutation({
+    mutationFn: () => api.properties.update(p.id, { ...f, reason: reason || undefined }),
+    onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : 'Сохранено'); onClose(); setF({}); setReason(''); },
+    onError: (e) => toast(errText(e), true),
+  });
+  // after the operator's verification these fields go to «Запросы» (backend properties.LOCKED_AFTER_VERIFY)
+  const locked = new Set(p.locked_fields || []);
+  const lockHint = (k: string) => (locked.has(k) ? 'Изменение уйдёт оператору на проверку' : undefined);
   const numOrNull = (s: string) => (s === '' ? null : Number(s));
   const where = useQuery({ queryKey: ['property-elsewhere', p.id], queryFn: () => api.properties.elsewhere(p.id), enabled: open && !!v.is_exclusive });
   const found = where.data?.items || [];
@@ -609,18 +621,19 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
     <Modal open={open} onClose={onClose} title="Поля объекта">
       <div className="form-grid">
         <Field label="Район"><Select value={v.district || ''} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
-        <Field label="Адрес"><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
-        <Field label="Цена, $"><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
+        <Field label="Адрес" hint={lockHint('address')}><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
+        <Field label="Цена, $" hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
         <Field label="Спальни"><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
         <Field label="Площадь, м²"><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>
         <Field label="Этаж"><Input type="number" value={v.floor ?? ''} onChange={(e) => upd('floor', numOrNull(e.target.value))} /></Field>
         <Field label="Этажей в доме"><Input type="number" value={v.total_floors ?? ''} onChange={(e) => upd('total_floors', numOrNull(e.target.value))} /></Field>
-        <Field label="Собственник"><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
-        <Field label="Телефон собственника"><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
-        <Field label="Кадастровый код" className="span2"><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
+        <Field label="Собственник" hint={lockHint('owner_name')}><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
+        <Field label="Телефон собственника" hint={lockHint('owner_phone')}><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
+        <Field label="Кадастровый код" className="span2" hint={lockHint('cadastral_code')}><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
         <div className="span2 col gap-sm">
           <Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" />
+          {locked.has('is_exclusive') && <span className="muted" style={{ fontSize: 12 }}>{lockHint('is_exclusive')}</span>}
           {v.is_exclusive && (where.isLoading ? <span className="muted" style={{ fontSize: 12 }}>Проверяем другие сайты…</span>
             : found.length ? (
               <div className="alert alert-warn col gap-sm" style={{ fontSize: 13 }}>
@@ -637,7 +650,38 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
       </div>
       <div className="divider" />
       <PostFieldsForm value={v.post_fields || {}} onChange={(pf) => upd('post_fields', pf)} />
+      {locked.size > 0 && (
+        <div className="col gap-sm mt-lg">
+          <div className="alert alert-info" style={{ fontSize: 13 }}>Объект проверен оператором: собственник и телефон, адрес, кадастр, ссылка, эксклюзив, цена и залог меняются только через «Запрос оператору». Остальное сохранится сразу.</div>
+          <Field label="Причина изменения" hint="Оператор увидит её в запросе"><Input value={reason} placeholder="Например: собственник сменил номер" onChange={(e) => setReason(e.target.value)} /></Field>
+        </div>
+      )}
       <div className="row mt-lg"><Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={onClose}>Отмена</Button></div>
+    </Modal>
+  );
+}
+
+/** «В архив» with a mandatory reason; objects are never deleted. After verification the agent's archive is a request. */
+function ArchiveModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
+  const { toast, set } = useProp(p.id);
+  const [reason, setReason] = useState('');
+  const [comment, setComment] = useState('');
+  const [dup, setDup] = useState('');
+  const m = useMutation({
+    mutationFn: () => api.properties.archive(p.id, { reason, comment: comment || undefined, duplicate_of: reason === 'duplicate' ? Number(dup.replace('#', '')) || null : null }),
+    onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : 'Объект в архиве'); onClose(); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const ok = !!reason && (reason !== 'other' || !!comment.trim()) && (reason !== 'duplicate' || !!dup.trim());
+  return (
+    <Modal open={open} onClose={onClose} title="В архив">
+      <div className="col gap-lg">
+        <Field label="Причина"><Select value={reason} placeholder="—" onChange={(e) => setReason(e.target.value)} options={Object.entries(ARCHIVE_REASON).map(([value, label]) => ({ value, label }))} /></Field>
+        {reason === 'duplicate' && <Field label="Дубль объекта №" hint="Номер объекта, который остаётся в базе"><Input inputMode="numeric" value={dup} placeholder="#123" onChange={(e) => setDup(e.target.value)} /></Field>}
+        <Field label={reason === 'other' ? 'Комментарий (обязательно)' : 'Комментарий'}><Input value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
+        {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>Объект проверен оператором: архивация уйдёт оператору на проверку.</div>}
+        <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}><Archive size={16} />{(p.locked_fields || []).length ? 'Отправить запрос' : 'В архив'}</Button>
+      </div>
     </Modal>
   );
 }
@@ -646,9 +690,8 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const { user, isStaff } = useAuth();
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id) });
   const hist = useQuery({ queryKey: ['property-history', id], queryFn: () => api.properties.history(id) });
-  const { toast, set } = useProp(id);
   const [edit, setEdit] = useState(false);
-  const archive = useMutation({ mutationFn: () => api.properties.archive(id), onSuccess: (r) => { set(r); toast('Объект в архиве'); } });
+  const [archiving, setArchiving] = useState(false);
   const step = useMemo(() => (p ? stepOf(p) : 0), [p]);
 
   if (isLoading) return <Loading />;
@@ -674,6 +717,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   // the media / review steps show the files with their own controls
   const mediaInAction = ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status) || (p.status === 'review' && isStaff);
   const ownerVisible = !!(p.owner?.phone || p.owner_phone);
+  const objLink = (oid: number) => (compact ? `/m/properties/${oid}` : `/objects/${oid}`);
 
   return (
     <div className="col gap-lg">
@@ -706,6 +750,20 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <OwnerOutcomes p={p} />}
             </Card>
           )}
+          {p.status === 'archived' && (
+            <div className="alert alert-warn">
+              <span>
+                В архиве{p.archived_at ? ` с ${fmtDate(p.archived_at)}` : ''} · <b>{ARCHIVE_REASON[p.archive_reason || ''] || p.archive_reason || 'причина не указана'}</b>
+                {p.archive_reason === 'duplicate' && p.duplicate_of ? <> объекта <Link to={objLink(p.duplicate_of)}>#{p.duplicate_of}</Link></> : null}
+                {p.archive_comment ? ` · ${p.archive_comment}` : ''}
+              </span>
+            </div>
+          )}
+          {!!p.change_requests?.length && (
+            <Card label="Запрос оператору" title={`На проверке у оператора · ${p.change_requests.length}`}>
+              {p.change_requests.map((r) => <RequestRow key={r.id} r={r} showObject={false} />)}
+            </Card>
+          )}
           <ExclusiveConflict p={p} />
           {!mediaInAction && <Gallery p={p} />}
           <Publications p={p} />
@@ -722,7 +780,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
             ]} />
             {p.owner?.agent && p.agent && p.owner.agent.id !== p.agent.id && <div className="alert alert-warn mt" style={{ fontSize: 13 }}>Собственник закреплён за другим агентом: {agentLabel(p.owner.agent)}</div>}
             {!ownerVisible && p.owner && <div className="muted mt" style={{ fontSize: 12 }}>Контакты видны оператору и агенту объекта</div>}
-            {isStaff && p.owner && !p.owner.is_agent && <OwnerTransfer p={p} />}
+            {p.owner && !p.owner.is_agent && (isStaff ? <OwnerTransfer p={p} /> : (mine || p.owner.agent?.id === user?.id) && <OwnerTransfer p={p} request />)}
           </Card>
           <Card label="Объект" title="Параметры" actions={canWork ? <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />Править</Button> : undefined}>
             <KV items={[
@@ -741,17 +799,20 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               ['Взят', fmtDateTime(p.taken_at)],
               ['Съёмка', fmtDateTime(p.shoot_at)],
               ['Опубликован', fmtDateTime(p.published_at)],
+              ['Проверен оператором', p.verified_at ? fmtDateTime(p.verified_at) : 'нет'],
+              ...(p.archive_reason ? [['Причина архива', `${ARCHIVE_REASON[p.archive_reason] || p.archive_reason}${p.archive_comment ? ` · ${p.archive_comment}` : ''}`] as [string, React.ReactNode]] : []),
               ['Источник', p.source_url ? <a href={p.source_url} target="_blank" rel="noreferrer">открыть</a> : '—'],
             ]} />
             {p.description && <p className="muted mt" style={{ fontSize: 13 }}>{p.description}</p>}
-            {isStaff && !['archived', 'rented'].includes(p.status) && (
-              <Button variant="ghost" size="sm" className="mt" loading={archive.isPending} onClick={() => archive.mutate()}><Archive size={14} />В архив</Button>
+            {canWork && !['archived', 'rented'].includes(p.status) && (
+              <Button variant="ghost" size="sm" className="mt" onClick={() => setArchiving(true)}><Archive size={14} />В архив</Button>
             )}
           </Card>
           {compact && <Card label="История" title="События"><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>
       </div>
       <EditModal p={p} open={edit} onClose={() => setEdit(false)} />
+      <ArchiveModal p={p} open={archiving} onClose={() => setArchiving(false)} />
     </div>
   );
 }
