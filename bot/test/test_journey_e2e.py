@@ -196,6 +196,13 @@ class JourneyE2E(unittest.TestCase):
         self.assertNotIn("tg4", cat)  # $3000: over the questionnaire budget (districts may be relaxed when < 5 fit, budget never)
         self.assertIn("💡 подходит по анкете", card["text"])
         self.assertNotIn("t.me", card["text"])  # no sources on client cards
+        with db.tx() as c:  # stage 8: the shown cards and the saved questionnaire outlive the next request
+            views = c.execute("SELECT v.listing_id, v.search_id, s.results FROM client_views v JOIN searches s ON s.id = v.search_id "
+                              "WHERE v.client_id = ? AND v.source = 'search'", (cl["id"],)).fetchall()
+            saved = c.execute("SELECT data->'profile'->>'budget_max' FROM events WHERE entity = 'client' AND entity_id = ? "
+                              "AND action = 'profile_saved'", (str(cl["id"]),)).fetchall()
+        self.assertTrue(views and len(views) == views[0][2], views)
+        self.assertEqual([r[0] for r in saved], ["900"])
 
         m = self.fake.mark()
         f.press(CLIENT, card, "❤️ Нравится")                           # A3

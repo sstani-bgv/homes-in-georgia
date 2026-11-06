@@ -201,7 +201,8 @@ def listing(lid):
 
 
 # Client access never depends on a setting: moderation of a scraped listing is not agency publication.
-CLIENT_ELIGIBLE = "l.status = 'published' AND (l.source = 'agency' OR EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL))"
+# Fast track (stage 10): the owner agreed to show the object to our clients before the shoot (backend leads.client_listing_eligible).
+CLIENT_ELIGIBLE = "l.status = 'published' AND (l.source = 'agency' OR EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR (p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented')))))"
 
 
 def client_listing(lid):
@@ -390,8 +391,10 @@ def _finish(cl, items, understood, total, base, **state):
         translate([x["listing"] for x in items])
     update(cl, lambda s, r: (s["shown"].extend(x["listing"]["id"] for x in items), s.update(state)))
     with db.tx() as c:
-        c.execute("INSERT INTO searches (client_id, results, at) VALUES (?, ?, ?)", (cl["id"], len(items), db.now()))
-    return {"understood": public(understood), "total": max(total or 0, len(items)), "base": base, "items": items}
+        sid = c.execute("INSERT INTO searches (client_id, results, at) VALUES (?, ?, ?) RETURNING id",
+                        (cl["id"], len(items), db.now())).fetchone()[0]
+    return {"understood": public(understood), "total": max(total or 0, len(items)), "base": base, "items": items,
+            "search_id": sid}
 
 
 # ---------- hybrid search (search_mode=hybrid): filters in code + local embeddings, Codex reads ~20 lines ----------
@@ -717,6 +720,13 @@ def react(cl, lid, kind):
                   "ON CONFLICT (client_id, listing_id) DO UPDATE SET reaction = excluded.reaction",
                   (cl["id"], lid, kind, db.now()))
     return {"listing": i}
+
+
+def log_view(cl, lid, search_id=None, source="search"):
+    """A card the client got, kept for good (client_views, stage 8): state["shown"] is wiped by every new request."""
+    with db.tx() as c:
+        c.execute("INSERT INTO client_views (client_id, listing_id, property_id, search_id, source) "
+                  "VALUES (?, ?, (SELECT id FROM properties WHERE listing_id = ?), ?, ?)", (cl["id"], lid, lid, search_id, source))
 
 
 def who(cl, as_html=True):

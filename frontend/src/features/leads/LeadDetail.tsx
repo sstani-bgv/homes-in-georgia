@@ -270,7 +270,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
               </div>
             </div>
           )}
-          <Card label="Клиент" title={c?.name || 'Клиент'} actions={c?.lang ? <Badge tone="grey">{c.lang.toUpperCase()}</Badge> : undefined}>
+          <Card label="Клиент" title={isStaff && !compact && c?.id ? <Link to={`/clients/${c.id}`}>{c.name || 'Клиент'}</Link> : c?.name || 'Клиент'} actions={c?.lang ? <Badge tone="grey">{c.lang.toUpperCase()}</Badge> : undefined}>
             {lead.contacts_visible ?? (!!lead.contacts_shared_at || isStaff) ? (
               <div className="col gap-sm" style={{ marginBottom: 12 }}>
                 {c?.phone && <a href={`tel:${c.phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{c.phone}</a>}

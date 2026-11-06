@@ -12,7 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, pluralForm, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 
@@ -377,6 +377,52 @@ function NeedsCheck({ p }: { p: Property }) {
       <span className="grow">Новый объект из сделки — проверить: адрес, собственник и телефон, кадастр и ссылку. {isStaff ? 'Сделка по нему ждёт этой проверки.' : 'Оператор проверит его перед подтверждением сделки.'}</span>
       {isStaff && <Button size="sm" variant="ok" loading={m.isPending} onClick={() => m.mutate()}><CheckCircle2 size={14} />Объект проверен</Button>}
     </div>
+  );
+}
+
+/** Stage 10: active clients this object fits; owner first: after the call «Собственник согласен показать клиентам»
+ * opens it to clients with the ad's photos and sends it to them (at most 10, never twice to one client). */
+function Demand({ p }: { p: Property }) {
+  const { isStaff } = useAuth();
+  const { qc, toast, set } = useProp(p.id);
+  const { data: d } = useQuery({ queryKey: ['property-demand', p.id], queryFn: () => api.properties.demand(p.id) });
+  const m = useMutation({
+    mutationFn: () => api.properties.fastTrack(p.id),
+    onSuccess: (r) => {
+      set(r);
+      qc.invalidateQueries({ queryKey: ['property-demand', p.id] });
+      toast(r.sent ? `Объект отправлен клиентам: ${r.sent}` : 'Объект открыт клиентам · отправлять сейчас некому');
+    },
+    onError: (e) => toast(errText(e), true),
+  });
+  if (!d || (!d.count && !d.fast_track_at)) return null;
+  return (
+    <Card label="Спрос" title={d.count ? demandLabel(d.count) : 'Подходящих активных клиентов сейчас нет'}>
+      <div className="muted" style={{ fontSize: 13 }}>По анкетам клиентов: район, бюджет, спальни, животные, срок. Активные: писали боту за {d.active_days} дней, сделки ещё нет.</div>
+      {d.fast_track_at ? (
+        <div className="alert alert-ok mt">Собственник согласен · объект показан клиентам {fmtDateTime(d.fast_track_at)} · отправлено: {d.pushed}</div>
+      ) : d.can_fast_track && (
+        <div className="col gap-sm mt">
+          <div style={{ fontSize: 13 }}>Скажите собственнику: «У нас {d.count} {['клиент готов', 'клиента готовы', 'клиентов готовы'][pluralForm(d.count)]} смотреть». Если он согласен, объект сразу уйдёт этим клиентам в бот с фото из объявления (до 10 человек), дальше обычный путь: лайк, оператор, просмотр.</div>
+          <Button variant="ok" loading={m.isPending} onClick={() => { if (window.confirm('Собственник согласен показать квартиру клиентам? Объект уйдёт подходящим клиентам в бот.')) m.mutate(); }}>
+            <Send size={16} />Собственник согласен показать клиентам
+          </Button>
+        </div>
+      )}
+      {d.clients.length > 0 && (
+        <div className="mt">
+          {d.clients.map((c, i) => (
+            <div className="list-row" key={c.id ?? i}>
+              <div className="grow">
+                <div style={{ fontWeight: 600 }}>{isStaff && c.id ? <Link to={`/clients/${c.id}`}>{c.name || (c.username ? `@${c.username}` : `Клиент #${c.id}`)}</Link> : `Клиент ${i + 1}`}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{c.profile || 'анкета без условий'}</div>
+              </div>
+              {c.sent && <Badge tone="ok">отправлено</Badge>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -769,6 +815,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {canWork && ['taken', 'call_failed', 'owner_confirmed', 'shoot_scheduled'].includes(p.status) && <OwnerOutcomes p={p} />}
             </Card>
           )}
+          {!['archived', 'rented'].includes(p.status) && <Demand p={p} />}
           {p.status === 'archived' && (
             <div className="alert alert-warn">
               <span>

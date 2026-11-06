@@ -67,6 +67,8 @@ export interface Listing {
   known_object?: { id: number; address?: string | null } | null;
   /** «похож»: objects an operator should compare with (pending) */
   matches?: ListingMatch[];
+  /** active clients whose questionnaire fits this ad (stage 10) */
+  demand?: number;
 }
 
 export interface ListingMatch { property_id: number; address?: string | null; score: number; reasons: string[] }
@@ -144,6 +146,8 @@ export interface Property {
   exclusive_conflict?: ExternalAd[];
   /** stage 6: the operator's first approve / publish; after it locked_fields go through «Запрос оператору» for the agent */
   verified_at?: string | null;
+  /** stage 10: «Собственник согласен показать клиентам» */
+  fast_track_at?: string | null;
   locked_fields?: string[];
   /** stage 7: «Новый объект из сделки — проверить» (typed in the deal form, not verified yet) */
   needs_check?: boolean;
@@ -214,6 +218,42 @@ export interface Client {
   /** list: number of leads; detail: lead cards */
   leads?: number | Lead[];
   reactions?: { listing_id: string; reaction: string; created_at?: string | null; listing?: Listing | null }[];
+  channel?: string | null;
+  /** stage 8 card: «Сейчас: …», the timeline (newest first) and the refusals */
+  status?: string;
+  timeline?: ClientEvent[];
+  refusals?: ClientRefusal[];
+}
+
+export type ClientEventType = 'profile' | 'search' | 'shown' | 'reaction' | 'lead' | 'message' | 'viewing' | 'refusal' | 'deal';
+export interface ClientEvent {
+  at: string | null;
+  type: ClientEventType;
+  action?: string | null;
+  actor?: string | null;
+  text: string;
+  links: { listing_id?: string; property_id?: number; lead_id?: number; deal_id?: number };
+}
+export interface ClientRefusal {
+  lead_id: number;
+  listing_id?: string | null;
+  property_id?: number | null;
+  object: string;
+  at?: string | null;
+  by: 'client' | 'agent' | 'operator';
+  by_name: string;
+  reason?: string | null;
+  note?: string | null;
+  stage?: LeadStatus | null;
+}
+/** stage 10: active clients an object fits (agents get no names / ids) */
+export interface Demand {
+  count: number;
+  active_days: number;
+  pushed: number;
+  fast_track_at?: string | null;
+  can_fast_track: boolean;
+  clients: { id?: number; name?: string | null; username?: string | null; lang?: string; profile: string; sent: boolean }[];
 }
 
 export type LeadStatus =

@@ -294,7 +294,8 @@ async def search(chat_id, user, ctx, delay=2.5):
             # buttons can't sit on an album, so ❤️/👎 and "📍 On the map" (approximate zone only) go on the text card
             text, markup = core.card(i, x["reason"], x["near"], lang), core.card_keyboard(i, lang)
             m = await ctx.bot.send_message(chat_id, text, reply_markup=kb_of(markup))
-            await asyncio.to_thread(journey.remember_card, cl, i["id"], chat_id, m.message_id, text, markup["inline_keyboard"][1:])
+            await asyncio.to_thread(journey.remember_card, cl, i["id"], chat_id, m.message_id, text, markup["inline_keyboard"][1:],
+                                    res.get("search_id"))
         except Exception as e:
             logging.getLogger(__name__).warning("card of %s failed: %r", i.get("id"), e)
     st, prof = cl["state"], cl.get("profile") or {}

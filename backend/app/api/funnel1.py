@@ -10,7 +10,7 @@ from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
 from app.services import change_requests as CR
-from app.services import matching
+from app.services import demand, matching
 from app.services import properties as P
 from app.services.leads import ACTIVE
 from app.services.common import get_or_404, log_event
@@ -197,6 +197,19 @@ def _with_request(db: Session, p: Property, user: User) -> dict:
 @router.post("/properties/{pid}/call")
 def properties_call(pid: int, body: CallIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return P.out(db, P.call_result(db, pid, user, body.reached), user, full=True)
+
+
+@router.get("/properties/{pid}/demand")
+def properties_demand(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """Stage 10: active clients this object fits (agents: anonymized profiles, staff: who)."""
+    return demand.for_property(db, get_or_404(db, Property, pid, "property"), user)
+
+
+@router.post("/properties/{pid}/fast-track")
+def properties_fast_track(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Собственник согласен показать клиентам»: client-eligible with the ad's photos, sent to the matched clients."""
+    p, sent = demand.fast_track(db, pid, user)
+    return {**P.out(db, p, user, full=True), "sent": len(sent)}
 
 
 @router.post("/properties/{pid}/owner")

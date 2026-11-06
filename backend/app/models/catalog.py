@@ -163,6 +163,19 @@ class Search(Base):
     at = Column(Text, nullable=False)
 
 
+class ClientView(Base):
+    """A card the client bot sent to this client, kept for good (stage 8); source: search | push (stage 10)."""
+    __tablename__ = "client_views"
+    __table_args__ = (Index("client_views_client_idx", "client_id", "shown_at"), Index("client_views_listing_idx", "listing_id"))
+    id = Column(Integer, primary_key=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    listing_id = Column(Text, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"))
+    search_id = Column(Integer, ForeignKey("searches.id", ondelete="SET NULL"))
+    source = Column(Text, nullable=False, server_default="search")
+    shown_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class TgFile(Base):
     __tablename__ = "tg_files"
     path = Column(Text, primary_key=True)

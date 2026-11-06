@@ -170,8 +170,12 @@ def save_profile(cl, fn):
 
 
 def set_done(cl, done):
+    import json
     with db.tx() as c:
         c.execute("UPDATE clients SET profile_done = ? WHERE id = ?", (int(done), cl["id"]))
+        if done:  # the client card's timeline (stage 8): each finished questionnaire with what it said
+            c.execute("INSERT INTO events (entity, entity_id, action, actor_label, data, at) VALUES ('client', ?, 'profile_saved', "
+                      "'client', ?::jsonb, now())", (str(cl["id"]), json.dumps({"profile": load_profile(cl)}, ensure_ascii=False)))
     cl["profile_done"] = int(done)
 
 
@@ -471,8 +475,8 @@ async def on_start(update: Update, ctx, cl):
 
 # ---------- A2b/A3: the card and ❤️ ----------
 
-def remember_card(cl, listing_id, chat_id, message_id, text, rows):
-    """The sent card (text + extra button rows) so notify.lead_client_ack can rewrite it (A3)."""
+def remember_card(cl, listing_id, chat_id, message_id, text, rows, search_id=None):
+    """The sent card (text + extra button rows) so notify.lead_client_ack can rewrite it (A3); logged in client_views."""
     def fn(st, r):
         cards = st.setdefault("cards", {})
         cards.pop(listing_id, None)
@@ -481,6 +485,7 @@ def remember_card(cl, listing_id, chat_id, message_id, text, rows):
             cards.pop(k)
     core.update(cl, fn)
     core.remember_message("card", f"{cl['id']}:{listing_id}", chat_id, message_id)
+    core.log_view(cl, listing_id, search_id)
 
 
 def request_of(cl):

@@ -10,6 +10,7 @@ from app.api.auth import user_out
 from app.api.deps import ADMIN_ROLES, STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import STAFF, ChannelPost, Client, Deal, Lead, Listing, Property, Reaction, Report, User
+from app.services import clients as client_card
 from app.services import deals, leads, properties, reports, users
 from app.services.common import TZ, get_or_404, jload, now
 from app.services.errors import forbidden
@@ -175,7 +176,7 @@ def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Ses
 @router.get("/clients/{cid}")
 def get_client(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
     c = get_or_404(db, Client, cid, "client")
-    d = client_out(c)
+    d = {**client_out(c), **client_card.card(db, c)}  # stage 8: status, timeline, refusals
     d["leads"] = [leads.card(db, x, user) for x in db.scalars(select(Lead).where(Lead.client_id == cid)
                                                             .order_by(Lead.created_ts.desc()))]
     d["reactions"] = [{"listing_id": r.listing_id, "reaction": r.reaction, "created_at": r.created_at,

@@ -195,7 +195,9 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
     ids = [r.id for r in rows]
     sim, refused, objs = similar_in_channel(db, rows), refusals_for(db, ids), known_objects(db, ids)
-    return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id),
+    from app.services import demand
+    want = demand.listing_counts(db, rows)  # stage 10: «Под этот объект подходят N активных клиентов»
+    return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id), "demand": want.get(r.id, 0),
                        **objs.get(r.id, {"known_object": None, "matches": []})} for r in rows],
             "total": total, "known_total": known_total}
 
@@ -1170,7 +1172,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                                     "duplicate_of", "dup_check", "review_comment", "reviewed_by", "post_url",
                                     "post_message_id", "owner_id", "post_fields", "archive_reason", "archive_comment")}
     for c in ("taken_at", "next_call_at", "shoot_at", "reviewed_at", "published_at", "verified_at", "archived_at",
-              "created_at", "updated_at"):
+              "fast_track_at", "created_at", "updated_at"):
         v = getattr(p, c)
         d[c] = v.isoformat() if v else None
     d["price"] = float(p.price) if p.price is not None else None

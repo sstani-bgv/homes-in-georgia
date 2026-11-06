@@ -73,6 +73,9 @@ class Property(Base):
     archive_reason = Column(Text)  # ARCHIVE_REASONS
     archive_comment = Column(Text)
     archived_at = Column(DateTime(timezone=True))
+    # stage 10: «Собственник согласен показать клиентам»: client-eligible with the ad's photos before the publication
+    fast_track_at = Column(DateTime(timezone=True))
+    fast_track_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     # + text_embedding / photo_embedding vector(768) (migration 0006): not mapped, raw SQL in app/embeddings.py

@@ -321,6 +321,28 @@ def handoff(lead, cl, i, lang):
     tg.send(chat, text, kb([[url_btn(write, url)], [url_btn(back, links.tg_user(conf("BOT_USERNAME")))]]), html=False)
 
 
+PUSH = {"ru": ("🏡 Новый вариант под ваш запрос, его ещё нет в канале:", "❤️ Нравится", "👎 Не то"),
+        "en": ("🏡 A new option for your request, not in the channel yet:", "❤️ Like", "👎 Not it"),
+        "ka": ("🏡 ახალი ვარიანტი თქვენი მოთხოვნით, არხში ჯერ არ არის:", "❤️ მომწონს", "👎 არ მომწონს")}
+
+
+@safe
+def object_to_client(cl, listing_id):
+    """Stage 10, owner-first: an object the agent fast-tracked, as a client card (photo from the ad + ❤️/👎 with the
+    bot's callbacks like:<id> / no:<id>, so the usual like → lead flow follows). Facts only: no ad text, links or phones."""
+    i = store.listing(listing_id)
+    chat = chat_of(cl or {})
+    if not i or not chat:
+        return None
+    lang = texts.lang_of(cl.get("lang"))
+    intro, like, no = PUSH[lang]
+    text = "\n".join(x for x in (intro, f"<b>{e(headline(i, lang))}</b>", f"📍 {e(address(i, lang))}", e(flat_line(i, lang))) if x)
+    markup = kb([[cb(like, f"like:{i['id']}"), cb(no, f"no:{i['id']}")]])
+    photo = first_photo(i)
+    m = photo and tg.send_photo(chat, photo if os.path.exists(photo) else os.path.join(bot_dir(), photo), text, markup)
+    return m or tg.send(chat, text, markup)
+
+
 SLOTS = {"ru": ("Собственник готов показать квартиру 🏡\n<b>Выберите удобное время:</b>", "🕐 Предложить своё время", "Открыть объявление"),
          "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Suggest my own time", "Open the listing"),
          "ka": ("მესაკუთრე მზადაა ბინის საჩვენებლად 🏡\n<b>აირჩიეთ მოსახერხებელი დრო:</b>", "🕐 ჩემი დროის შეთავაზება", "განცხადების გახსნა")}

@@ -118,3 +118,15 @@ export function isoToLocal(iso?: string | null): string {
 export function todayStr(): string { return new Date().toISOString().slice(0, 10); }
 export function levelFor(n: number) { return n < 11 ? 50 : n < 101 ? 70 : 90; }
 export function nextLevelAt(n: number) { return n < 11 ? 11 : n < 101 ? 101 : null; }
+
+/** «Под этот объект подходят 4 активных клиента» (stage 10) */
+export function demandLabel(n: number): string {
+  const f = pluralForm(n);
+  return `Под этот объект ${f === 0 ? 'подходит' : 'подходят'} ${n} ${['активный клиент', 'активных клиента', 'активных клиентов'][f]}`;
+}
+
+/** 0: 1/21/31…, 1: 2-4/22-24…, 2: the rest */
+export function pluralForm(n: number): 0 | 1 | 2 {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2;
+}

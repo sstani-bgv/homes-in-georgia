@@ -14,7 +14,7 @@ import { DealsPage } from './pages/Deals';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
 import { MDeal, MDealView, MLead, MLeads, MMe, MNew, MNotFound, MProperties, MProperty, MReports, MobileLayout } from './pages/Mobile';
-import { ClientsPage, OwnersPage } from './pages/People';
+import { ClientPage, ClientsPage, OwnersPage } from './pages/People';
 import { ReportsPage } from './pages/Reports';
 import { TeamPage } from './pages/Team';
 
@@ -87,6 +87,7 @@ export function App() {
         <Route path="deals/:id" element={<DealRedirect />} />
         <Route path="properties/:id" element={<PropertyRedirect />} />
         <Route path="clients" element={<RequireAuth roles={STAFF}><ClientsPage /></RequireAuth>} />
+        <Route path="clients/:id" element={<RequireAuth roles={STAFF}><ClientPage /></RequireAuth>} />
         <Route path="owners" element={<RequireAuth roles={STAFF}><OwnersPage /></RequireAuth>} />
         <Route path="team" element={<TeamPage />} />
         <Route path="contracts" element={<ContractsPage />} />

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Search } from 'lucide-react';
+import { ExternalLink, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Property } from '../../api/types';
@@ -10,7 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
-import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, fmtDateTime, money } from '../../lib/format';
+import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
 const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', tg: 'Telegram' };
@@ -115,6 +115,7 @@ export function NewListings({ base = '' }: { base?: string }) {
               <ListingCard key={l.id} listing={l} locked={lockedByOther ? `Взял ${l.taken_by?.name}` : undefined}
                 footer={
                   <div className="col gap-sm">
+                    {!!l.demand && <div className="alert alert-info row gap-sm" style={{ fontSize: 12, fontWeight: 700 }}><Users size={14} />{demandLabel(l.demand)}</div>}
                     {l.known_object && (
                       <Link className="alert alert-ok" to={objLink(l.known_object.id)} style={{ fontSize: 12, fontWeight: 700 }}>
                         Уже есть в базе · объект #{l.known_object.id}

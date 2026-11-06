@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -92,10 +92,12 @@ def _require_status(lead: Lead, *allowed: str):
 # ---------------------------------------------------------------- client side (bot)
 
 def client_listing_eligible(db: Session, listing_id: str) -> bool:
-    """Clients can request only published agency listings or properties published through funnel 1."""
-    published_property = select(Property.id).where(Property.listing_id == Listing.id, Property.status == "published",
-                                                  func.trim(func.coalesce(Property.post_url, "")) != "",
-                                                  func.trim(func.coalesce(Property.post_message_id, "")) != "").exists()
+    """Clients can request only published agency listings, properties published through funnel 1, or fast-tracked ones
+    (stage 10: the owner agreed to show them before the publication). Same rule as bot/core.py CLIENT_ELIGIBLE."""
+    published = and_(Property.status == "published", func.trim(func.coalesce(Property.post_url, "")) != "",
+                     func.trim(func.coalesce(Property.post_message_id, "")) != "")
+    fast = and_(Property.fast_track_at.isnot(None), Property.status.not_in(("archived", "rented")))
+    published_property = select(Property.id).where(Property.listing_id == Listing.id, or_(published, fast)).exists()
     return db.scalar(select(Listing.id).where(Listing.id == listing_id, Listing.status == "published",
                                               or_(Listing.source == "agency", published_property))) is not None
 
