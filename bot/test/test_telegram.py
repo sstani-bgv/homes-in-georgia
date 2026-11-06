@@ -168,8 +168,12 @@ class NotifyTest(unittest.TestCase):
         self.lead.update(operator_id=self.op, agent_id=self.ag)
         mark = self.fake.mark()
         notify.lead_client_reply(self.lead, "Завтра в 13:00")
-        self.assertIn("Завтра в 13:00", self.last("sendMessage", 500, mark)["text"])
-        self.assertFalse(self.fake.calls(chat=600, since=mark))
+        for chat in (500, 600):  # operator AND agent, in private, with the lead button
+            msg = self.last("sendMessage", chat, mark)
+            self.assertIn(f"Ответ клиента по заявке #{self.lid}</b>", msg["text"])
+            self.assertIn("Завтра в 13:00", msg["text"])
+            self.assertEqual(self.buttons(msg), [("📋 Открыть заявку", f"https://crm.test/m/leads/{self.lid}")])
+        self.assertFalse(self.fake.calls(chat=-100777, since=mark))
         with db.tx() as c:
             c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.op,))
         mark = self.fake.mark()
@@ -178,11 +182,29 @@ class NotifyTest(unittest.TestCase):
         self.assertIn("В 14:00", delivered)
         self.assertNotIn("Анна", delivered)
         self.assertNotIn("anna", delivered)
+        self.assertIn("В 14:00", self.last("sendMessage", -100777, mark)["text"])  # operator unreachable: operators chat
         with db.tx() as c:
             c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.ag,))
         mark = self.fake.mark()
         notify.lead_client_reply(self.lead, "Уточнение")
         self.assertIn("Уточнение", self.last("sendMessage", -100777, mark)["text"])
+
+    def test_client_time_to_operator(self):
+        at = datetime.now(texts.tz()).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        lead = {**self.lead, "operator_id": self.op, "agent_id": self.ag, "viewing_at": at}
+        mark = self.fake.mark()
+        notify.client_time_staff(lead)
+        msg = self.last("sendMessage", 500, mark)
+        for want in (f"Клиент выбрал время просмотра · заявка #{self.lid}", texts.when_long(at), "Ваке, ул. Каштановая, 12", "Агент: Георгий"):
+            self.assertIn(want, msg["text"])
+        self.assertEqual(self.buttons(msg), [("📋 Открыть заявку", f"https://crm.test/m/leads/{self.lid}")])
+        self.assertFalse(self.fake.calls(chat=600, since=mark))  # the agent gets C8 contacts_to_agent instead
+        with db.tx() as c:
+            c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.op,))
+        mark = self.fake.mark()
+        notify.client_time_staff(lead, "суббота после 15")
+        self.assertIn("Клиент предложил своё время · заявка", self.last("sendMessage", -100777, mark)["text"])
+        self.assertIn("«суббота после 15»", self.last("sendMessage", -100777, mark)["text"])
 
     def test_group_card_take_and_assign(self):
         m = self.fake.mark()

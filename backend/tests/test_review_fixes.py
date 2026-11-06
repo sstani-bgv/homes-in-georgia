@@ -224,6 +224,31 @@ def test_listing_detail_includes_only_linked_owner_for_authorized_agent(db, clie
     assert "owner" not in client.get(url, headers=auth(ag)).json()  # no guessing by address
 
 
+def test_lead_detail_owner_call_for_operator_and_assigned_agent(db, client):
+    op, ag, other = make_user(db, "operator"), make_user(db, "agent"), make_user(db, "agent")
+    listing = make_listing(db, text="Сдаю, звоните +995 555 12 34 56")
+    owner = Owner(name="Собственник", phone="+995 599 11 22 33")
+    db.add(owner)
+    db.flush()
+    prop = Property(listing_id=listing.id, owner_id=owner.id, agent_id=other.id, status="published",
+                    post_url="https://t.me/rent_tbilisi_ge/1", post_message_id="1")
+    db.add(prop)
+    db.commit()
+    lead = leads.create_from_like(db, make_client(db).id, listing.id)
+    url = f"/api/leads/{lead.id}"
+    assert client.get(url, headers=auth(op)).json()["owner"]["phone"] == owner.phone
+    leads.assign_agent(db, lead.id, ag.id, op)
+    d = client.get(url, headers=auth(ag)).json()
+    assert (d["owner"]["phone"], d["property_id"]) == (owner.phone, prop.id)
+    assert client.get("/api/leads", headers=auth(ag)).json()["items"][0].get("owner") is None  # lists carry no phones
+    prop.owner_id = None
+    db.commit()
+    assert client.get(url, headers=auth(ag)).json()["owner"]["phone"] == "+995 555 12 34 56"  # listing text fallback
+    lead.status = "refused"
+    db.commit()
+    assert client.get(url, headers=auth(ag)).json()["owner"] is None
+
+
 def test_retake_archived_and_agent_mark_keeps_owner(db, sent):
     ag = make_user(db, "agent")
     p = properties.take(db, make_listing(db).id, ag)

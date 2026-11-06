@@ -75,6 +75,24 @@ def to_operators(kind, ref, text, keyboard_for):
             store.remember(kind, ref, m["chat"]["id"], m["message_id"])
 
 
+def to_lead_staff(lead, text, keyboard_for, keys=("operator_id", "agent_id")):
+    """Private messages to the lead's operator and/or agent; the operators chat too when the operator isn't reached
+    (no operator yet, no Telegram id, or the send failed)."""
+    sent, op_ok = set(), False
+    for k in keys:
+        u = store.user(g(lead, k)) or {}
+        tid = u.get("tg_id")
+        if not tid or not u.get("is_active", True):
+            continue
+        if str(tid) in sent or tg.send(tid, text, keyboard_for(True)):
+            sent.add(str(tid))
+            op_ok = op_ok or k == "operator_id"
+    if not op_ok:
+        for chat, topic in operators_targets():
+            if str(chat) not in sent:
+                tg.send(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
+
+
 def edit_refs(kind, ref, text, keyboard_for):
     for chat, mid in store.refs(kind, ref):
         tg.edit(chat, mid, text, keyboard_for(is_private(chat)))
@@ -632,18 +650,30 @@ def client_message(client, text, lead_id):
         return m
 
 
+def lead_btn(lid):
+    return lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]])
+
+
 @safe
 def lead_client_reply(lead, text):
-    """A client reply is saved in the lead and delivered to its operator, or the operators inbox."""
-    cl, _, _ = ctx(lead)
+    """A client reply is saved in the lead and delivered to its operator and agent (the operators chat as fallback)."""
     lid = g(lead, "id")
-    body = f"💬 <b>Ответ клиента · заявка #{lid}</b>\n\n{e(text)}"
-    op = store.user(g(lead, "operator_id")) or {}
-    ag = store.user(g(lead, "agent_id")) or {}
-    recipient = next((u for u in (op, ag) if u.get("is_active", True) and u.get("tg_id")), None)
-    if recipient:
-        return tg.send(recipient["tg_id"], body, kb([[app_btn("📋 Открыть заявку", links.lead_app(lid))]]))
-    to_operators(None, lid, body, lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]]))
+    to_lead_staff(lead, f"💬 <b>Ответ клиента по заявке #{lid}</b>\n\n{e(text)}", lead_btn(lid))
+
+
+@safe
+def client_time_staff(lead, own_text=None):
+    """The client picked a slot (own_text None) or wrote their own time -> the lead's operator (operators chat as
+    fallback). The agent gets C8 contacts_to_agent / C6 lead_assigned_agent."""
+    _, i, _ = ctx(lead)
+    lid, at = g(lead, "id"), g(lead, "viewing_at")
+    if own_text is None:
+        head = f"✅ <b>Клиент выбрал время просмотра · заявка #{lid}</b>\n🕐 {e(texts.when_long(at)) if at else '—'}"
+    else:
+        head = f"🕐 <b>Клиент предложил своё время · заявка #{lid}</b>\n«{e(own_text)}»"
+    ag = store.user(g(lead, "agent_id"))
+    text = head + (f"\n🏠 {e(address(i))}" if i else "") + f"\n👤 Агент: {e(staff_name(ag))}"
+    to_lead_staff(lead, text, lead_btn(lid), keys=("operator_id",))
 
 
 @safe

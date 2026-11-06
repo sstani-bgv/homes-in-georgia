@@ -230,6 +230,8 @@ class JourneyE2E(unittest.TestCase):
         self.assertEqual(f.markup(conf)[0][0]["url"], "https://t.me/georgiy_e2e")
         contacts = self.with_text(AGENT["id"], "🔓 <b>Контакты клиента</b>", m)   # C8
         self.assertIn("@anna_e2e", contacts["text"])
+        picked = self.with_text(OPERATOR["id"], "Клиент выбрал время просмотра · заявка #1", m)   # the operator too
+        self.assertIn("Агент: Георгий", picked["text"])
         self.find(cid, lambda c: c["method"] == "editMessageReplyMarkup" and f.markup(c)[0][0]["text"] == "✓ " + times[0], m, "✓ slot")
 
         m = self.press(CLIENT, cid, "⏰ Опаздываю", since=m)
@@ -304,6 +306,7 @@ class JourneyE2E(unittest.TestCase):
         m = self.say(u, "Saturday after 3 pm")
         self.with_text(u["id"], "Your time was saved", m)
         again = self.with_text(AGENT["id"], "Клиент предложил своё время:</b> Saturday after 3 pm", m)
+        self.with_text(OPERATOR["id"], f"Клиент предложил своё время · заявка #{lead.id}</b>\n«Saturday after 3 pm»", m)
         self.assertIn(f"ls:quick:{lead.id}", [b.get("callback_data") for row in f.markup(again) for b in row])
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, client_note FROM leads WHERE id = ?", (lead.id,)).fetchone()[:],
@@ -333,7 +336,7 @@ class JourneyE2E(unittest.TestCase):
         f.press(u, original, "💬 Ответить")
         self.with_text(u["id"], f"Напишите ответ по заявке #{first.id}", mark)
         mark = self.say(u, "Завтра в 13:00")
-        self.with_text(OPERATOR["id"], "Завтра в 13:00", mark)
+        self.with_text(OPERATOR["id"], f"Ответ клиента по заявке #{first.id}</b>\n\nЗавтра в 13:00", mark)
         self.with_text(u["id"], "Ответ сохранён", mark)
         # Native Telegram reply-to also resolves the exact originating request.
         mark = f.mark()

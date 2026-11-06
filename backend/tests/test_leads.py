@@ -67,6 +67,8 @@ def test_lead_journey_end_to_end(db, client, sent):
     lead = leads.choose_slot(db, slot_id, client_id=anna.id)
     assert lead.status == "time_chosen" and lead.contacts_shared_at and lead.viewing_at == t1
     assert sent.of("contacts_to_agent") and sent.of("slot_confirmed_client")[0][1].id == georgiy.id
+    assert sent.of("client_time_staff")[-1][0].id == lead.id  # the operator learns the chosen time (Stage 0)
+    assert db.query(LeadEvent).filter_by(lead_id=lead.id, kind="time_chosen").one().note
     d = client.get(f"/api/leads/{lead.id}", headers=auth(georgiy)).json()
     assert d["contacts_visible"] and d["client"]["phone"] == "+995 555 000 111"
     assert any(h["action"] == "contacts_shared" for h in d["history"])
@@ -189,3 +191,12 @@ def test_client_messages_preserve_history_and_reject_foreign_reply(db, sent, mon
     leads.message_from_client(db, lead.id, cl.id, "Завтра в 13:00")
     assert db.query(LeadEvent).filter_by(lead_id=lead.id, kind="message_from_client").one().note == "Завтра в 13:00"
     assert sent.of("lead_client_reply")[-1][1] == "Завтра в 13:00"
+
+
+def test_client_own_time_reaches_the_operator(db, sent):
+    op, ag = make_user(db, "operator"), make_user(db, "agent")
+    lead = leads.create_from_like(db, make_client(db).id, make_listing(db).id)
+    leads.assign_agent(db, lead.id, ag.id, op)
+    leads.client_own_time(db, lead.id, "суббота после 15")
+    assert sent.of("client_time_staff")[-1][1] == "суббота после 15"
+    assert sent.of("lead_assigned_agent")

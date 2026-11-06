@@ -185,6 +185,7 @@ export interface Lead {
   viewing_at?: string | null;
   contacts_shared_at?: string | null;
   contacts_visible?: boolean;
+  owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } | null;
   client_outcome?: string | null;
   agent_outcome?: string | null;
   refusal_reason?: string | null;

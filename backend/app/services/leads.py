@@ -7,11 +7,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings as env
-from app.models import (FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Property, Reaction, User)
+from app.models import (FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
 from app.services import jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
+from app.services.dedup import extract_phones
 from app.services.errors import DomainError, forbidden
-from app.telegram import notify
+from app.telegram import notify, texts
 
 log = logging.getLogger(__name__)
 
@@ -178,12 +179,13 @@ def choose_slot(db: Session, slot_id: int, client_id: int | None = None) -> Lead
     _touch(lead, "time_chosen")
     _set_sla(db, lead, None)
     _schedule_viewing_jobs(db, lead)
-    _event(db, lead, "time_chosen", label="client", viewing_at=slot.starts_at.isoformat())
+    _event(db, lead, "time_chosen", label="client", note=texts.when_long(slot.starts_at), viewing_at=slot.starts_at.isoformat())
     _event(db, lead, "contacts_shared", label="bot", note="Бот передал контакты агенту")
     db.commit()
     agent = db.get(User, lead.agent_id) if lead.agent_id else None
     _notify("slot_confirmed_client", lead, agent)
     _notify("contacts_to_agent", lead)
+    _notify("client_time_staff", lead)
     return lead
 
 
@@ -207,6 +209,7 @@ def client_own_time(db: Session, lead_id: int, text: str) -> Lead:
     _set_sla(db, lead, "agent_slots")
     db.commit()
     _notify("lead_assigned_agent", lead)
+    _notify("client_time_staff", lead, lead.client_note)
     return lead
 
 
@@ -560,8 +563,24 @@ def card(db: Session, lead: Lead, user: User, cache: dict | None = None) -> dict
     }
 
 
+def owner_contact(db: Session, lead: Lead, user: User, prop: Property | None) -> dict | None:
+    """«Позвонить собственнику» in the lead: staff and the lead's agent while the lead is active (as listing_get)."""
+    if not (user.role in STAFF or (lead.agent_id == user.id and lead.status in ACTIVE)):
+        return None
+    owner = db.get(Owner, prop.owner_id) if prop and prop.owner_id else None
+    if owner and owner.phone:
+        return {"name": owner.name, "phone": owner.phone, "is_agent": owner.is_agent}
+    listing = db.get(Listing, lead.listing_id) if lead.listing_id else None
+    phones = extract_phones(listing.text or "") if listing else []
+    return {"name": None, "phone": phones[0], "is_agent": False} if phones else None
+
+
 def detail(db: Session, lead: Lead, user: User) -> dict:
     d = card(db, lead, user)
+    prop = db.get(Property, lead.property_id) if lead.property_id else (
+        db.scalar(select(Property).where(Property.listing_id == lead.listing_id)) if lead.listing_id else None)
+    d["property_id"] = prop.id if prop else None
+    d["owner"] = owner_contact(db, lead, user, prop)
     d["slots"] = [{"id": s.id, "starts_at": s.starts_at.isoformat(), "chosen": s.chosen}
                   for s in db.scalars(select(LeadSlot).where(LeadSlot.lead_id == lead.id).order_by(LeadSlot.starts_at))]
     d["history"] = history(db, lead.id)

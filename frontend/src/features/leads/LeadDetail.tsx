@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, Hand, MessageSquare, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
@@ -197,6 +197,8 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const closed = ['rented', 'refused'].includes(lead.status);
   const l = lead.listing;
   const showOutcome = ['viewing_done', 'deal_pending', 'rented', 'refused', 'thinking'].includes(lead.status) || lead.agent_outcome || lead.client_outcome;
+  const objectHref = lead.property_id ? (compact ? `/m/properties/${lead.property_id}` : `/objects/${lead.property_id}`) : null;
+  const ownerPhone = lead.owner?.phone;
 
   return (
     <div className="col gap-lg">
@@ -204,12 +206,17 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
         <div className="row row-between row-wrap">
           <div>
             <div className="label">Заявка #{lead.id} · {fmtDateTime(lead.created_at)}</div>
-            <h1 style={{ fontSize: compact ? 20 : 24 }}>{l?.title || `Объект ${lead.listing_id || ''}`}</h1>
+            <h1 style={{ fontSize: compact ? 20 : 24 }}>
+              {objectHref ? <Link to={objectHref}>{l?.title || `Объект #${lead.property_id}`}</Link>
+                : l ? <button type="button" className="btn-ghost" style={{ border: 0, background: 'none', padding: 0, font: 'inherit', cursor: 'pointer', textAlign: 'left' }} onClick={() => setListingOpen(true)}>{l.title || `Объект ${lead.listing_id || ''}`}</button>
+                : `Объект ${lead.listing_id || ''}`}
+            </h1>
             <div className="row row-wrap gap-sm mt"><LeadStatusBadge status={lead.status} /><SlaChip lead={lead} />
               {lead.viewing_at && <Badge tone="solid"><CalendarClock size={12} />просмотр {fmtSlot(lead.viewing_at)}</Badge>}
             </div>
           </div>
           <div className="row row-wrap">
+            {ownerPhone && <a className="btn btn-lg" href={`tel:${ownerPhone.replace(/[^+\d]/g, '')}`}><Phone size={18} />{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</a>}
             {isStaff && lead.status === 'new' && <Button size="lg" loading={take.isPending} onClick={() => take.mutate()}><Hand size={18} />Взять</Button>}
             {isStaff && !closed && <Button size={lead.status === 'operator_taken' ? 'lg' : undefined} variant={lead.status === 'operator_taken' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}><UserPlus size={16} />{lead.agent ? 'Сменить агента' : 'Назначить агента'}</Button>}
           </div>
@@ -250,14 +257,16 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
         <div className="col gap-lg">
           {l && (
             <div className="card lcard">
-              {l.photos?.[0] && <button type="button" className="lcard-photo" onClick={() => setListingOpen(true)} aria-label="Открыть объявление и контакты" style={{ border: 0, padding: 0, width: '100%', cursor: 'pointer' }}><img src={mediaUrl(l.photos[0])} alt="" /></button>}
+              {l.photos?.[0] && (objectHref
+                ? <Link to={objectHref} className="lcard-photo" aria-label="Открыть объект" style={{ display: 'block' }}><img src={mediaUrl(l.photos[0])} alt="" /></Link>
+                : <button type="button" className="lcard-photo" onClick={() => setListingOpen(true)} aria-label="Открыть объявление и контакты" style={{ border: 0, padding: 0, width: '100%', cursor: 'pointer' }}><img src={mediaUrl(l.photos[0])} alt="" /></button>)}
               <div className="lcard-body">
                 <div className="label">Объект{lead.property_id ? ` #${lead.property_id}` : ''}</div>
                 <div className="price">{money(l.price, l.currency || 'USD')}<span className="muted" style={{ fontSize: 12 }}>/мес</span></div>
                 <div className="muted">{[l.district, bedroomsLabel(l.bedrooms), l.area ? `${l.area} м²` : null].filter(Boolean).join(' · ')}</div>
                 <Place address={l.address} />
                 <Button variant="secondary" onClick={() => setListingOpen(true)}>Объявление и контакты</Button>
-                {lead.property_id && <Link to={compact ? `/m/properties/${lead.property_id}` : `/objects/${lead.property_id}`} className="label">Открыть объект</Link>}
+                {objectHref && <Link to={objectHref} className="btn btn-secondary">Открыть объект #{lead.property_id}</Link>}
               </div>
             </div>
           )}
