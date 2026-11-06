@@ -4,7 +4,7 @@ export type Role = 'superadmin' | 'admin' | 'operator' | 'agent' | 'recruit';
 
 export interface Page<T> { items: T[]; total: number }
 
-export interface UserRef { id: number; name: string; username?: string | null; photo_url?: string | null }
+export interface UserRef { id: number; name: string; username?: string | null; photo_url?: string | null; agent_tag?: string | null }
 
 export interface Plans { photo: number; showing: number; stickers: number; rental: number }
 
@@ -24,6 +24,8 @@ export interface User {
   birth_date?: string | null;
   exclusive_deals: number;
   plans?: Plans;
+  /** the agent's post hashtag without '#' (Zaza, ArturB), unique */
+  agent_tag?: string | null;
   next_level_at?: number | null;
   created_at?: string;
   last_login_at?: string | null;
@@ -81,7 +83,15 @@ export type PropertyStatus =
   | 'new' | 'taken' | 'call_failed' | 'owner_confirmed' | 'agent_marked' | 'shoot_scheduled'
   | 'media_uploaded' | 'review' | 'returned' | 'published' | 'rented' | 'archived';
 
-export interface OwnerRef { id: number; name?: string | null; phone?: string | null; is_agent?: boolean }
+/** agent: the agent the owner belongs to (stage 6.5) — the agent of all his objects */
+export interface OwnerRef { id: number; name?: string | null; phone?: string | null; is_agent?: boolean; agent?: UserRef | null }
+
+/** The channel post fields of the old generator (backend services/properties.py POST_ONE / POST_MANY / POST_NUM), tags without '#'. */
+export interface PostFields {
+  deal?: 'Rent' | 'Sale'; prop_type?: string; metro?: string; building?: string; design?: string; condition?: string;
+  heating?: string; bathrooms?: string; pets?: string; amenities?: string[]; periods?: string[];
+  tenants?: number; deposit?: number; sale_price?: number; headline?: string;
+}
 
 export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?: string; room?: string | null; position?: number }
 
@@ -113,6 +123,7 @@ export interface Property {
   description?: string | null;
   is_exclusive?: boolean;
   checklist?: Record<string, boolean> | null;
+  post_fields?: PostFields | null;
   ai_flags?: AiFlags | null;
   duplicate_of?: number | null;
   dup_check?: 'added' | 'exists' | null;
@@ -346,6 +357,7 @@ export interface Owner {
   link?: string | null;
   is_agent?: boolean;
   notes?: string | null;
+  agent_id?: number | null;
   created_at?: string | null;
   properties_count?: number;
   properties?: Property[];

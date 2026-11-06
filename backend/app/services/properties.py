@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import quote
 
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy import update as update_
@@ -16,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import settings as env
-from app.models import (PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
+from app.models import (FIELD, PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
                         PropertyListing, PropertyMedia, PropertyPublication, User)
 from app.services import jobs
+from app.services import users as users_svc
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
 from app.services.errors import DomainError, forbidden
@@ -29,7 +31,8 @@ log = logging.getLogger(__name__)
 BOARD = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled", "media_uploaded", "review",
          "returned", "published", "rented")
 EDITABLE = ("address", "district", "cadastral_code", "price", "currency", "bedrooms", "rooms", "area", "floor",
-            "total_floors", "description", "is_exclusive", "source_url", "source_type", "checklist", "shoot_at")
+            "total_floors", "description", "is_exclusive", "source_url", "source_type", "checklist", "shoot_at",
+            "post_fields")
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif"}
 MAX_UPLOAD = 300 * 1024 * 1024
@@ -281,6 +284,7 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
             if existing.agent_id and existing.status != "archived":
                 raise DomainError("taken_by_other", "object already taken by another agent")
             existing.agent_id, existing.taken_at = agent.id, now()
+            _bind_owner(db, existing, db.get(Owner, existing.owner_id) if existing.owner_id else None, agent)
             _status(db, existing, "taken", agent, "taken")
             db.commit()
             return existing
@@ -338,6 +342,8 @@ def _apply(p: Property, data: dict):
             v = int(v) if v not in (None, "") else None
         elif k == "shoot_at":
             v = aware(v)
+        elif k == "post_fields":
+            v = clean_post_fields(v)
         setattr(p, k, v)
 
 
@@ -367,10 +373,12 @@ def _set_owner_contact(db: Session, p: Property, name: str | None, phone: str | 
     if o is None:
         o, _ = upsert_owner(db, name, phone, p.address, p.source_url, actor=actor)
         p.owner_id = o.id
+        _bind_owner(db, p, o, actor)
     elif phone and norm_phone(phone) != o.phone_norm:
         other = find_owner(db, phone)
         if other and other.id != o.id:
             p.owner_id, o = other.id, other
+            _bind_owner(db, p, o, actor)
         else:
             o.phone, o.phone_norm = phone, norm_phone(phone)
     if name:
@@ -385,6 +393,12 @@ def owner_refused(db: Session, pid: int, agent: User, comment: str | None = None
     _require_status(p, "taken", "call_failed", "owner_confirmed", "shoot_scheduled")
     _status(db, p, "archived", agent, "owner_refused", comment=(comment or "").strip() or None)
     p.next_call_at = None
+    o = db.get(Owner, p.owner_id) if p.owner_id else None
+    if o is not None and o.agent_id == p.agent_id and not db.scalar(select(Property.id).where(  # he never became ours
+            Property.owner_id == o.id, Property.id != p.id, Property.agent_id == o.agent_id,
+            Property.status != "archived").limit(1)):
+        o.agent_id = None
+        log_event(db, "owner", o.id, "agent_released", agent, property_id=p.id)
     for kind in ("call_retry", "owner_followup"):
         jobs.cancel(db, kind, p.id)
     db.commit()
@@ -508,6 +522,7 @@ def owner_or_agent(db: Session, pid: int, agent: User, is_owner: bool, owner_nam
                 Property.owner_id == known.id, Property.id != p.id, Property.status != "agent_marked").limit(1)):
             mark_agent = False
     owner, created = upsert_owner(db, owner_name, owner_phone, p.address, p.source_url, is_agent=mark_agent, actor=agent)
+    _bind_owner(db, p, owner, agent)
     p.owner_id = owner.id
     if is_owner:
         dup = None if created else db.scalar(select(Property).where(Property.owner_id == owner.id, Property.id != p.id)
@@ -523,6 +538,49 @@ def owner_or_agent(db: Session, pid: int, agent: User, is_owner: bool, owner_nam
     jobs.cancel(db, "call_retry", p.id)
     db.commit()
     return p
+
+
+def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
+    """Stage 6.5: an owner belongs to the agent who brought him, and so do all his objects. A free owner is bound to the
+    object's agent. An owner bound to another agent is never re-assigned silently: an agent is stopped («Собственник
+    закреплён за #Tag»), staff may link him anyway (logged) or move him with transfer_owner. Agent contacts (is_agent)
+    are nobody's. No commit."""
+    if o is None or o.is_agent or p.agent_id is None or o.agent_id == p.agent_id:
+        return
+    if o.agent_id is None:
+        o.agent_id = p.agent_id
+        log_event(db, "owner", o.id, "agent_bound", actor, agent_id=p.agent_id, property_id=p.id)
+    elif actor.role not in STAFF:
+        raise DomainError("owner_taken", f"Собственник закреплён за {users_svc.tag_of(db.get(User, o.agent_id))}", 409)
+    else:
+        log_event(db, "property", p.id, "owner_agent_override", actor, owner_id=o.id, owner_agent_id=o.agent_id)
+
+
+def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, reason: str | None = None) -> Owner:
+    """«Передать собственника агенту…»: staff only (stage 6's agent «Запрос оператору» is approved through here, e.g. the
+    agent left). The owner and his live objects of the previous agent move to the new one; every object of the owner
+    and the owner himself get a history event."""
+    if by_user.role not in STAFF:
+        raise forbidden("only operators transfer owners")
+    o = get_or_404(db, Owner, int(owner_id), "owner", lock=True)
+    to = get_or_404(db, User, int(to_agent_id), "user")
+    if to.role not in FIELD or not to.is_active:
+        raise DomainError("bad_agent", "Передать можно только активному агенту")
+    if o.agent_id == to.id:
+        raise DomainError("bad_status", "Собственник уже закреплён за этим агентом")
+    old = db.get(User, o.agent_id) if o.agent_id else None
+    reason = (reason or "").strip() or None
+    o.agent_id = to.id
+    data = {"from_agent_id": old.id if old else None, "to_agent_id": to.id, "reason": reason,
+            "comment": f"{old.name if old else '—'} → {to.name}" + (f" · {reason}" if reason else "")}
+    log_event(db, "owner", o.id, "owner_transferred", by_user, **data)
+    for p in db.scalars(select(Property).where(Property.owner_id == o.id).with_for_update()):
+        moved = p.agent_id == (old.id if old else None) and p.status not in ("archived", "rented")
+        if moved:
+            p.agent_id, p.updated_at = to.id, now()
+        log_event(db, "property", p.id, "owner_transferred", by_user, owner_id=o.id, moved=moved, **data)
+    db.commit()
+    return o
 
 
 def schedule_shoot(db: Session, pid: int, agent: User, shoot_at) -> tuple[Property, str]:
@@ -653,38 +711,140 @@ DISTRICT_TAG = {"Ваке": "#Vake", "Ваке-Багеби": "#Vake", "Сабу
                 "Авлабари": "#Avlabari", "Нахаловка": "#Naxalovka", "Ваке-Сабуртало": "#Vake"}
 PRICE_TAGS = ((300, "#Price0to300"), (500, "#Price300to500"), (700, "#Price500to700"), (900, "#Price700to900"),
               (1200, "#Price900to1200"))
+SALE_PRICE_STEPS = (30000, 50000, 70000, 90000, 120000, 150000, 180000, 210000, 240000, 270000, 300000, 330000, 360000,
+                    390000, 420000, 450000, 480000, 510000, 600000, 700000, 800000, 900000, 1000000)
+# properties.post_fields: the old generator's tag groups (stored without '#', in this order). One value / a list / a number.
+POST_ONE = {
+    "deal": ("Rent", "Sale"),
+    "prop_type": ("Apartment", "House", "Commercial", "Land", "Retail", "Business", "Cafe", "Restaurant", "BeautySalon",
+                  "Warehouses", "Manufacture", "Duplex", "Townhouse"),
+    "metro": ("LibertySquare", "Rustaveli", "Marjanishvili", "StationSquare", "Tsereteli", "Gotsiridze", "Nadzaladevi",
+              "Didube", "Grmagele", "Guramishvili", "Sarajishvili", "AhmeteliTheatre", "STUniversity", "VazhaPshavela",
+              "Delisi", "TCUniversity", "MCUniversity", "AvlabariMetro", "IsaniMetro", "300Aragveli", "SamgoriMetro",
+              "Varketili"),
+    "building": ("NewBuilding", "OldBuilding", "HistoricalBuilding", "Reconstruction"),
+    "design": ("New", "White", "Grey", "Yellow", "Mixed", "Old", "Retro", "UnderRepair"),
+    "condition": ("BlackFrame", "WhiteFrame", "GreenFrame", "FullyRenovated"),  # sale only
+    "heating": ("CentralHeating", "GasHeating", "ElectricalHeating", "ACHeating", "Fireplace"),
+    "bathrooms": ("2Bathroom", "3Bathroom", "4Bathroom"),
+    "pets": ("Allowed", "NotAllowed", "ByAgreement"),
+}
+FIXED_AMENITIES = ("Elevator", "Oven", "ParkingPlace", "Conditioner")  # a rent post shows ✖️ for the missing ones
+POST_MANY = {
+    "amenities": ("Balcony", "Terrace", "Courtyard", "WiFi", "TV", "SmartTV", "Bath", "Shower", "Dishwasher", "Stove",
+                  "Microwave", "WashingMachine", "VacuumCleaner", "Fireplace") + FIXED_AMENITIES,
+    "periods": ("1Day", "1Month", "2Month", "3Month", "4Month", "5Month", "6Month", "9Month", "12Month"),
+}
+POST_NUM = ("tenants", "deposit", "sale_price")  # tenants max (1-N); deposit $ (default = price, 0 = none); sale price $
+
+
+def clean_post_fields(v) -> dict:
+    """Validate the post fields against the generator's vocabulary; empty values are dropped, lists keep POST_MANY order."""
+    if not isinstance(v, dict):
+        raise DomainError("bad_post_fields", "Поля поста: ожидается объект")
+    out = {}
+    for k, x in v.items():
+        if x is None or x == "" or x == []:
+            continue
+        if k in POST_ONE:
+            x = str(x).lstrip("#")
+            ok = x in POST_ONE[k]
+        elif k in POST_MANY:
+            got = {str(i).lstrip("#") for i in x} if isinstance(x, list) else {None}
+            ok, x = got <= set(POST_MANY[k]), [i for i in POST_MANY[k] if i in got]
+        elif k in POST_NUM:
+            n = _num(x)
+            ok, x = n is not None and 0 <= n < 10 ** 9, int(n or 0)
+        elif k == "headline":
+            ok, x = True, str(x).strip()[:120]
+        else:
+            ok = False
+        if not ok:
+            raise DomainError("bad_post_fields", f"Поля поста: недопустимое значение {k}={x}")
+        out[k] = x
+    return out
+
+
+def maps_url(db: Session, p: Property) -> str | None:
+    """Google Maps link for the post address: the origin ad's pin, else a search by the address."""
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    if listing is not None and listing.lat is not None and listing.lng is not None:
+        return f"https://maps.google.com/?q={listing.lat},{listing.lng}"
+    if not p.address:
+        return None
+    q = f"{p.address}, Tbilisi".replace(" ", "+")  # non-ASCII stays readable in the editable text; Telegram takes IRIs
+    return "https://www.google.com/maps/search/?api=1&query=" + "".join(c if ord(c) > 127 else quote(c, safe=",+") for c in q)
 
 
 def post_text(db: Session, p: Property) -> str:
-    """Channel caption in the agency's own format: a port of buildRentPost() from the agency post generator.
-    Fields the object doesn't have (metro, amenities, pets, terms) are left out, as the generator does when empty."""
-    agent = db.get(User, p.agent_id) if p.agent_id else None
+    """Channel caption in the agency's own format: a port of buildRentPost() / buildSalePost() from the agency's old HTML
+    post generator, fed by the object's fields and post_fields (empty ones are left out, as the generator does). The
+    address is `📍[address](maps link)`: notify.post_html turns it into a link. The hashtag is the agent's agent_tag."""
+    f = p.post_fields or {}
+    sale = f.get("deal") == "Sale"
+    tag = lambda k: f"#{f[k]}" if f.get(k) else None  # noqa: E731
     district = DISTRICT_TAG.get((p.district or "").strip(), f"#{(p.district or 'Tbilisi').replace(' ', '')}")
-    lines = [district]
+    lines = [" ".join(x for x in (district, f.get("metro") and f"🚇 #{f['metro']}") if x)]
     if p.address:
-        lines.append(f"📍{p.address}")
+        url = maps_url(db, p)
+        lines.append(f"📍[{p.address}]({url})" if url else f"📍{p.address}")
+    if f.get("headline"):
+        lines += ["", f"🌟 {f['headline']} 🌟" if sale else f"⭐️ {f['headline']} ⭐️"]
     lines.append("")
     if p.is_exclusive:
         lines += ["❗️#Exclusive", ""]
     beds = "#Studio " if p.bedrooms == 0 else (f"#{p.bedrooms}Bed " if p.bedrooms else "")
-    lines.append(f"🏢 {beds}#Apartment for #Rent")
+    lines.append(f"🏢 {beds}{tag('prop_type') or '#Apartment'} for {'#Sale' if sale else '#Rent'}")
+    style = [x for x in (tag("building"), tag("design"), sale and tag("condition")) if x]
+    if style:
+        lines.append("✨ " + " | ".join(style))
     spec = []
     if p.area:
-        spec.append(f"{float(p.area):g} sq.m")
+        spec.append(f"{float(p.area):g} {'Sq.m' if sale else 'sq.m'}")
     if p.floor:
         spec.append(f"{p.floor}/{p.total_floors} Floor" if p.total_floors else f"{p.floor} Floor")
+    spec += [x for x in (tag("heating"), tag("bathrooms")) if x]
     if spec:
         lines.append("🏠 " + " | ".join(spec))
     lines.append("")
-    if p.price is not None:
-        price = int(p.price)
-        lines.append(f"💰 {price}$ + Deposit {price}$")
-    lines.append("0% Commission")
-    if p.price is not None:
-        lines.append(next((t for top, t in PRICE_TAGS if int(p.price) <= top), "#Price1200plus"))
-    agent_tag = f"#{agent.name.split()[0]}" if agent and agent.name else "#???"
-    lines += ["", f"📲 @David_Tibelashvili | \n+995 599 20 67 16 {agent_tag}", "", "🌟 Check all listings | Reviews", "",
-              "📍APARTMENTS ON MAP📍", "", "📱 Instagram 🗳 FB 🎥 YouTube"]
+    am = f.get("amenities") or []
+    if sale:
+        lines += [" ".join(f"✅ #{a}" for a in am[i:i + 3]) for i in range(0, len(am), 3)]
+    else:
+        has = [a for a in am if a not in FIXED_AMENITIES] + [a for a in FIXED_AMENITIES if a in am]
+        lines += ["  ".join(f"✅\u00a0#{a}" for a in has[i:i + 3]) for i in range(0, len(has), 3)]
+        missing = [a for a in FIXED_AMENITIES if a not in am]
+        if am and missing:
+            lines.append("  ".join(f"✖️\u00a0#{a}" for a in missing))
+        lines.append("")
+        if f.get("tenants"):
+            lines.append(f"👬Tenants: 1-{f['tenants']}")
+        if f.get("pets"):
+            lines.append(f"🐕Pets: #{f['pets']}")
+        if f.get("periods"):
+            lines.append("🕐 " + " ".join(f"#{x}" for x in f["periods"]))
+    lines.append("")
+    if sale:
+        price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
+        if price:
+            lines.append(f"💰{price:,}$".replace(",", "."))
+        lines.append("0% Commission")
+        if price:
+            lines.append(next((f"#Price{lo}to{hi}" for lo, hi in zip((0,) + SALE_PRICE_STEPS, SALE_PRICE_STEPS)
+                               if price <= hi), "#Price1000000plus"))
+    else:
+        if p.price is not None:
+            price = int(p.price)
+            deposit = f.get("deposit", price)
+            lines.append(f"💰 {price}$" + (f" + Deposit {deposit}$" if deposit else ""))
+        lines.append("0% Commission")
+        if p.price is not None:
+            lines.append(next((t for top, t in PRICE_TAGS if int(p.price) <= top), "#Price1200plus"))
+    agent = db.get(User, p.agent_id) if p.agent_id else None
+    lines += ["", f"📲 @David_Tibelashvili | \n+995 599 20 67 16 {users_svc.tag_of(agent)}", "", "🌟 Check all listings | Reviews",
+              "", "📍APARTMENTS ON MAP📍", "", "📱 Instagram 🗳 FB 🎥 YouTube"]
+    if sale:
+        lines += ["", "SALE IN TBILISI🇬🇪"]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -847,13 +1007,16 @@ def can_see_owner(p: Property, user: User) -> bool:
 
 def prefetch(db: Session, rows: list[Property], cache: dict) -> None:
     """Batch-load agents, owners and media counts for out() (lists/boards without N+1)."""
-    for model, ids in ((User, {p.agent_id for p in rows}), (Owner, {p.owner_id for p in rows})):
+    def load(model, ids):
         ids = {i for i in ids if i is not None and (model.__name__, i) not in cache}
         if ids:
             for obj in db.scalars(select(model).where(model.id.in_(ids))):
                 cache[(model.__name__, obj.id)] = obj
             for i in ids:
                 cache.setdefault((model.__name__, i), None)
+    load(Owner, {p.owner_id for p in rows})
+    owners = [cache[("Owner", p.owner_id)] for p in rows if p.owner_id is not None]
+    load(User, {p.agent_id for p in rows} | {o.agent_id for o in owners if o is not None})
     ex = [p.id for p in rows if p.is_exclusive and ("conflict", p.id) not in cache]
     if ex:
         ads = external_ads(db, ex)
@@ -889,19 +1052,21 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                                     "address", "district", "cadastral_code", "currency", "bedrooms", "rooms", "floor",
                                     "total_floors", "description", "is_exclusive", "checklist", "ai_flags",
                                     "duplicate_of", "dup_check", "review_comment", "reviewed_by", "post_url",
-                                    "post_message_id", "owner_id")}
+                                    "post_message_id", "owner_id", "post_fields")}
     for c in ("taken_at", "next_call_at", "shoot_at", "reviewed_at", "published_at", "created_at", "updated_at"):
         v = getattr(p, c)
         d[c] = v.isoformat() if v else None
     d["price"] = float(p.price) if p.price is not None else None
     d["area"] = float(p.area) if p.area is not None else None
-    d["agent"] = {"id": agent.id, "name": agent.name, "username": agent.username} if agent else None
+    ref = lambda u: {"id": u.id, "name": u.name, "username": u.username, "agent_tag": u.agent_tag} if u else None  # noqa: E731
+    d["agent"] = ref(agent)
     d["locked"] = bool(p.agent_id) and p.agent_id != user.id and user.role not in STAFF
     owner = get(Owner, p.owner_id)
     if owner:
         visible = can_see_owner(p, user)
+        # stage 6.5: the owner's agent is the agent of all his objects (may differ from this object's after a staff override)
         d["owner"] = {"id": owner.id, "name": owner.name, "is_agent": owner.is_agent,
-                      "phone": owner.phone if visible else None}
+                      "phone": owner.phone if visible else None, "agent": ref(get(User, owner.agent_id))}
     else:
         d["owner"] = None
     k = ("conflict", p.id)

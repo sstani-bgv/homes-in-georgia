@@ -235,6 +235,16 @@ raise — it logs failures).
 - `review(db, pid, operator, approve: bool, comment)` (approve → publish; return → agent notified)
 - `publish(db, pid, actor, text=None, media_ids=None, channel="tg", comment=None)` (stage 5, the card's post generator: caption = edited text or post_text() in the agency format, the picked media in order; publishing a `review` object approves it; sends via notify.publish_post, records the publication, notifies the agent C5; Telegram failure → 502 `publish_failed`, nothing changes; dev without BOT_TOKEN → dry run recorded without a link)
 - the agent's media and checklist are read-only after `/submit` (409 `submitted`) until the operator returns the object
+- stage 6.5: `owners.agent_id` = the agent who brought the owner (all his objects show that agent). Binding a free owner
+  is automatic (call step, card phone fix, re-take); an owner of another agent → 409 `owner_taken` «Собственник закреплён за
+  #Tag» for agents, staff may link anyway (event `owner_agent_override`). `transfer_owner(db, owner_id, to_agent_id,
+  by_user, reason)` (staff, `POST /owners/{id}/transfer`): owner + his live objects of the old agent move, `owner_transferred`
+  events. An owner who refused is released. `leads.recommend_agents` puts the owner's agent first («его собственник»).
+- `post_text(db, p)`: port of the old generator's buildRentPost/buildSalePost from the object + `properties.post_fields`
+  (JSONB: deal, prop_type, metro, building, design, condition, heating, bathrooms, pets, amenities[], periods[], tenants,
+  deposit, sale_price, headline; vocabulary POST_ONE/POST_MANY/POST_NUM), `📍[address](maps link)` (notify.post_html
+  makes it a link), the agent's `users.agent_tag` (unique, `GET /users/agent-tag-suggestion`; inbound.resolve_agent
+  looks it up before the `agent_tags` setting)
 - `check_duplicate(db, phone, address, url, cadastral)` (port of apps-script checkProperty + legacy lib-repository rules)
 `deals.py`: `calc(...)`, `create(db, data, actor)`, `confirm(db, deal_id, actor)`, `cancel`, `rented_text(deal)`
 `evaluations.py`, `reports.py` (save + topic post + counters), `users.py` (level logic, promote recruit → agent),

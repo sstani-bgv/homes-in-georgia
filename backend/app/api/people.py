@@ -32,6 +32,7 @@ class UserIn(BaseModel):
     photo_url: str | None = None
     birth_date: date | None = None
     plans: dict | None = None
+    agent_tag: str | None = None
 
 
 class UserPatch(BaseModel):
@@ -50,6 +51,7 @@ class UserPatch(BaseModel):
     birth_date: date | None = None
     plans: dict | None = None
     exclusive_deals: int | None = None
+    agent_tag: str | None = None
 
 
 class PromoteIn(BaseModel):
@@ -64,6 +66,12 @@ def list_users(role: str | None = None, active: bool | None = None, db: Session 
         return {"items": [{"id": u.id, "name": u.name, "username": u.username, "role": u.role,
                            "level": users.effective_level(u)} for u in rows if u.is_active], "total": len(rows)}
     return {"items": [user_out(u) for u in rows], "total": len(rows)}
+
+
+@router.get("/users/agent-tag-suggestion")
+def agent_tag_suggestion(name: str, uid: int | None = None, db: Session = Depends(get_db, scope="function"),
+                         user: User = Depends(require_roles(*ADMIN_ROLES))):
+    return {"tag": users.suggest_agent_tag(db, name, uid)}
 
 
 @router.post("/users")

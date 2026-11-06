@@ -58,7 +58,7 @@ def user_out(u: User) -> dict:
             "level": users.effective_level(u) if u.role in ("agent", "recruit") else u.level, "mentor_id": u.mentor_id,
             "districts": u.districts, "is_active": u.is_active, "login": u.login, "photo_url": u.photo_url,
             "birth_date": u.birth_date.isoformat() if u.birth_date else None, "exclusive_deals": u.exclusive_deals,
-            "plans": u.plans, "created_at": u.created_at.isoformat() if u.created_at else None,
+            "plans": u.plans, "agent_tag": u.agent_tag, "created_at": u.created_at.isoformat() if u.created_at else None,
             "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None}
 
 

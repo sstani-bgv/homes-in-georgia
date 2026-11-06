@@ -36,7 +36,8 @@ def test_post_text_endpoint(db, client, sent):
     georgiy, nino, pid, _ = _submitted(db, client)
     assert client.get(f"/api/properties/{pid}/post", headers=auth(georgiy)).status_code == 403
     r = client.get(f"/api/properties/{pid}/post", headers=auth(nino)).json()
-    assert r["text"].startswith("#Vake\n📍ул. Палиашвили 10") and "70 sq.m | 4/9 Floor" in r["text"]
+    assert r["text"].startswith("#Vake\n📍[ул. Палиашвили 10](https://www.google.com/maps/search/?api=1&query=ул.+Палиашвили+10,+Tbilisi)")
+    assert "70 sq.m | 4/9 Floor" in r["text"]
     assert "💰 850$ + Deposit 850$" in r["text"] and "#Георгий" in r["text"]
     assert r["hashtags"] == ["#Vake", "#2Bed", "#Apartment", "#Rent", "#Price700to900", "#Георгий"]
     assert r["channels"] == ["tg"]

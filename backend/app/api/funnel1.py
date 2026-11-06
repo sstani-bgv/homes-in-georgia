@@ -103,6 +103,7 @@ class PropertyIn(BaseModel):
     source_type: str | None = None
     owner_name: str | None = None
     owner_phone: str | None = None
+    post_fields: dict | None = None  # services.properties.POST_ONE / POST_MANY / POST_NUM
 
 
 class CallIn(BaseModel):
@@ -304,7 +305,7 @@ class OwnerIn(BaseModel):
 
 def owner_out(o: Owner, show_phone: bool = True) -> dict:
     return {"id": o.id, "name": o.name, "phone": o.phone if show_phone else None, "address": o.address, "link": o.link,
-            "is_agent": o.is_agent, "notes": o.notes, "created_by": o.created_by,
+            "is_agent": o.is_agent, "notes": o.notes, "created_by": o.created_by, "agent_id": o.agent_id,
             "created_at": o.created_at.isoformat() if o.created_at else None}
 
 
@@ -324,7 +325,8 @@ def owners_list(q: str | None = None, limit: int = 50, offset: int = 0, db: Sess
     if user.role in STAFF:
         return paginate(db, stmt.order_by(Owner.id.desc()), owner_out, limit, offset)
     mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
-    return paginate(db, stmt.order_by(Owner.id.desc()), lambda o: owner_out(o, o.id in mine), limit, offset)
+    return paginate(db, stmt.order_by(Owner.id.desc()), lambda o: owner_out(o, o.id in mine or o.agent_id == user.id),
+                    limit, offset)
 
 
 @router.post("/owners")
@@ -349,3 +351,15 @@ def owners_patch(oid: int, body: OwnerIn, db: Session = Depends(get_db, scope="f
     log_event(db, "owner", o.id, "updated", user, fields=sorted(data))
     db.commit()
     return owner_out(o)
+
+
+class TransferIn(BaseModel):
+    agent_id: int
+    reason: str | None = None
+
+
+@router.post("/owners/{oid}/transfer")
+def owners_transfer(oid: int, body: TransferIn, db: Session = Depends(get_db, scope="function"),
+                    user: User = Depends(require_roles(*STAFF_ROLES))):
+    """«Передать собственника агенту…» (stage 6.5): the owner and his live objects move to another agent."""
+    return owner_out(P.transfer_owner(db, oid, body.agent_id, user, body.reason))

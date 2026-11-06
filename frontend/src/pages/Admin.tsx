@@ -20,13 +20,15 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   const save = useMutation({
     mutationFn: () => {
       const body = { name: f.name, role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
-        tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans, ...(f.password ? { password: f.password } : {}) };
+        tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans,
+        agent_tag: f.agent_tag || '', ...(f.password ? { password: f.password } : {}) };
       return user ? api.users.update(user.id, body) : api.users.create(body);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Сохранено'); onDone(); },
     onError: (e) => toast(errText(e), true),
   });
   const promote = useMutation({ mutationFn: () => api.users.promote(user!.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Рекрут переведён в агенты'); onDone(); } });
+  const suggest = useMutation({ mutationFn: () => api.users.suggestTag(f.name || '', user?.id), onSuccess: (r) => set('agent_tag', r.tag), onError: (e) => toast(errText(e), true) });
   const toggleDistrict = (d: string) => set('districts', (f.districts || []).includes(d) ? (f.districts || []).filter((x) => x !== d) : [...(f.districts || []), d]);
   const plans = f.plans || { photo: 15, showing: 15, stickers: 15, rental: 15 };
   return (
@@ -38,6 +40,12 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
         <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
+          <div className="row gap-sm">
+            <Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => set('agent_tag', e.target.value.replace(/^#+/, '') || null)} />
+            <Button variant="secondary" size="sm" disabled={!f.name} loading={suggest.isPending} onClick={() => suggest.mutate()}>Предложить</Button>
+          </div>
+        </Field>
         {f.role === 'recruit' ? (
           <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent').map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
@@ -86,13 +94,14 @@ function Users() {
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
         <div className="card table-wrap">
           <table className="table">
-            <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
+            <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th>Хэштег</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
             <tbody>
               {items.map((u) => (
                 <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
                   <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
                   <td><Badge tone={u.role === 'superadmin' || u.role === 'admin' ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
                   <td className="num">{u.level ? `${u.level}%` : '—'}</td>
+                  <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
                   <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>
                   <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
                   <td onClick={(e) => e.stopPropagation()}><Switch checked={u.is_active} onChange={() => toggle.mutate(u)} /></td>

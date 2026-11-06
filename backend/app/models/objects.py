@@ -22,6 +22,7 @@ class Owner(Base):
     link = Column(Text)
     is_agent = Column(Boolean, nullable=False, server_default=text("false"))
     notes = Column(Text)
+    agent_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))  # the agent who brought him (stage 6.5)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -54,6 +55,7 @@ class Property(Base):
     description = Column(Text)
     is_exclusive = Column(Boolean, nullable=False, server_default=text("false"))
     checklist = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    post_fields = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))  # services.properties.POST_FIELDS
     ai_flags = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     duplicate_of = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"))
     dup_check = Column(Text)

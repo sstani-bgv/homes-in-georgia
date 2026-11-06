@@ -6,6 +6,7 @@ import functools
 import html
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -629,6 +630,8 @@ FOOTER_LINKS = (
 
 def post_html(text):
     out = html.escape(text or "", quote=False)
+    # the address line `📍[address](maps link)` (services.properties.post_text) → a link, as the old generator did
+    out = re.sub(r"📍\[([^\]\n]+)\]\((https?://[^)\s]+)\)", lambda m: f'<a href="{m[2].replace(chr(34), "%22")}">📍{m[1]}</a>', out)
     for plain, linked in FOOTER_LINKS:
         out = out.replace(plain, linked)
     return out

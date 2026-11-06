@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
-import type { Media, Property } from '../../api/types';
+import type { Media, PostFields, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
@@ -56,6 +56,7 @@ function useProp(id: number) {
     qc.setQueryData(['property', id], (old: Property | undefined) => ({ ...(old || {}), ...p }));
     qc.invalidateQueries({ queryKey: ['property', id] });
     qc.invalidateQueries({ queryKey: ['property-history', id] });
+    qc.invalidateQueries({ queryKey: ['property-post', id] });
     qc.invalidateQueries({ queryKey: ['properties'] });
   };
   return { qc, toast, set };
@@ -413,7 +414,7 @@ function PostComposer({ p }: { p: Property }) {
         <span className="label">Канал</span>
         {(draft.data?.channels || ['tg']).map((c) => <span key={c} className="chip active"><Send size={14} />{CHANNEL_LABEL[c] || c}</span>)}
       </div>
-      <Field label="Текст поста" hint="Собран из полей объекта. Допишите, если нужно: метро, удобства, животные, сроки.">
+      <Field label="Текст поста" hint="Собран из полей объекта и полей поста (метро, удобства, животные, сроки — «Править» в «Параметрах»). 📍[адрес](ссылка) станет ссылкой на карту.">
         <Textarea value={text} onChange={(e) => setEdited(e.target.value)} rows={16} style={{ fontFamily: 'inherit', lineHeight: 1.45 }} />
       </Field>
       <div className="row row-between row-wrap gap-sm">
@@ -492,6 +493,108 @@ function Republish({ p }: { p: Property }) {
     : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />Опубликовать повторно</Button>;
 }
 
+const agentLabel = (a?: { name: string; agent_tag?: string | null } | null) => (a ? `${a.name}${a.agent_tag ? ` · #${a.agent_tag}` : ''}` : '—');
+
+/** «Передать собственника агенту…» (staff): the owner and his live objects move to another agent, with a history event. */
+function OwnerTransfer({ p }: { p: Property }) {
+  const { toast, qc } = useProp(p.id);
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState('');
+  const [reason, setReason] = useState('');
+  const agents = useQuery({ queryKey: ['users', 'field'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: open });
+  const m = useMutation({
+    mutationFn: () => api.owners.transfer(p.owner!.id, Number(to), reason),
+    onSuccess: () => { ['property', 'property-history', 'property-post'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Собственник передан агенту'); setOpen(false); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const options = itemsOf(agents.data).filter((u) => u.id !== p.owner?.agent?.id).map((u) => ({ value: u.id, label: agentLabel(u) }));
+  return (
+    <>
+      <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />Передать собственника агенту…</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Передать собственника агенту">
+        <div className="col gap-lg">
+          <div className="muted" style={{ fontSize: 13 }}>Сейчас: {agentLabel(p.owner?.agent)}. Вместе с собственником перейдут его объекты в работе у прежнего агента. Передача запишется в историю.</div>
+          <Field label="Новый агент"><Select value={to} placeholder="—" onChange={(e) => setTo(e.target.value)} options={options} /></Field>
+          <Field label="Причина"><Input value={reason} placeholder="Например: агент ушёл из агентства" onChange={(e) => setReason(e.target.value)} /></Field>
+          <Button block disabled={!to} loading={m.isPending} onClick={() => m.mutate()}>Передать</Button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+// the old generator's tag groups (backend services/properties.py POST_ONE / POST_MANY), stored without '#'
+const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label]) => ({ value, label }));
+const POST_ONE: Record<string, [string, Record<string, string>]> = {
+  prop_type: ['Тип', { Apartment: 'Квартира', House: 'Дом', Commercial: 'Коммерция', Duplex: 'Дуплекс', Townhouse: 'Таунхаус', Land: 'Земля', Retail: 'Ритейл', Business: 'Бизнес', Cafe: 'Кафе', Restaurant: 'Ресторан', BeautySalon: 'Салон красоты', Warehouses: 'Склад', Manufacture: 'Производство' }],
+  metro: ['Метро', Object.fromEntries(['LibertySquare', 'Rustaveli', 'Marjanishvili', 'StationSquare', 'Tsereteli', 'Gotsiridze', 'Nadzaladevi', 'Didube', 'Grmagele', 'Guramishvili', 'Sarajishvili', 'AhmeteliTheatre', 'STUniversity', 'VazhaPshavela', 'Delisi', 'TCUniversity', 'MCUniversity', 'AvlabariMetro', 'IsaniMetro', '300Aragveli', 'SamgoriMetro', 'Varketili'].map((m) => [m, m]))],
+  building: ['Дом', { NewBuilding: 'Новостройка', OldBuilding: 'Старый фонд', HistoricalBuilding: 'Исторический', Reconstruction: 'Реконструкция' }],
+  design: ['Дизайн', { New: 'Новый', White: 'Белый', Grey: 'Серый', Yellow: 'Жёлтый', Mixed: 'Смешанный', Old: 'Старый', Retro: 'Ретро', UnderRepair: 'В ремонте' }],
+  condition: ['Состояние (продажа)', { BlackFrame: 'Чёрный каркас', WhiteFrame: 'Белый каркас', GreenFrame: 'Зелёный каркас', FullyRenovated: 'С ремонтом' }],
+  heating: ['Отопление', { CentralHeating: 'Центральное', GasHeating: 'Газовое', ElectricalHeating: 'Электрическое', ACHeating: 'Кондиционер', Fireplace: 'Камин' }],
+  bathrooms: ['Санузлов', { '2Bathroom': '2', '3Bathroom': '3', '4Bathroom': '4' }],
+  pets: ['Животные', { Allowed: 'Можно', NotAllowed: 'Нельзя', ByAgreement: 'По договорённости' }],
+};
+const POST_MANY: Record<string, [string, Record<string, string>]> = {
+  amenities: ['Удобства', { Balcony: 'Балкон', Terrace: 'Терраса', Courtyard: 'Двор', WiFi: 'Wi-Fi', TV: 'ТВ', SmartTV: 'Smart TV', Bath: 'Ванна', Shower: 'Душ', Dishwasher: 'Посудомойка', Stove: 'Плита', Microwave: 'Микроволновка', WashingMachine: 'Стиральная машина', VacuumCleaner: 'Пылесос', Fireplace: 'Камин', Elevator: 'Лифт', Oven: 'Духовка', ParkingPlace: 'Парковка', Conditioner: 'Кондиционер' }],
+  periods: ['Сроки аренды', { '1Day': '1 день', '1Month': '1 мес', '2Month': '2 мес', '3Month': '3 мес', '4Month': '4 мес', '5Month': '5 мес', '6Month': '6 мес', '9Month': '9 мес', '12Month': '12 мес' }],
+};
+const RENT_ONLY = ['pets', 'periods', 'tenants', 'deposit'];
+
+/** «Параметры» rows for the filled post fields. */
+function postFieldRows(f?: PostFields | null): [string, React.ReactNode][] {
+  if (!f) return [];
+  const rows: [string, React.ReactNode][] = [];
+  if (f.deal) rows.push(['Сделка', f.deal === 'Sale' ? 'продажа' : 'аренда']);
+  for (const [k, [label, o]] of Object.entries(POST_ONE)) { const x = (f as Record<string, string>)[k]; if (x) rows.push([label, o[x] || x]); }
+  for (const [k, [label, o]] of Object.entries(POST_MANY)) { const x = (f as Record<string, string[]>)[k]; if (x?.length) rows.push([label, x.map((a) => o[a] || a).join(', ')]); }
+  if (f.tenants) rows.push(['Жильцов', `до ${f.tenants}`]);
+  if (f.deposit !== undefined) rows.push(['Залог', f.deposit ? money(f.deposit) : 'без залога']);
+  if (f.sale_price) rows.push(['Цена продажи', money(f.sale_price)]);
+  if (f.headline) rows.push(['Заголовок', f.headline]);
+  return rows;
+}
+
+/** The post fields the agent fills (the old HTML generator's groups): one-of selects, amenity / term checkboxes, numbers. */
+function PostFieldsForm({ value: f, onChange }: { value: PostFields; onChange: (f: PostFields) => void }) {
+  const sale = f.deal === 'Sale';
+  const set = (k: string, x: unknown) => onChange({ ...f, [k]: x === '' || x === null ? undefined : x });
+  const num = (s: string) => (s === '' ? undefined : Number(s));
+  const toggle = (k: string, a: string) => { const cur = (f as Record<string, string[]>)[k] || []; set(k, cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]); };
+  return (
+    <div className="col gap-lg">
+      <div className="row row-between row-wrap gap-sm">
+        <span className="label">Поля поста</span>
+        <Seg value={f.deal || 'Rent'} onChange={(d) => set('deal', d)} options={[{ value: 'Rent', label: 'Аренда' }, { value: 'Sale', label: 'Продажа' }]} />
+      </div>
+      <div className="form-grid">
+        {Object.entries(POST_ONE).filter(([k]) => (sale ? !RENT_ONLY.includes(k) : k !== 'condition')).map(([k, [label, o]]) => (
+          <Field key={k} label={label}><Select value={(f as Record<string, string>)[k] || ''} placeholder="—" onChange={(e) => set(k, e.target.value)} options={opts(o)} /></Field>
+        ))}
+        {sale ? <Field label="Цена продажи, $"><Input type="number" value={f.sale_price ?? ''} onChange={(e) => set('sale_price', num(e.target.value))} /></Field> : (
+          <>
+            <Field label="Жильцов, до"><Input type="number" min={1} value={f.tenants ?? ''} onChange={(e) => set('tenants', num(e.target.value))} /></Field>
+            <Field label="Залог, $" hint="Пусто — как цена, 0 — без залога"><Input type="number" min={0} value={f.deposit ?? ''} onChange={(e) => set('deposit', num(e.target.value))} /></Field>
+          </>
+        )}
+        <Field label="Заголовок" className="span2"><Input value={f.headline || ''} placeholder="Например: No one lived" onChange={(e) => set('headline', e.target.value)} /></Field>
+      </div>
+      {Object.entries(POST_MANY).filter(([k]) => !(sale && RENT_ONLY.includes(k))).map(([k, [label, o]]) => (
+        <div key={k}>
+          <span className="label">{label}</span>
+          {k === 'amenities' && !sale && <div className="muted" style={{ fontSize: 12 }}>Лифт, духовка, парковка, кондиционер без галочки уйдут в пост с ✖️</div>}
+          <div className="row row-wrap gap-sm mt">
+            {opts(o).map(({ value: a, label: l }) => {
+              const on = ((f as Record<string, string[]>)[k] || []).includes(a);
+              return <button key={a} type="button" role="checkbox" aria-checked={on} className={`chip ${on ? 'active' : ''}`} onClick={() => toggle(k, a)}>{on ? <CheckCircle2 size={14} /> : null}{l}</button>;
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
   type Form = Partial<Property> & { owner_name?: string; owner_phone?: string };
@@ -511,6 +614,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         <Field label="Спальни"><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
         <Field label="Площадь, м²"><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>
         <Field label="Этаж"><Input type="number" value={v.floor ?? ''} onChange={(e) => upd('floor', numOrNull(e.target.value))} /></Field>
+        <Field label="Этажей в доме"><Input type="number" value={v.total_floors ?? ''} onChange={(e) => upd('total_floors', numOrNull(e.target.value))} /></Field>
         <Field label="Собственник"><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
         <Field label="Телефон собственника"><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
         <Field label="Кадастровый код" className="span2"><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
@@ -531,6 +635,8 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
             ) : where.data ? <div className="alert alert-ok" style={{ fontSize: 13 }}>На других сайтах этот объект не найден</div> : null)}
         </div>
       </div>
+      <div className="divider" />
+      <PostFieldsForm value={v.post_fields || {}} onChange={(pf) => upd('post_fields', pf)} />
       <div className="row mt-lg"><Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={onClose}>Отмена</Button></div>
     </Modal>
   );
@@ -611,9 +717,12 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           <Card label="Собственник" title={<>{p.owner?.name || '—'} {p.owner?.is_agent ? <Badge tone="warn">агент</Badge> : null}</>}>
             <KV items={[
               ['Телефон', <OwnerPhone p={p} />],
-              ['Агент объекта', p.agent?.name || '—'],
+              ['Агент собственника', agentLabel(p.owner?.agent)],
+              ['Агент объекта', agentLabel(p.agent)],
             ]} />
+            {p.owner?.agent && p.agent && p.owner.agent.id !== p.agent.id && <div className="alert alert-warn mt" style={{ fontSize: 13 }}>Собственник закреплён за другим агентом: {agentLabel(p.owner.agent)}</div>}
             {!ownerVisible && p.owner && <div className="muted mt" style={{ fontSize: 12 }}>Контакты видны оператору и агенту объекта</div>}
+            {isStaff && p.owner && !p.owner.is_agent && <OwnerTransfer p={p} />}
           </Card>
           <Card label="Объект" title="Параметры" actions={canWork ? <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />Править</Button> : undefined}>
             <KV items={[
@@ -626,6 +735,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
               ['Кадастр', p.cadastral_code || '—'],
               ['Эксклюзив', p.is_exclusive ? 'да' : 'нет'],
+              ...postFieldRows(p.post_fields),
               ['Дубль объекта', p.duplicate_of ? <Link to={compact ? `/m/properties/${p.duplicate_of}` : `/objects/${p.duplicate_of}`}>#{p.duplicate_of}</Link> : '—'],
               ['Создан', fmtDateTime(p.created_at)],
               ['Взят', fmtDateTime(p.taken_at)],

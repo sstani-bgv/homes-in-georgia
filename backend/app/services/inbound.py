@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ChannelPost, Deal, News, Owner, PropertyPublication, Report, User
 from app.services import settings as settings_svc
+from app.services import users as users_svc
 from app.services.common import TZ, jload, log_event, now
 from app.services.dedup import address_match, norm_address
 from app.telegram.client import conf
@@ -144,7 +145,8 @@ def _num(s) -> float:
 
 def agent_aliases(db: Session) -> dict[str, str]:
     """Setting `agent_tags` (JSON {"#Tag": "User name"}, admin-editable via PUT /settings) - the old AGENT_TAGS map.
-    Not hardcoded: the names are agency data, kept in the DB."""
+    Not hardcoded: the names are agency data, kept in the DB. Since stage 6.5 the tag lives in users.agent_tag
+    (resolve_agent looks there first); the setting is the fallback for tags not in any profile."""
     raw = jload(settings_svc.get(db, "agent_tags"), {}) or {}
     return {str(k).lstrip("#").lower(): str(v) for k, v in raw.items() if v} if isinstance(raw, dict) else {}
 
@@ -170,6 +172,9 @@ def resolve_agent(db: Session, tag: str, aliases: dict | None = None) -> tuple[s
     raw = (tag or "").lstrip("#").replace("'", "").strip()
     if not raw:
         return "", None
+    tagged = users_svc.tag_owner(db, raw) if users_svc.TAG_RE.fullmatch(raw) else None
+    if tagged is not None:
+        return tagged.name, tagged
     aliases = agent_aliases(db) if aliases is None else aliases
     name = aliases.get(raw.lower(), raw)
     return name, match_user(db, name) or (match_user(db, raw) if name != raw else None)
@@ -366,6 +371,8 @@ def handle_photo_queue(db: Session, msg: dict) -> dict | None:
         return {"duplicate": True}
     owner, status = add_to_owner_base(db, parsed)
     agent_name, agent = resolve_agent(db, parsed["agent"]) if parsed["agent"] else ("", None)
+    if status == "added" and agent is not None:  # stage 6.5: a new owner belongs to the agent who brought him
+        owner.agent_id = agent.id
     when = msg_dt(msg.get("date"))
     d, hm = parse_shoot_date(parsed["date"], when)
     day = d or when.astimezone(TZ).date()

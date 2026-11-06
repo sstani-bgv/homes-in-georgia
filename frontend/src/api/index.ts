@@ -30,6 +30,8 @@ export const api = {
     update: (id: number, b: Partial<User> & { password?: string }) => http.patch<User>(`/users/${id}`, b),
     promote: (id: number) => http.post<User>(`/users/${id}/promote`),
     stats: (id: number) => http.get<Record<string, unknown>>(`/users/${id}/stats`),
+    /** #Zaza, or #ArturB when another agent has that first name (without '#') */
+    suggestTag: (name: string, uid?: number) => http.get<{ tag: string }>('/users/agent-tag-suggestion', { name, uid }),
   },
 
   cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
@@ -84,6 +86,8 @@ export const api = {
     list: (q?: string) => http.get<L<Owner>>('/owners', { q }),
     create: (b: Partial<Owner>) => http.post<Owner>('/owners', b),
     update: (id: number, b: Partial<Owner>) => http.patch<Owner>(`/owners/${id}`, b),
+    /** «Передать собственника агенту…» (staff): the owner and his live objects move to the agent */
+    transfer: (id: number, agent_id: number, reason?: string) => http.post<Owner>(`/owners/${id}/transfer`, { agent_id, reason }),
   },
 
   leads: {

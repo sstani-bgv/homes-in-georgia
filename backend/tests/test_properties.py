@@ -92,11 +92,11 @@ def test_agent_marked_and_duplicate_exists(db, sent):
     properties.call_result(db, p1.id, ag1, True)
     properties.owner_or_agent(db, p1.id, ag1, True, "Нана", "599 11 22 33")
 
-    # same owner phone, written differently, for another object → 'exists'
-    p2 = properties.take(db, make_listing(db, "ss2", address="Другая 5").id, ag2)
-    p2 = properties.owner_or_agent(db, p2.id, ag2, True, "Нана", "+995 0599-11-22-33")
+    # same owner phone, written differently, for another object → 'exists' (the owner is ag1's: stage 6.5)
+    p2 = properties.take(db, make_listing(db, "ss2", address="Другая 5").id, ag1)
+    p2 = properties.owner_or_agent(db, p2.id, ag1, True, "Нана", "+995 0599-11-22-33")
     assert p2.dup_check == "exists" and p2.duplicate_of == p1.id
-    _, dup = properties.schedule_shoot(db, p2.id, ag2, datetime.now(timezone.utc) + timedelta(days=1))
+    _, dup = properties.schedule_shoot(db, p2.id, ag1, datetime.now(timezone.utc) + timedelta(days=1))
     assert dup == "exists"
     rep = db.query(Report).filter_by(kind="makefoto").one()
     assert "Уже есть в базе" in rep.data["posts"][0]["text"]

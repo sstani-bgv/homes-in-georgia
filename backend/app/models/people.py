@@ -33,6 +33,7 @@ class User(Base):
     plans = Column(JSONB, nullable=False, server_default=text(
         """'{"photo": 15, "showing": 15, "stickers": 15, "rental": 15}'::jsonb"""))
     legacy_id = Column(Text)
+    agent_tag = Column(Text)  # post hashtag without '#' (Zaza, ArturB); unique lower(agent_tag) index (migration 0009)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_login_at = Column(DateTime(timezone=True))
 

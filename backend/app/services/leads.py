@@ -301,16 +301,21 @@ def reassign(db: Session, lead_id: int, agent_id: int, actor: User) -> Lead:
 
 
 def recommend_agents(db: Session, lead_id: int) -> list[dict]:
-    """B3 hint: owner of the object first, then district coverage, then lighter load."""
+    """B3 hint: the agent the object's owner belongs to first (stage 6.5), then the object's agent, district coverage,
+    lighter load. The operator still assigns."""
     lead = _lead(db, lead_id)
     listing = db.get(Listing, lead.listing_id) if lead.listing_id else None
     prop = db.get(Property, lead.property_id) if lead.property_id else None
     district = (prop.district if prop else None) or (listing.district if listing else None) or ""
+    owner = db.get(Owner, prop.owner_id) if prop and prop.owner_id else None
     load = dict(db.execute(select(Lead.agent_id, func.count()).where(Lead.status.in_(ACTIVE), Lead.agent_id.isnot(None))
                            .group_by(Lead.agent_id)).all())
     out = []
     for a in db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True))):
         score, reasons = 0, []
+        if owner is not None and owner.agent_id == a.id:
+            score += 200
+            reasons.append("его собственник")
         if prop and prop.agent_id == a.id:
             score += 100
             reasons.append("его объект")
