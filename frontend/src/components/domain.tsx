@@ -238,6 +238,9 @@ const ACTION_TEXT: Record<string, string> = {
   owner_transferred: 'Собственник передан агенту', owner_agent_override: 'Оператор привязал собственника другого агента',
   change_requested: 'Запрос оператору', change_request_approved: 'Запрос одобрен', change_request_rejected: 'Запрос отклонён',
   rent_cancelled: 'Сделка отменена · снова на рынке',
+  media_added: 'Добавлены фото / видео', media_deleted: 'Файл удалён', checklist: 'Чек-лист комнат', verified: 'Объект проверен оператором',
+  from_deal: 'Создан из сделки', fast_track: 'Собственник согласен · объект показан клиентам',
+  agent_bound: 'Собственник закреплён за агентом', agent_released: 'Собственник освобождён',
   listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято',
 };
 const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked'];
