@@ -146,7 +146,11 @@ class JourneyE2E(unittest.TestCase):
         picked = self.press(CLIENT, cid, "🇷🇺 Русский", since=m)
         self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["seq"] <= picked and "1 из 6" in (c.get("text") or "")])
         self.with_text(cid, "Ответьте на 6 коротких вопросов", m)
+        first = self.with_text(cid, "1 из 6", m)                      # the ONE questionnaire message
         self.press(CLIENT, cid, "2", since=m)                         # A1a: 1 of 6
+        step2 = self.with_text(cid, "2 из 6", m)
+        self.assertEqual((step2["method"], step2["message_id"]), ("editMessageText", first["message_id"]))
+        self.assertIn("✓ 👥 2 человека", step2["text"])               # finished answers on top
         m = self.press(CLIENT, cid, "🐕 Собака")                      # 2 of 6, multi
         self.with_button(cid, "✓ 🐕 Собака", m)
         self.press(CLIENT, cid, "Готово ➜", since=m)
@@ -157,8 +161,11 @@ class JourneyE2E(unittest.TestCase):
         self.press(CLIENT, cid, "Готово ➜", since=m)
         m = self.press(CLIENT, cid, "✏️ Своя сумма")                  # A1b: free text budget
         self.with_text(cid, "Напишите сумму", m)
-        m = self.say(CLIENT, "до 900")
-        self.with_text(cid, "Понял: <b>до $900</b>", m)
+        m = self.say(CLIENT, "до 900")                                # the client's message stays; the questionnaire moves on
+        beds = self.find(cid, lambda c: c["method"] == "editMessageText" and "5 из 6" in c["text"], m, "bedrooms step")
+        self.assertEqual(beds["message_id"], first["message_id"])
+        self.assertIn("✓ 💰 до $900", beds["text"])
+        self.assertIn("✓ 🐾 🐕 собака", beds["text"])
         m = self.press(CLIENT, cid, "1", since=m)                     # 5 of 6, bedrooms
         self.with_button(cid, "✓ 1", m)
         m = self.press(CLIENT, cid, "2", since=m)
@@ -173,6 +180,11 @@ class JourneyE2E(unittest.TestCase):
         summary = self.with_text(cid, "Ваш профиль", m)               # A2a
         for want in ("2 человека · 🐕 собака", "6 или 12 мес · 💰 до $900", "1-2 спальни", "Ваке, Сабуртало"):
             self.assertIn(want, summary["text"])
+        # one message: every step and the summary edit it, no sendMessage per step (only the map keyboard would need one)
+        q = [c for c in f.calls(chat=cid, since=first["seq"] - 1) if c["seq"] <= summary["seq"] and c["method"] == "sendMessage"]
+        self.assertEqual([c["seq"] for c in q], [first["seq"]], [c.get("text") for c in q])
+        self.assertEqual(summary["message_id"], first["message_id"])
+        self.assertIn("🌐 Язык", [b["text"] for row in f.markup(summary) for b in row])
         cl = core.client("tg", cid)
         self.assertEqual((cl["profile_done"], cl["profile"]["budget_max"], cl["profile"]["bedrooms"], cl["profile"]["districts"]),
                          (1, 900, [1, 2], ["Ваке", "Сабуртало"]))
@@ -192,6 +204,15 @@ class JourneyE2E(unittest.TestCase):
         ack = self.find(cid, lambda c: c["method"] == "editMessageText" and "✅ Передано оператору" in c["text"], m, "A3 edit")
         self.assertEqual(ack["message_id"], card["message_id"])       # the same card changed
         self.assertEqual(self.fake.markup(ack)[0][0]["text"], "❤️ В избранном")
+        hand = self.with_button(cid, "💬 Написать оператору", m)       # DM handoff: prefilled first message to the operator
+        with db.tx() as c:
+            obj, district, price = c.execute("SELECT COALESCE(l.property_id::text, l.listing_id), s.district, s.price_usd FROM leads l "
+                                             "JOIN listings s ON s.id = l.listing_id WHERE l.id = 1").fetchone()[:]
+        from urllib.parse import quote
+        urls = [b["url"] for row in f.markup(hand) for b in row]
+        self.assertEqual(urls[0], "https://t.me/nino_e2e?text=" + quote(f"Здравствуйте! Меня интересует объект #{obj} "
+                                                                         f"{district}, ул. Каштановая, 12 · ${price:g} (заявка #1)"))
+        self.assertTrue(urls[1].startswith("https://t.me/") and urls[1] != urls[0])   # «↩️ Вернуться в бот»
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, sla_stage FROM leads WHERE id = 1").fetchone()[:], ("new", "operator_take"))
 
@@ -285,6 +306,43 @@ class JourneyE2E(unittest.TestCase):
         time.sleep(0.5)
         self.assertFalse([c for c in f.calls(chat=cid, since=m) if "1 из 6" in (c.get("text") or "")])
 
+    def test_georgian_and_language_switch(self):
+        """ka: the picker, the questionnaire in Georgian in one message, clients.lang = ka (DB CHECK), «🌐 Язык» and /lang."""
+        f, u = self.fake, {"id": 1020, "name": "ნინო", "username": "nino_ka", "lang": "ka"}
+        cid = u["id"]
+        self.assertEqual((core.detect_lang("გამარჯობა, ბინა მინდა"), core.detect_lang(None, hint="ka")), ("ka", "ka"))
+        m = self.say(u, "/start")
+        self.press(u, cid, "🇬🇪 ქართული", since=m)
+        self.with_text(cid, "უპასუხეთ 6 მოკლე კითხვას", m)
+        first = self.with_text(cid, "1 / 6.", m)
+        self.assertEqual(core.client("tg", cid)["lang"], "ka")
+        m = self.press(u, cid, "1", since=m)
+        self.assertIn("✓ 👥 1 ადამიანი", self.with_text(cid, "2 / 6.", m)["text"])
+        m = self.press(u, cid, "🐈 კატა", since=m)
+        m = self.press(u, cid, "მზადაა ➜", since=m)
+        m = self.press(u, cid, "6 თვე", since=self.with_text(cid, "3 / 6.", m)["seq"] - 1)
+        m = self.press(u, cid, "მზადაა ➜", since=m)
+        m = self.press(u, cid, "$500-800", since=self.with_text(cid, "4 / 6.", m)["seq"] - 1)
+        m = self.press(u, cid, "სტუდიო", since=self.with_text(cid, "5 / 6.", m)["seq"] - 1)
+        m = self.press(u, cid, "მზადაა ➜", since=m)
+        m = self.press(u, cid, "🏙 უბნების არჩევა", since=self.with_text(cid, "6 / 6.", m)["seq"] - 1)
+        m = self.press(u, cid, "ვაკე", since=m)
+        m = self.press(u, cid, "მზადაა ➜", since=m)
+        summary = self.with_text(cid, "თქვენი პროფილი", m)
+        for want in ("1 ადამიანი · 🐈 კატა", "6 თვე · 💰 $500-800", "სტუდიო", "ვაკე"):
+            self.assertIn(want, summary["text"])
+        self.assertEqual(summary["message_id"], first["message_id"])
+        self.assertEqual(core.client("tg", cid)["profile"]["districts"], ["Ваке"])   # stored as listings.district (ru)
+        m = self.press(u, cid, "🌐 ენა", since=summary["seq"] - 1)            # language switch from the profile summary
+        m = self.press(u, cid, "🇬🇧 English", since=m)
+        self.with_text(cid, "Welcome back", m)
+        self.assertEqual(core.client("tg", cid)["lang"], "en")
+        m = self.say(u, "/lang")                                                 # and by command
+        m = self.press(u, cid, "🇷🇺 Русский", since=m)
+        self.with_text(cid, "С возвращением", m)
+        with db.tx() as c:
+            self.assertEqual(c.execute("SELECT lang FROM clients WHERE external_id = ?", (str(cid),)).fetchone()[0], "ru")
+
     def test_text_slots_and_own_time(self):
         """C7 by text («завтра 12:00, завтра 17:30»), then the client asks for another time (A4a «Предложить своё время»)."""
         from app.services import leads
@@ -326,11 +384,26 @@ class JourneyE2E(unittest.TestCase):
         self.svc(lambda s: leads.message_client(s, first.id, "Когда удобно?", self.user(s, OPERATOR["id"])))
         original = self.with_text(u["id"], "Когда удобно?", m)
         self.svc(lambda s: leads.message_client(s, second.id, "Другой объект", self.user(s, OPERATOR["id"])))
-        # A normal message must not silently attach to the latest of two leads.
+        # A normal message must not silently attach to the latest of two leads; it refines the request, and
+        # (auto_push_variants=0) new variants come only by «Ещё»: no search until the button.
         before = len(self.prompts)
         mark = self.say(u, "Ищу квартиру до 900")
-        self.find(u["id"], lambda c: any(b.get("callback_data") == "more" for row in f.markup(c) for b in row), mark)
+        noted = self.with_text(u["id"], "Учёл", mark)
+        time.sleep(0.5)
+        self.assertEqual(len(self.prompts), before)
+        mark = f.mark()
+        f.press(u, noted, "🔄 Ещё варианты")
+        self.find(u["id"], lambda c: c is not noted and any(b.get("callback_data") == "more" for row in f.markup(c) for b in row)
+                  and "Учёл" not in (c.get("text") or ""), mark, "search after «Ещё»")
         self.assertGreater(len(self.prompts), before)
+        db.set_setting("auto_push_variants", "1")                     # the old behaviour: a message searches at once
+        try:
+            before, mark = len(self.prompts), self.say(u, "Ищу квартиру до 1000")
+            self.find(u["id"], lambda c: "Учёл" not in (c.get("text") or "") and
+                      any(b.get("callback_data") == "more" for row in f.markup(c) for b in row), mark, "auto search")
+            self.assertGreater(len(self.prompts), before)
+        finally:
+            db.set_setting("auto_push_variants", "0")
         # The explicit callback chooses the original lead, not the most recent message.
         mark = f.mark()
         f.press(u, original, "💬 Ответить")

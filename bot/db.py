@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "review_batch": "5",        # pending cards sent per bot tick (every 10 min)
     "search_mode": "llm",       # llm: whole catalog to Codex | hybrid: filters + local embeddings, 20 lines to Codex
     "final_llm": "on",          # hybrid only. off: top 5 by score with templated reasons (one short Codex call)
+    "auto_push_variants": "0",  # 1: a client's message starts a search at once; 0: it refines the request, variants by «Ещё»
 }
 
 JSON_COLS = ("urls", "dup_sources", "photos", "photo_hashes", "features", "agent_reasons", "details")

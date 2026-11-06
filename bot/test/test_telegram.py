@@ -38,7 +38,7 @@ class CompatTest(unittest.TestCase):
             c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", [("a1", "1"), ("a2", "2")])
             r = c.execute("SELECT key, value FROM settings WHERE key = ?", ("a1",)).fetchone()
             self.assertEqual((r[0], r["value"], dict(r), tuple(r), r.keys()), ("a1", "1", {"key": "a1", "value": "1"}, ("a1", "1"), ["key", "value"]))
-            self.assertEqual(dict(c.execute("SELECT key, value FROM settings WHERE key LIKE 'a%' ORDER BY key").fetchall()), {"a1": "1", "a2": "2"})
+            self.assertEqual(dict(c.execute("SELECT key, value FROM settings WHERE key LIKE 'a_' ORDER BY key").fetchall()), {"a1": "1", "a2": "2"})
             self.assertEqual(c.execute("SELECT value FROM settings WHERE key = :k", {"k": "a2"}).fetchone()[0], "2")
             c.execute("INSERT INTO messages (kind, ref, chat_id, message_id) VALUES (?, ?, ?, ?)", ("x", 5, -1001234567890, 7))
             self.assertEqual(c.execute("SELECT chat_id FROM messages WHERE ref = ?", (5,)).fetchone()[0], -1001234567890)  # int vs TEXT

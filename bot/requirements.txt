@@ -5,6 +5,7 @@ psycopg[binary]==3.3.6   # db.py: the shared PostgreSQL (DATABASE_URL)
 # the bot imports the backend's services and app.telegram (same DB, same rules): install backend/requirements.txt too
 -r ../backend/requirements.txt
 python-telegram-bot==22.8
+telethon==1.36.0   # backend/app/telegram/userbot.py (optional operator userbot); imported only there
 curl_cffi==0.16.3
 pillow==13.0.0
 gspread==6.2.1

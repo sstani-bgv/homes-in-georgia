@@ -131,8 +131,8 @@ def L(cl):
     return texts.lang_of(cl["lang"])
 
 
-def tr(cl, ru, en):
-    return en if L(cl) == "en" else ru
+def tr(cl, ru, en, ka):
+    return texts.pick(L(cl), ru, en, ka)
 
 
 def markup(rows):
@@ -180,51 +180,53 @@ def checked(rows):
     return [b.callback_data for row in rows for b in row if b.text.startswith("✓ ") and b.callback_data]
 
 
-def only_chosen(chosen):
-    """A finished question keeps just the chosen answers (journey screens: «✓ 6 мес», «✓ 12 мес»)."""
-    return markup([[cb("✓ " + x, "noop") for x in chosen[i:i + 3]] for i in range(0, len(chosen), 3)] or [[cb("✓", "noop")]])
-
-
-# ---------- A1a-A2a questionnaire ----------
+# ---------- A1a-A2a questionnaire: ONE message, each step edits it (clients.state["qmsg"] = its message id) ----------
 
 STEPS = ("res", "pets", "terms", "bud", "beds", "place")
 OPTS = {"res": texts.RESIDENTS, "pets": texts.PETS, "terms": texts.TERMS, "bud": texts.BUDGETS, "beds": texts.BEDROOMS}
 MULTI = {"pets": "pets", "terms": "terms", "beds": "bedrooms"}
-Q = {
+Q = {  # (ru, en, ka)
     "intro": ("Здравствуйте, {name}! 👋\nЯ помогу найти квартиру в Тбилиси без комиссии.\n\nОтветьте на 6 коротких вопросов, это займёт "
               "минуту. Где подходит несколько ответов, выберите все и нажмите «Готово».",
               "Hello, {name}! 👋\nI'll help you find a flat in Tbilisi with no commission.\n\nAnswer 6 short questions, it takes a minute. "
-              "Where several answers fit, pick them all and tap «Done»."),
-    "res": ("<b>1 из 6.</b> Сколько человек будет жить?", "<b>1 of 6.</b> How many people will live there?"),
-    "pets": ("<b>2 из 6.</b> Будут ли животные? Можно несколько.", "<b>2 of 6.</b> Any pets? You can pick several."),
-    "terms": ("<b>3 из 6.</b> На какой срок? Можно несколько.", "<b>3 of 6.</b> For how long? You can pick several."),
-    "bud": ("<b>4 из 6.</b> Бюджет в месяц?", "<b>4 of 6.</b> Monthly budget?"),
-    "beds": ("<b>5 из 6.</b> Сколько спален? Можно несколько.", "<b>5 of 6.</b> How many bedrooms? You can pick several."),
-    "place": ("<b>6 из 6.</b> Где искать?", "<b>6 of 6.</b> Where should I look?"),
-    "dist": ("Отметьте районы, можно несколько:", "Pick districts, several are fine:"),
-    "done": ("Готово ➜", "Done ➜"), "own": ("✏️ Своя сумма", "✏️ My own amount"),
-    "own_ask": ("Напишите сумму, например «до 900» или «около 1000$».", "Write the amount, e.g. «up to 900» or «about $1000»."),
-    "own_bad": ("Не понял сумму 🙈 Напишите, например, «до 900».", "I didn't get the amount 🙈 Try «up to 900»."),
-    "own_ok": ("Понял: <b>{b}</b> в месяц ✓", "Got it: <b>{b}</b> a month ✓"),
-    "map": ("📍 Выбрать на карте", "📍 Pick on the map"), "districts": ("🏙 Выбрать районы", "🏙 Pick districts"),
-    "any": ("Любой район", "Any district"),
+              "Where several answers fit, pick them all and tap «Done».",
+              "გამარჯობა, {name}! 👋\nდაგეხმარებით თბილისში ბინის პოვნაში საკომისიოს გარეშე.\n\nუპასუხეთ 6 მოკლე კითხვას, ამას ერთი "
+              "წუთი დასჭირდება. სადაც რამდენიმე პასუხი გერგებათ, აირჩიეთ ყველა და დააჭირეთ „მზადაა“."),
+    "res": ("<b>1 из 6.</b> Сколько человек будет жить?", "<b>1 of 6.</b> How many people will live there?",
+            "<b>1 / 6.</b> რამდენი ადამიანი იცხოვრებს?"),
+    "pets": ("<b>2 из 6.</b> Будут ли животные? Можно несколько.", "<b>2 of 6.</b> Any pets? You can pick several.",
+             "<b>2 / 6.</b> გეყოლებათ შინაური ცხოველი? შეგიძლიათ რამდენიმე აირჩიოთ."),
+    "terms": ("<b>3 из 6.</b> На какой срок? Можно несколько.", "<b>3 of 6.</b> For how long? You can pick several.",
+              "<b>3 / 6.</b> რა ვადით? შეგიძლიათ რამდენიმე აირჩიოთ."),
+    "bud": ("<b>4 из 6.</b> Бюджет в месяц?", "<b>4 of 6.</b> Monthly budget?", "<b>4 / 6.</b> რა ბიუჯეტი გაქვთ თვეში?"),
+    "beds": ("<b>5 из 6.</b> Сколько спален? Можно несколько.", "<b>5 of 6.</b> How many bedrooms? You can pick several.",
+             "<b>5 / 6.</b> რამდენი საძინებელი? შეგიძლიათ რამდენიმე აირჩიოთ."),
+    "place": ("<b>6 из 6.</b> Где искать?", "<b>6 of 6.</b> Where should I look?", "<b>6 / 6.</b> სად ვეძებო?"),
+    "dist": ("Отметьте районы, можно несколько:", "Pick districts, several are fine:", "მონიშნეთ უბნები, შეიძლება რამდენიმე:"),
+    "done": ("Готово ➜", "Done ➜", "მზადაა ➜"), "own": ("✏️ Своя сумма", "✏️ My own amount", "✏️ ჩემი თანხა"),
+    "own_ask": ("Напишите сумму, например «до 900» или «около 1000$».", "Write the amount, e.g. «up to 900» or «about $1000».",
+                "დაწერეთ თანხა, მაგალითად „900-მდე“ ან „დაახლოებით 1000$“."),
+    "own_bad": ("Не понял сумму 🙈 Напишите, например, «до 900».", "I didn't get the amount 🙈 Try «up to 900».",
+                "თანხა ვერ გავიგე 🙈 დაწერეთ, მაგალითად, „900-მდე“."),
+    "map": ("📍 Выбрать на карте", "📍 Pick on the map", "📍 რუკაზე არჩევა"),
+    "districts": ("🏙 Выбрать районы", "🏙 Pick districts", "🏙 უბნების არჩევა"),
+    "any": ("Любой район", "Any district", "ნებისმიერი უბანი"),
     "map_hint": ("Нажмите кнопку «🗺 Выбрать место на карте» внизу экрана и поставьте точку 👇",
-                 "Tap «🗺 Pick a place on the map» at the bottom of the screen and drop a pin 👇"),
-    "picked": ("Выбрано: {x}", "Selected: {x}"),
+                 "Tap «🗺 Pick a place on the map» at the bottom of the screen and drop a pin 👇",
+                 "დააჭირეთ ეკრანის ქვედა ნაწილში ღილაკს „🗺 ადგილის არჩევა რუკაზე“ და მონიშნეთ წერტილი 👇"),
+    "picked": ("Выбрано: {x}", "Selected: {x}", "არჩეულია: {x}"),
     "summary": ("<b>Ваш профиль</b> ✅\n{p}\n\nЕсли есть фото квартир, которые вам нравятся, пришлите их: подберу похожие по стилю 📷",
-                "<b>Your profile</b> ✅\n{p}\n\nIf you have photos of flats you like, send them: I'll find similar ones 📷"),
-    "back": ("С возвращением! 👋", "Welcome back! 👋"),
-    "show": ("🔍 Показать варианты", "🔍 Show options"), "edit": ("✏️ Изменить профиль", "✏️ Edit profile"),
+                "<b>Your profile</b> ✅\n{p}\n\nIf you have photos of flats you like, send them: I'll find similar ones 📷",
+                "<b>თქვენი პროფილი</b> ✅\n{p}\n\nთუ გაქვთ თქვენთვის სასურველი ბინების ფოტოები, გამომიგზავნეთ: მსგავს სტილს შეგირჩევთ 📷"),
+    "back": ("С возвращением! 👋", "Welcome back! 👋", "კეთილი იყოს თქვენი დაბრუნება! 👋"),
+    "show": ("🔍 Показать варианты", "🔍 Show options", "🔍 ვარიანტების ნახვა"),
+    "edit": ("✏️ Изменить профиль", "✏️ Edit profile", "✏️ პროფილის შეცვლა"),
 }
 
 
 def q(cl, key, **kw):
-    s = Q[key][L(cl) == "en"]
+    s = texts.pick(L(cl), *Q[key])
     return s.format(**kw) if kw else s
-
-
-def opt_label(cl, opts, code):
-    return next(lab[L(cl)] for c, lab in opts if c == code)
 
 
 def selected(cl, step):
@@ -241,7 +243,7 @@ def question_kb(cl, step):
         return markup([[cb(q(cl, "map"), "q:place:map")], [cb(q(cl, "districts"), "q:place:districts")], [cb(q(cl, "any"), "q:place:any")]])
     if step == "dist":
         sel = selected(cl, "dist")
-        btns = [cb(("✓ " if ru in sel else "") + (en if L(cl) == "en" else ru), f"q:dist:{n}") for n, (ru, en) in enumerate(texts.DISTRICTS)]
+        btns = [cb(("✓ " if d[0] in sel else "") + texts.district_name(d[0], L(cl)), f"q:dist:{n}") for n, d in enumerate(texts.DISTRICTS)]
         return markup([btns[i:i + 3] for i in range(0, len(btns), 3)] + [[cb(q(cl, "done"), "q:dist:done")]])
     sel = selected(cl, step) if step in MULTI else []
     btns = [cb(("✓ " if code in sel else "") + lab[L(cl)], f"q:{step}:{n}") for n, (code, lab) in enumerate(OPTS[step])]
@@ -253,42 +255,89 @@ def question_kb(cl, step):
     return markup(rows)
 
 
-def question_text(cl, step):
+ICON = {"res": "👥", "pets": "🐾", "terms": "🕐", "bud": "💰", "beds": "🛏", "place": "📍"}
+
+
+def answer_of(cl, step):
+    """A finished step as the summary at the top of the questionnaire message shows it."""
+    p, lang = cl.get("profile") or {}, L(cl)
+    return {"res": lambda: p.get("residents") and texts._people(p["residents"], lang),
+            "pets": lambda: p.get("pets") and texts.pets_text(p["pets"], lang),
+            "terms": lambda: p.get("terms") and texts.terms_text(p["terms"], lang),
+            "bud": lambda: texts.budget_text(p, lang),
+            "beds": lambda: p.get("bedrooms") and texts._bedrooms(p["bedrooms"], lang),
+            "place": lambda: texts.place_text(p, lang)}[step]() or "—"
+
+
+def question_text(cl, step, note=None):
+    """✓ answers of the steps before `step`, then the current question (+ the picked options, + a note)."""
+    cur = "place" if step == "dist" else step
+    done = [f"✓ {ICON[s]} {e(answer_of(cl, s))}" for s in STEPS[:STEPS.index(cur)]]
     t = q(cl, step)
     if step in MULTI or step == "dist":
         labels = selected_labels(cl, step)
         if labels:
-            t += "\n<i>" + q(cl, "picked", x=", ".join(labels)) + "</i>"
-    return t
+            t += "\n<i>" + e(q(cl, "picked", x=", ".join(labels))) + "</i>"
+    if note:
+        t += "\n\n" + note
+    return "\n".join(done) + ("\n\n" if done else "") + t
 
 
 def selected_labels(cl, step):
     sel = selected(cl, step)
     if step == "dist":
-        return [texts.DISTRICT_EN.get(d, d) if L(cl) == "en" else d for d in sel]
+        return [texts.district_name(d, L(cl)) for d in sel]
     return [lab[L(cl)] for code, lab in OPTS[step] if code in sel]
 
 
-async def ask(bot, cl, step):
-    await bot.send_message(int(cl["chat_id"]), question_text(cl, step), parse_mode="HTML", reply_markup=question_kb(cl, step))
+async def render(bot, cl, text, mk, query=None):
+    """The questionnaire message shows `text`: the tapped message (query) or clients.state["qmsg"] is edited; only when
+    there is none (or it is gone) a new message is sent and remembered."""
+    chat = int(cl["chat_id"])
+    mid = query.message.message_id if query and query.message else cl["state"].get("qmsg")
+    if mid:
+        try:
+            await bot.edit_message_text(text, chat, mid, parse_mode="HTML", reply_markup=mk)
+            if cl["state"].get("qmsg") != mid:
+                await th(core.update, cl, lambda st, r: st.update(qmsg=mid))
+            return
+        except BadRequest as ex:
+            if "not modified" in str(ex).lower():
+                return
+            log.info("questionnaire message %s: %s, sending a new one", mid, ex)
+    m = await bot.send_message(chat, text, parse_mode="HTML", reply_markup=mk)
+    await th(core.update, cl, lambda st, r: st.update(qmsg=m.message_id))
+
+
+async def ask(bot, cl, step, query=None, note=None):
+    await render(bot, cl, question_text(cl, step, note), question_kb(cl, step), query)
 
 
 async def start_questionnaire(bot, cl, name):
     await th(set_done, cl, False)
+    await th(core.update, cl, lambda st, r: st.update(qmsg=None))  # a fresh questionnaire message
     await bot.send_message(int(cl["chat_id"]), q(cl, "intro", name=e(name or "")).replace(", !", "!"))
     await ask(bot, cl, "res")
 
 
+def summary_kb(cl):
+    return markup([[cb(q(cl, "show"), "q:go")], [cb(q(cl, "edit"), "q:edit")], [cb(core.t(cl["lang"], "lang_btn"), "lang:menu")]])
+
+
+def summary_text(cl, back=False):
+    return (q(cl, "back") + "\n\n" if back else "") + q(cl, "summary", p=e(texts.profile_summary(cl.get("profile") or {}, L(cl))))
+
+
 async def summary(bot, cl, back=False):
-    text = (q(cl, "back") + "\n\n" if back else "") + q(cl, "summary", p=e(texts.profile_summary(cl.get("profile") or {}, L(cl))))
-    await bot.send_message(int(cl["chat_id"]), text, parse_mode="HTML",
-                           reply_markup=markup([[cb(q(cl, "show"), "q:go")], [cb(q(cl, "edit"), "q:edit")]]))
+    await bot.send_message(int(cl["chat_id"]), summary_text(cl, back), parse_mode="HTML", reply_markup=summary_kb(cl))
 
 
-async def finish(bot, cl):
+async def finish(bot, cl, query=None):
+    """A2a: the questionnaire message becomes the profile summary with «Показать варианты» / «Изменить» / «Язык»."""
     await th(set_done, cl, True)
     await th(set_await, cl)
-    await summary(bot, cl)
+    await render(bot, cl, summary_text(cl), summary_kb(cl), query)
+    await th(core.update, cl, lambda st, r: st.update(qmsg=None))
 
 
 def next_step(step):
@@ -299,7 +348,7 @@ BUDGET_CODES = {"0-500": (None, 500), "500-800": (500, 800), "800-1200": (800, 1
 
 
 async def on_q(update: Update, ctx, cl):
-    """q:<step>:<option index | done | own | map | districts | any>, q:go, q:edit."""
+    """q:<step>:<option index | done | own | map | districts | any>, q:go, q:edit. Every step edits the tapped message."""
     query = update.callback_query
     parts = query.data.split(":")
     bot, step, val = ctx.bot, parts[1], parts[2] if len(parts) > 2 else None
@@ -311,7 +360,7 @@ async def on_q(update: Update, ctx, cl):
     if step == "edit":
         await answer(query)
         await th(set_done, cl, False)
-        await ask(bot, cl, "res")
+        await ask(bot, cl, "res", query)
         return
     if step in MULTI and val != "done":  # toggle; «Нет» (pets) excludes the rest
         code = OPTS[step][int(val)][0]
@@ -331,7 +380,7 @@ async def on_q(update: Update, ctx, cl):
         await th(save_profile, cl, toggle)
         await answer(query)
         await th(load_profile, cl)  # render the latest state: a concurrent tap may have saved after us
-        await edit_text(query, question_text(cl, step), parse_mode="HTML", reply_markup=question_kb(cl, step))
+        await ask(bot, cl, step, query)
         return
     if step == "dist" and val != "done":
         name = texts.DISTRICTS[int(val)][0]
@@ -339,42 +388,34 @@ async def on_q(update: Update, ctx, cl):
                                                       + ([] if name in (p.get("districts") or []) else [name]), pin=None))
         await answer(query)
         await th(load_profile, cl)
-        await edit_text(query, question_text(cl, "dist"), parse_mode="HTML", reply_markup=question_kb(cl, "dist"))
+        await ask(bot, cl, "dist", query)
         return
     await answer(query)
     if step in MULTI or step == "dist":  # Готово
         await th(load_profile, cl)
-        labels = selected_labels(cl, step)
-        if step == "dist" and not labels:
+        if step == "dist" and not selected_labels(cl, step):
             await th(save_profile, cl, lambda p: p.update(districts=["any"], pin=None))
-            labels = [q(cl, "any")]
-        await edit_text(query, q(cl, step), parse_mode="HTML", reply_markup=only_chosen(labels or ["—"]))
-        return await finish(bot, cl) if step == "dist" else await ask(bot, cl, next_step(step))
+        return await finish(bot, cl, query) if step == "dist" else await ask(bot, cl, next_step(step), query)
     if step == "res":
         code = OPTS["res"][int(val)][0]
         await th(save_profile, cl, lambda p: p.update(residents=code))
-        await edit_text(query, q(cl, "res"), parse_mode="HTML", reply_markup=only_chosen([opt_label(cl, OPTS["res"], code)]))
-        return await ask(bot, cl, "pets")
+        return await ask(bot, cl, "pets", query)
     if step == "bud":
         if val == "own":
             await th(set_await, cl, "budget")
-            await bot.send_message(int(cl["chat_id"]), q(cl, "own_ask"))
-            return
+            return await ask(bot, cl, "bud", query, note=q(cl, "own_ask"))
         code = OPTS["bud"][int(val)][0]
         lo, hi = BUDGET_CODES[code]
         await th(save_profile, cl, lambda p: p.update(budget_min=lo, budget_max=hi))
-        await edit_text(query, q(cl, "bud"), parse_mode="HTML", reply_markup=only_chosen([opt_label(cl, OPTS["bud"], code)]))
-        return await ask(bot, cl, "beds")
+        return await ask(bot, cl, "beds", query)
     if step == "place":
         if val == "any":
             await th(save_profile, cl, lambda p: p.update(districts=["any"], pin=None, radius_km=None))
-            await edit_text(query, q(cl, "place"), parse_mode="HTML", reply_markup=only_chosen([q(cl, "any")]))
-            return await finish(bot, cl)
+            return await finish(bot, cl, query)
         if val == "districts":
-            await edit_text(query, q(cl, "place"), parse_mode="HTML", reply_markup=only_chosen([q(cl, "districts")[2:]]))
-            return await ask(bot, cl, "dist")
+            return await ask(bot, cl, "dist", query)
         await th(set_await, cl, "pin")
-        from bot import map_kb
+        from bot import map_kb  # the map is a reply-keyboard button: it can only come with a new message
         await bot.send_message(int(cl["chat_id"]), q(cl, "map_hint"), reply_markup=map_kb(cl["lang"]))
 
 
@@ -382,14 +423,14 @@ NUM = r"(\d+(?:[.,]\d+)?)\s*(k|к|тыс\.?)?"
 
 
 def parse_budget(text):
-    """Free-text budget (A1b) -> (min, max) in $: «до 900», «около 1000$», «от 700 до 1000», «800-1200», «2000 лари»."""
-    t = (text or "").lower().replace(" ", " ")
+    """Free-text budget (A1b) -> (min, max) in $: «до 900», «около 1000$», «от 700 до 1000», «800-1200», «2000 лари», «900-მდე»."""
+    t = (text or "").lower().replace(" ", " ")
     t = re.sub(r"(\d)\s(\d{3})\b", r"\1\2", t)  # 1 000 -> 1000
     t = re.sub(r"(\d),(\d{3})(?!\d)", r"\1\2", t)  # $1,200 -> 1200 (a comma before exactly 3 digits: thousands)
     nums = [float(n.replace(",", ".")) * (1000 if k else 1) for n, k in re.findall(NUM, t)]
     if not nums:
         return None
-    if re.search(r"лар|gel|₾|lari", t):
+    if re.search(r"лар|gel|₾|lari|ლარ", t):
         nums = [n / 2.7 for n in nums]
     nums = [int(round(n)) for n in nums]
     if any(n < 50 or n > 100000 for n in nums):
@@ -397,24 +438,25 @@ def parse_budget(text):
     if len(nums) >= 2:
         return min(nums[:2]), max(nums[:2])
     n = nums[0]
-    if re.search(r"\bот\b|\bfrom\b|\bmin|не меньше|at least|\+\s*$|больше", t):
+    if re.search(r"\bот\b|\bfrom\b|\bmin|не меньше|at least|\+\s*$|больше|დან|მინიმუმ", t):
         return n, None
     return None, n  # «до», «up to», «около», «about», a bare number: the ceiling (the search allows +10%)
 
 
 async def on_budget_text(bot, cl, text):
+    """The client's typed amount (A1b): the questionnaire message moves to the bedrooms step; nothing is deleted."""
     got = parse_budget(text)
     if not got:
         await bot.send_message(int(cl["chat_id"]), q(cl, "own_bad"))
         return
     await th(save_profile, cl, lambda p: p.update(budget_min=got[0], budget_max=got[1]))
     await th(set_await, cl)
-    await bot.send_message(int(cl["chat_id"]), q(cl, "own_ok", b=e(texts.budget_text(cl["profile"], L(cl)))), parse_mode="HTML")
     await ask(bot, cl, "beds")
 
 
 async def on_pin(bot, cl, lat, lng, radius, label):
-    """A1c map point (Mini App map / location) while the questionnaire waits for it."""
+    """A1c map point (Mini App map / location) while the questionnaire waits for it: the questionnaire message becomes
+    the profile summary."""
     await th(save_profile, cl, lambda p: p.update(pin={"lat": lat, "lng": lng, "label": label}, radius_km=radius or 2.0, districts=[]))
     await finish(bot, cl)
 
@@ -724,7 +766,7 @@ async def on_cancel(update: Update, ctx, cl):
     if not had and awaiting(cl)[0]:
         await th(set_await, cl)
         had = True
-    await update.effective_message.reply_text(tr(cl, "Отменено 👌", "Cancelled 👌") if had else tr(cl, "Нечего отменять.", "Nothing to cancel."))
+    await update.effective_message.reply_text(tr(cl, "Отменено 👌", "Cancelled 👌", "გაუქმდა 👌") if had else tr(cl, "Нечего отменять.", "Nothing to cancel.", "გასაუქმებელი არაფერია."))
 
 
 # ---------- A4/A5/A6: client buttons ----------
@@ -733,17 +775,27 @@ OUTCOME_REPLY = {
     "rented": ("Отлично, поздравляем! 🎉\nАгент {agent} поможет с договором. Оператор проверит сделку и пришлёт подтверждение.\n\n"
                "Через 14 дней спрошу, всё ли хорошо в новой квартире.",
                "Great, congratulations! 🎉\nAgent {agent} will help with the contract. An operator will check the deal and confirm.\n\n"
-               "In 14 days I'll ask if everything is fine in the new flat."),
-    "thinking": ("Хорошо, подумайте 🙂 Напомню завтра.", "Sure, take your time 🙂 I'll remind you tomorrow."),
+               "In 14 days I'll ask if everything is fine in the new flat.",
+               "მშვენიერია, გილოცავთ! 🎉\nაგენტი {agent} ხელშეკრულებაში დაგეხმარებათ. ოპერატორი გარიგებას შეამოწმებს და დადასტურებას გამოგიგზავნით.\n\n"
+               "14 დღეში გკითხავთ, ყველაფერი რიგზეა თუ არა ახალ ბინაში."),
+    "thinking": ("Хорошо, подумайте 🙂 Напомню завтра.", "Sure, take your time 🙂 I'll remind you tomorrow.",
+                 "კარგი, დაფიქრდით 🙂 ხვალ შეგახსენებთ."),
 }
 REASON_REPLY = {
-    "price": ("Понял, учту цену. Подобрать похожие квартиры дешевле?", "Got it, I'll keep the price in mind. Find similar cheaper flats?"),
-    "location": ("Понял, учту район. Подобрать похожие в другом месте?", "Got it. Find similar flats in another area?"),
-    "condition": ("Понял, учту состояние. Подобрать похожие в лучшем состоянии?", "Got it. Find similar flats in better condition?"),
-    "other": ("Понял, учту. Подобрать похожие квартиры?", "Got it. Shall I find similar flats?"),
+    "price": ("Понял, учту цену. Подобрать похожие квартиры дешевле?", "Got it, I'll keep the price in mind. Find similar cheaper flats?",
+              "გასაგებია, ფასს გავითვალისწინებ. შეგირჩიოთ მსგავსი, უფრო იაფი ბინები?"),
+    "location": ("Понял, учту район. Подобрать похожие в другом месте?", "Got it. Find similar flats in another area?",
+                 "გასაგებია, უბანს გავითვალისწინებ. შეგირჩიოთ მსგავსი ბინები სხვა ადგილას?"),
+    "condition": ("Понял, учту состояние. Подобрать похожие в лучшем состоянии?", "Got it. Find similar flats in better condition?",
+                  "გასაგებია, მდგომარეობას გავითვალისწინებ. შეგირჩიოთ მსგავსი ბინები უკეთეს მდგომარეობაში?"),
+    "other": ("Понял, учту. Подобрать похожие квартиры?", "Got it. Shall I find similar flats?",
+              "გასაგებია, გავითვალისწინებ. შეგირჩიოთ მსგავსი ბინები?"),
 }
-REASON_MSG = {"price": ("хочу дешевле, чем ${p}", "cheaper than ${p}"), "location": ("другой район, не {d}", "another area, not {d}"),
-              "condition": ("в лучшем состоянии, с хорошим ремонтом", "better condition, good renovation"), "other": (None, None)}
+# what goes into the search request (the model reads any language; the ka client gets the English hint)
+REASON_MSG = {"price": ("хочу дешевле, чем ${p}", "cheaper than ${p}", "cheaper than ${p}"),
+              "location": ("другой район, не {d}", "another area, not {d}", "another area, not {d}"),
+              "condition": ("в лучшем состоянии, с хорошим ремонтом", "better condition, good renovation", "better condition, good renovation"),
+              "other": (None, None, None)}
 
 
 def my_lead(cl, lead_id):
@@ -771,7 +823,7 @@ async def on_client_journey(update: Update, ctx, cl):
     kind = parts[0]
     if kind == "ls" and parts[1] == "pick":
         _, err = await svc(leads.choose_slot, int(parts[2]), cl["id"])  # notify: A4b to the client, C8 contacts to the agent
-        await answer(query, "✅" if not err else tr(cl, "Это время уже недоступно", "This time is no longer available"), show_alert=bool(err))
+        await answer(query, "✅" if not err else tr(cl, "Это время уже недоступно", "This time is no longer available", "ეს დრო უკვე აღარ არის ხელმისაწვდომი"), show_alert=bool(err))
         return
     if kind == "t14":
         return await on_t14(update, ctx, cl, parts)
@@ -784,29 +836,33 @@ async def on_client_journey(update: Update, ctx, cl):
         await th(set_await, cl, "lead_message", lead_id)
         await answer(query)
         await bot.send_message(chat, tr(cl, f"Напишите ответ по заявке #{lead_id}. /cancel — отменить.",
-                                        f"Write your reply for request #{lead_id}. /cancel to cancel."))
+                                        f"Write your reply for request #{lead_id}. /cancel to cancel.",
+                                        f"დაწერეთ პასუხი განაცხადზე #{lead_id}. /cancel — გაუქმება."))
     elif kind == "ls":  # own time
         await th(set_await, cl, "own_time", lead_id)
         await answer(query)
         await bot.send_message(chat, tr(cl, "Напишите удобное время, например «завтра после 18:00». Передам агенту.",
-                                        "Write a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent."))
+                                        "Write a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent.",
+                                        "დაწერეთ თქვენთვის მოსახერხებელი დრო, მაგალითად „ხვალ 18:00-ის შემდეგ“. აგენტს გადავცემ."))
     elif kind == "lv":
         act = parts[1]
         if act == "ok":
-            await answer(query, tr(cl, "Отлично, ждём вас 👍", "Great, see you there 👍"))
+            await answer(query, tr(cl, "Отлично, ждём вас 👍", "Great, see you there 👍", "მშვენიერია, გელოდებით 👍"))
             await mark_choice(query, pressed_label(query))
             await th(notify.viewing_update, ld, "ok")
         elif act == "late":
             await svc(leads.client_late, lead_id)
             await answer(query)
             await th(notify.viewing_update, ld, "late")
-            await bot.send_message(chat, tr(cl, "Передал агенту, что вы опаздываете 👌", "I told the agent you're running late 👌"))
+            await bot.send_message(chat, tr(cl, "Передал агенту, что вы опаздываете 👌", "I told the agent you're running late 👌", "აგენტს გადავეცი, რომ აგვიანებთ 👌"))
         elif act == "resched":
             _, err = await svc(leads.request_reschedule, lead_id, "client")
             await answer(query)
             await bot.send_message(chat, tr(cl, "Передал агенту: он согласует с собственником новое время и пришлёт варианты 🙌",
-                                            "I asked the agent: they'll agree a new time with the owner and send options 🙌")
-                                   if not err else tr(cl, "Перенести уже нельзя, напишите оператору.", "Can't reschedule now, please write to the operator."))
+                                            "I asked the agent: they'll agree a new time with the owner and send options 🙌",
+                                            "აგენტს გადავეცი: ის მესაკუთრესთან ახალ დროს შეათანხმებს და ვარიანტებს გამოგიგზავნით 🙌")
+                                   if not err else tr(cl, "Перенести уже нельзя, напишите оператору.", "Can't reschedule now, please write to the operator.",
+                                                      "გადატანა უკვე შეუძლებელია, მიწერეთ ოპერატორს."))
     elif kind == "lo":
         outcome = parts[3]
         _, err = await svc(leads.set_outcome, lead_id, "client", outcome)  # refused -> notify.refusal_reason_ask
@@ -816,7 +872,7 @@ async def on_client_journey(update: Update, ctx, cl):
         await mark_choice(query, pressed_label(query))
         if outcome in OUTCOME_REPLY:
             ag = await th(user_row, ld["agent_id"]) or {}
-            await bot.send_message(chat, OUTCOME_REPLY[outcome][L(cl) == "en"].format(agent=ag.get("name") or ""))
+            await bot.send_message(chat, texts.pick(L(cl), *OUTCOME_REPLY[outcome]).format(agent=ag.get("name") or ""))
     elif kind == "lr":
         reason = parts[2] if len(parts) > 2 and parts[2] in REASON_MSG else "other"
         if not first_tap(query, "lr"):  # a double tap (or a second reason on the same card): one answer
@@ -827,12 +883,12 @@ async def on_client_journey(update: Update, ctx, cl):
         await mark_choice(query, pressed_label(query))
         i = await th(core.listing, ld["listing_id"]) or {}
         await th(core.react, cl, ld["listing_id"], "dislike")
-        hint = REASON_MSG[reason][L(cl) == "en"]
+        hint = texts.pick(L(cl), *REASON_MSG[reason])
         if hint:
             await th(core.add_input, cl, text=hint.format(p=i.get("price_usd") or "", d=i.get("district") or ""))
-        await bot.send_message(chat, REASON_REPLY[reason][L(cl) == "en"],
-                               reply_markup=markup([[cb(tr(cl, "🔄 Да, подобрать", "🔄 Yes, find"), "more")],
-                                                    [cb(tr(cl, "Пока нет", "Not now"), "noop")]]))
+        await bot.send_message(chat, texts.pick(L(cl), *REASON_REPLY[reason]),
+                               reply_markup=markup([[cb(tr(cl, "🔄 Да, подобрать", "🔄 Yes, find", "🔄 დიახ, შემირჩიე"), "more")],
+                                                    [cb(tr(cl, "Пока нет", "Not now", "ჯერ არა"), "noop")]]))
 
 
 def _deal_client(deal_id):
@@ -862,7 +918,8 @@ async def on_t14(update, ctx, cl, parts):
     if parts[2] == "problem":
         await th(set_await, cl, "problem", deal_id)
         await ctx.bot.send_message(update.effective_chat.id, tr(cl, "Опишите, пожалуйста, проблему одним сообщением, оператор ответит.",
-                                                                 "Please describe the problem in one message, an operator will reply."))
+                                                                 "Please describe the problem in one message, an operator will reply.",
+                                                                 "გთხოვთ, აღწეროთ პრობლემა ერთი შეტყობინებით, ოპერატორი გიპასუხებთ."))
         return
     n, score = int(parts[2]), int(parts[3])
     await th(core.update, cl, lambda st, r: st.setdefault("t14", {}).setdefault(str(deal_id), {}).update({str(n): score}))
@@ -878,8 +935,9 @@ async def on_t14(update, ctx, cl, parts):
         await svc(evaluations.create, {"deal_id": deal_id, "kind": "t14", "author": "client", "h2o_client": a.get("1"),
                                        "h2o_owner": a.get("2"), "h2o_process": a.get("3")}, None)
     await ctx.bot.send_message(update.effective_chat.id, tr(cl, "Спасибо! 🙏 0 = плохо, 3 = отлично. Если есть проблема, напишите, оператор ответит.",
-                                                             "Thank you! 🙏 0 = bad, 3 = great. If there is a problem, write it, an operator will reply."),
-                               reply_markup=markup([[cb(tr(cl, "✍️ Есть проблема", "✍️ There is a problem"), f"t14:{deal_id}:problem")]]))
+                                                             "Thank you! 🙏 0 = bad, 3 = great. If there is a problem, write it, an operator will reply.",
+                                                             "გმადლობთ! 🙏 0 = ცუდი, 3 = შესანიშნავი. თუ რამე პრობლემაა, მოგვწერეთ, ოპერატორი გიპასუხებთ."),
+                               reply_markup=markup([[cb(tr(cl, "✍️ Есть проблема", "✍️ There is a problem", "✍️ პრობლემა მაქვს"), f"t14:{deal_id}:problem")]]))
 
 
 async def on_client_text(update: Update, ctx, cl):
@@ -903,10 +961,12 @@ async def on_client_text(update: Update, ctx, cl):
             if awaiting(cl)[0] == "lead_message" and str(awaiting(cl)[1]) == str(ref):
                 await th(set_await, cl)
             await bot.send_message(chat, tr(cl, "Ответ сохранён. Оператор увидит его в заявке 👌",
-                                            "Your reply was saved. The operator can see it in the request 👌"))
+                                            "Your reply was saved. The operator can see it in the request 👌",
+                                            "პასუხი შენახულია. ოპერატორი მას განაცხადში ნახავს 👌"))
         else:
             await bot.send_message(chat, tr(cl, "Не удалось сохранить ответ. Откройте сообщение оператора и попробуйте снова.",
-                                            "Couldn't save your reply. Open the operator's message and try again."))
+                                            "Couldn't save your reply. Open the operator's message and try again.",
+                                            "პასუხის შენახვა ვერ მოხერხდა. გახსენით ოპერატორის შეტყობინება და სცადეთ თავიდან."))
         return True
     if not kind:
         return False
@@ -916,16 +976,18 @@ async def on_client_text(update: Update, ctx, cl):
         _, err = await svc(leads.client_own_time, int(ref), text)
         if err:
             await bot.send_message(chat, tr(cl, "Не удалось сохранить время: заявка уже на другом шаге. Напишите оператору.",
-                                            "Couldn't save the time: this request has moved to another stage. Contact the operator."))
+                                            "Couldn't save the time: this request has moved to another stage. Contact the operator.",
+                                            "დროის შენახვა ვერ მოხერხდა: განაცხადი უკვე სხვა ეტაპზეა. მიწერეთ ოპერატორს."))
             return True
         await th(set_await, cl)
         await bot.send_message(chat, tr(cl, "Время сохранено в заявке. Агент согласует его с собственником 👌",
-                                        "Your time was saved in the request. The agent will agree it with the owner 👌"))
+                                        "Your time was saved in the request. The agent will agree it with the owner 👌",
+                                        "დრო განაცხადში შენახულია. აგენტი მას მესაკუთრესთან შეათანხმებს 👌"))
     elif kind == "problem":
         await th(set_await, cl)
         await svc(evaluations.create, {"deal_id": int(ref), "kind": "t14", "author": "client", "complaints": True,
                                        "complaints_text": text}, None)  # -> notify.evaluation_alert to operators
-        await bot.send_message(chat, tr(cl, "Передал оператору, он скоро ответит 🙏", "Sent to an operator, they'll reply soon 🙏"))
+        await bot.send_message(chat, tr(cl, "Передал оператору, он скоро ответит 🙏", "Sent to an operator, they'll reply soon 🙏", "ოპერატორს გადავეცი, მალე გიპასუხებთ 🙏"))
     else:
         return False
     return True

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     PUBLIC_URL: str = "http://localhost:8000"
     BOT_TOKEN: str = ""
     BOT_USERNAME: str = "HomesinGeorgia_bot"
+    STAFF_BOT_TOKEN: str = ""           # optional work bot: staff cards (operators group, operator/agent DMs) go through it
+    OPERATOR_TG_USERNAME: str = ""      # after ❤️ the client writes here (t.me/<it>?text=…); empty = the first operator's @username
+    # operator userbot (app/telegram/userbot.py): the operator's own account; all three set = enabled
+    OPERATOR_USERBOT_SESSION: str = ""  # Telethon StringSession, created by the operator (docs in userbot.py)
+    API_ID: str = ""
+    API_HASH: str = ""
+    USERBOT_URL: str = ""               # where the CRM/bot reach the userbot, e.g. http://userbot:8091 (compose)
     TG_API_BASE: str = "https://api.telegram.org"
     OPERATORS_CHAT_ID: str = ""
     OPERATORS_TOPIC_ID: str = ""

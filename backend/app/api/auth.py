@@ -102,7 +102,13 @@ class LoginIn(BaseModel):
 
 @router.post("/telegram-webapp")
 def telegram_webapp(body: WebAppIn, db: Session = Depends(get_db, scope="function")):
-    return _session(db, _tg_user(db, verify_webapp_init_data(body.init_data, settings.BOT_TOKEN)))
+    try:
+        data = verify_webapp_init_data(body.init_data, settings.BOT_TOKEN)
+    except DomainError:
+        if not settings.STAFF_BOT_TOKEN:  # the panel opened from the staff bot is signed with its token
+            raise
+        data = verify_webapp_init_data(body.init_data, settings.STAFF_BOT_TOKEN)
+    return _session(db, _tg_user(db, data))
 
 
 @router.post("/telegram-login")

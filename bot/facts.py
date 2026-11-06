@@ -371,7 +371,7 @@ def safe_link(url):
 
 def _lab(kind, code, lang):
     pair = LABELS[kind].get(code)
-    return pair and pair[lang == "en"]
+    return pair and pair[lang != "ru"]  # en and ka: English facts
 
 
 def _chunks(items, n=3):
@@ -381,7 +381,7 @@ def _chunks(items, n=3):
 def card_lines(i, lang="ru"):
     """The channel-style body of a card: [block, block, ...] (each a list of lines); no hashtags, only known facts.
     Text fields are raw (core.card runs them through public())."""
-    en = lang == "en"
+    en = lang != "ru"
     d = i.get("details") or {}
     pick = lambda k: d.get(f"{k}_en") if en else d.get(f"{k}_ru") or d.get(f"{k}_en")  # Latin is fine in a ru card
     district = (en and (d.get("district_en") or i.get("district_en"))) or i.get("district") or ("Tbilisi" if en else "Тбилиси")
@@ -443,7 +443,7 @@ def _sp(n):
 
 def media_links(i, lang="ru"):
     """URL buttons for the client card: 🎥 video (e.g. YouTube) and 🧊 3D tour, only on hosts that don't reveal the source."""
-    d, en = i.get("details") or {}, lang == "en"
+    d, en = i.get("details") or {}, lang != "ru"
     out = []
     if not d.get("videos") and (u := safe_link(d.get("video_url"))):  # downloaded (fetch_videos.py) = already in the album
         out.append({"text": "🎥 Video" if en else "🎥 Видео", "url": u})

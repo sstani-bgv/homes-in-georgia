@@ -80,7 +80,7 @@ class Listing(Base):
 class Client(Base):
     __tablename__ = "clients"
     __table_args__ = (UniqueConstraint("channel", "external_id", name="clients_channel_external_id_key"),
-                      CheckConstraint("lang IN ('ru', 'en')", name="clients_lang_check"))
+                      CheckConstraint("lang IN ('ru', 'en', 'ka')", name="clients_lang_check"))
     id = Column(Integer, primary_key=True)
     channel = Column(Text, nullable=False)
     external_id = Column(Text, nullable=False)

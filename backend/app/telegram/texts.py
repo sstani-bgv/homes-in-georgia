@@ -1,32 +1,51 @@
-"""Shared wording for Telegram (bot questionnaire + notify): client profile, slot/time labels, T14 questions. RU/EN."""
+"""Shared wording for Telegram (bot questionnaire + notify): client profile, slot/time labels, T14 questions. RU/EN/KA."""
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 # questionnaire options (A1a-A1c); the codes are what clients.profile stores (ARCHITECTURE §4.3)
-RESIDENTS = [("1", {"ru": "1", "en": "1"}), ("2", {"ru": "2", "en": "2"}), ("3", {"ru": "3", "en": "3"}), ("4+", {"ru": "4+", "en": "4+"})]
-PETS = [("none", {"ru": "Нет", "en": "No"}), ("cat", {"ru": "🐈 Кошка", "en": "🐈 Cat"}),
-        ("dog", {"ru": "🐕 Собака", "en": "🐕 Dog"}), ("other", {"ru": "Другое", "en": "Other"})]
-TERMS = [("1-3", {"ru": "до 3 мес", "en": "up to 3 mo"}), ("6", {"ru": "6 мес", "en": "6 mo"}),
-         ("12", {"ru": "12 мес", "en": "12 mo"}), ("12+", {"ru": "Больше года", "en": "Over a year"})]
-BUDGETS = [("0-500", {"ru": "$ до 500", "en": "up to $500"}), ("500-800", {"ru": "500-800", "en": "$500-800"}),
-           ("800-1200", {"ru": "800-1200", "en": "$800-1200"}), ("1200-", {"ru": "1200+", "en": "$1200+"})]
-BEDROOMS = [("0", {"ru": "Студия", "en": "Studio"}), ("1", {"ru": "1", "en": "1"}), ("2", {"ru": "2", "en": "2"}),
-            ("3", {"ru": "3+", "en": "3+"})]
-# district names as listings.district stores them (ru) + English labels
-DISTRICTS = [("Ваке", "Vake"), ("Сабуртало", "Saburtalo"), ("Мтацминда", "Mtatsminda"), ("Сололаки", "Sololaki"),
-             ("Вера", "Vera"), ("Дидубе", "Didube"), ("Дигоми", "Digomi"), ("Исани", "Isani"), ("Глдани", "Gldani"),
-             ("Старый Тбилиси", "Old Tbilisi"), ("Надзаладеви", "Nadzaladevi"), ("Чугурети", "Chughureti")]
-DISTRICT_EN = dict(DISTRICTS)
+def _same(x):
+    return {"ru": x, "en": x, "ka": x}
+
+
+RESIDENTS = [("1", _same("1")), ("2", _same("2")), ("3", _same("3")), ("4+", _same("4+"))]
+PETS = [("none", {"ru": "Нет", "en": "No", "ka": "არა"}), ("cat", {"ru": "🐈 Кошка", "en": "🐈 Cat", "ka": "🐈 კატა"}),
+        ("dog", {"ru": "🐕 Собака", "en": "🐕 Dog", "ka": "🐕 ძაღლი"}), ("other", {"ru": "Другое", "en": "Other", "ka": "სხვა"})]
+TERMS = [("1-3", {"ru": "до 3 мес", "en": "up to 3 mo", "ka": "3 თვემდე"}), ("6", {"ru": "6 мес", "en": "6 mo", "ka": "6 თვე"}),
+         ("12", {"ru": "12 мес", "en": "12 mo", "ka": "12 თვე"}), ("12+", {"ru": "Больше года", "en": "Over a year", "ka": "წელზე მეტი"})]
+BUDGETS = [("0-500", {"ru": "$ до 500", "en": "up to $500", "ka": "$500-მდე"}), ("500-800", {"ru": "500-800", "en": "$500-800", "ka": "$500-800"}),
+           ("800-1200", {"ru": "800-1200", "en": "$800-1200", "ka": "$800-1200"}), ("1200-", {"ru": "1200+", "en": "$1200+", "ka": "$1200+"})]
+BEDROOMS = [("0", {"ru": "Студия", "en": "Studio", "ka": "სტუდიო"}), ("1", _same("1")), ("2", _same("2")), ("3", _same("3+"))]
+# district names as listings.district stores them (ru) + English and Georgian labels
+DISTRICTS = [("Ваке", "Vake", "ვაკე"), ("Сабуртало", "Saburtalo", "საბურთალო"), ("Мтацминда", "Mtatsminda", "მთაწმინდა"),
+             ("Сололаки", "Sololaki", "სოლოლაკი"), ("Вера", "Vera", "ვერა"), ("Дидубе", "Didube", "დიდუბე"),
+             ("Дигоми", "Digomi", "დიღომი"), ("Исани", "Isani", "ისანი"), ("Глдани", "Gldani", "გლდანი"),
+             ("Старый Тбилиси", "Old Tbilisi", "ძველი თბილისი"), ("Надзаладеви", "Nadzaladevi", "ნაძალადევი"),
+             ("Чугурети", "Chughureti", "ჩუღურეთი")]
+DISTRICT_EN = {ru: en for ru, en, _ in DISTRICTS}
+DISTRICT_KA = {ru: ka for ru, _, ka in DISTRICTS}
 
 T14_QUESTIONS = {"ru": ["Квартира соответствует объявлению?", "Собственник: всё в порядке?", "Как работал агент и агентство?"],
-                 "en": ["Does the flat match the listing?", "Is everything fine with the owner?", "How did the agent and the agency do?"]}
-REFUSAL = {"price": {"ru": "Цена", "en": "Price"}, "location": {"ru": "Район", "en": "Location"},
-           "condition": {"ru": "Состояние", "en": "Condition"}, "other": {"ru": "Другое", "en": "Other"}}
-WEEKDAYS = {"ru": ["пн", "вт", "ср", "чт", "пт", "сб", "вс"], "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+                 "en": ["Does the flat match the listing?", "Is everything fine with the owner?", "How did the agent and the agency do?"],
+                 "ka": ["ბინა შეესაბამება განცხადებას?", "მესაკუთრესთან ყველაფერი რიგზეა?", "როგორ იმუშავეს აგენტმა და სააგენტომ?"]}
+REFUSAL = {"price": {"ru": "Цена", "en": "Price", "ka": "ფასი"}, "location": {"ru": "Район", "en": "Location", "ka": "მდებარეობა"},
+           "condition": {"ru": "Состояние", "en": "Condition", "ka": "მდგომარეობა"}, "other": {"ru": "Другое", "en": "Other", "ka": "სხვა"}}
+WEEKDAYS = {"ru": ["пн", "вт", "ср", "чт", "пт", "сб", "вс"], "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "ka": ["ორშ", "სამ", "ოთხ", "ხუთ", "პარ", "შაბ", "კვ"]}
+LANGS = ("ru", "en", "ka")  # clients.lang (DB CHECK clients_lang_check)
 
 
 def lang_of(lang):
-    return "en" if lang == "en" else "ru"
+    return lang if lang in LANGS else "ru"
+
+
+def pick(lang, ru, en, ka):
+    """The variant of a client-facing string for the client's language."""
+    return (ru, en, ka)[LANGS.index(lang_of(lang))]
+
+
+def district_name(ru_name, lang):
+    """listings.district (ru) in the client's language."""
+    return pick(lang, ru_name, DISTRICT_EN.get(ru_name, ru_name), DISTRICT_KA.get(ru_name) or DISTRICT_EN.get(ru_name, ru_name))
 
 
 def tz():
@@ -52,20 +71,21 @@ def slot_label(dt, lang="ru", now=None):
     today = local(now or datetime.now(timezone.utc)).date()
     hm = d.strftime("%H:%M")
     if d.date() == today:
-        return ("Today " if lang == "en" else "Сегодня ") + hm
+        return pick(lang, "Сегодня ", "Today ", "დღეს ") + hm
     if d.date() == today + timedelta(days=1):
-        return ("Tomorrow " if lang == "en" else "Завтра ") + hm
+        return pick(lang, "Завтра ", "Tomorrow ", "ხვალ ") + hm
     return f"{WEEKDAYS[lang][d.weekday()].capitalize()} {d:%d.%m} {hm}"
 
 
 def when_long(dt, lang="ru", now=None):
-    """«завтра, пт 23.10, в 12:00» / «tomorrow, Fri 23.10, at 12:00»."""
+    """«завтра, пт 23.10, в 12:00» / «tomorrow, Fri 23.10, at 12:00» / «ხვალ, პარ 23.10, 12:00-ზე»."""
     lang, d = lang_of(lang), local(dt)
     today = local(now or datetime.now(timezone.utc)).date()
-    day = {0: ("сегодня", "today"), 1: ("завтра", "tomorrow")}.get((d.date() - today).days)
+    day = {0: ("сегодня", "today", "დღეს"), 1: ("завтра", "tomorrow", "ხვალ")}.get((d.date() - today).days)
     wd = f"{WEEKDAYS[lang][d.weekday()]} {d:%d.%m}"
-    head = f"{day[lang == 'en']}, {wd}" if day else wd
-    return f"{head}, {'at' if lang == 'en' else 'в'} {d:%H:%M}"
+    head = f"{pick(lang, *day)}, {wd}" if day else wd
+    hm = f"{d:%H:%M}"
+    return f"{head}, {pick(lang, 'в ' + hm, 'at ' + hm, hm + '-ზე')}"
 
 
 def money(v):
@@ -78,6 +98,8 @@ def money(v):
 def _people(n, lang):
     if lang == "en":
         return f"{n} {'person' if n == '1' else 'people'}"
+    if lang == "ka":
+        return f"{n} ადამიანი"
     return {"1": "1 человек", "2": "2 человека", "3": "3 человека"}.get(n, f"{n} человек")
 
 
@@ -85,13 +107,13 @@ def _bedrooms(beds, lang):
     beds = sorted({int(b) for b in beds})
     studio = 0 in beds
     rest = [b for b in beds if b]
-    parts = ["studio" if lang == "en" else "студия"] if studio else []
+    parts = [pick(lang, "студия", "studio", "სტუდიო")] if studio else []
     if rest:
         plus = rest[-1] >= 4 or rest == [3]  # the «3+» button stores 3 and 4
         rest = [b for b in rest if b < 4] or [4]
         rng = f"{rest[0]}-{rest[-1]}" if len(rest) > 1 and rest == list(range(rest[0], rest[-1] + 1)) else ", ".join(map(str, rest))
         rng += "+" if plus else ""
-        word = ("bedroom" if rest == [1] else "bedrooms") if lang == "en" else ("спальня" if rest == [1] else "спальни")
+        word = pick(lang, "спальня" if rest == [1] else "спальни", "bedroom" if rest == [1] else "bedrooms", "საძინებელი")
         parts.append(f"{rng} {word}")
     return ", ".join(parts)
 
@@ -101,39 +123,40 @@ def budget_text(p, lang="ru"):
     if lo and hi:
         return f"${lo}-{hi}"
     if hi:
-        return f"{'up to' if lang == 'en' else 'до'} ${hi}"
+        return pick(lang, f"до ${hi}", f"up to ${hi}", f"${hi}-მდე")
     if lo:
-        return f"{'from' if lang == 'en' else 'от'} ${lo}"
-    return "any budget" if lang == "en" else "бюджет любой"
+        return pick(lang, f"от ${lo}", f"from ${lo}", f"${lo}-დან")
+    return pick(lang, "бюджет любой", "any budget", "ნებისმიერი ბიუჯეტი")
 
 
 def terms_text(terms, lang="ru"):
     nums = [t for t in ("6", "12") if t in terms]
     out = []
     if "1-3" in terms:
-        out.append("up to 3 mo" if lang == "en" else "до 3 мес")
+        out.append(pick(lang, "до 3 мес", "up to 3 mo", "3 თვემდე"))
     if nums:
-        out.append(f" {'or' if lang == 'en' else 'или'} ".join(nums) + (" mo" if lang == "en" else " мес"))
+        out.append(f" {pick(lang, 'или', 'or', 'ან')} ".join(nums) + pick(lang, " мес", " mo", " თვე"))
     if "12+" in terms:
-        out.append("over a year" if lang == "en" else "больше года")
+        out.append(pick(lang, "больше года", "over a year", "წელზე მეტი"))
     return ", ".join(out)
 
 
 def pets_text(pets, lang="ru"):
-    names = {"none": ("без животных", "no pets"), "cat": ("🐈 кошка", "🐈 cat"), "dog": ("🐕 собака", "🐕 dog"),
-             "other": ("другое животное", "other pet")}
-    return ", ".join(names[x][lang == "en"] for x in pets if x in names)
+    names = {"none": ("без животных", "no pets", "ცხოველის გარეშე"), "cat": ("🐈 кошка", "🐈 cat", "🐈 კატა"),
+             "dog": ("🐕 собака", "🐕 dog", "🐕 ძაღლი"), "other": ("другое животное", "other pet", "სხვა ცხოველი")}
+    return ", ".join(pick(lang, *names[x]) for x in pets if x in names)
 
 
 def place_text(p, lang="ru"):
     if p.get("pin"):
         r = p.get("radius_km") or 2
         label = p["pin"].get("label")
-        return (f"{label}, " if label else ("point on the map, " if lang == "en" else "точка на карте, ")) + f"{r:g} {'km' if lang == 'en' else 'км'}"
+        return (f"{label}, " if label else pick(lang, "точка на карте, ", "point on the map, ", "წერტილი რუკაზე, ")) + \
+            f"{r:g} {pick(lang, 'км', 'km', 'კმ')}"
     ds = p.get("districts") or []
     if not ds or "any" in ds:
-        return "any district" if lang == "en" else "любой район"
-    return ", ".join(DISTRICT_EN.get(d, d) if lang == "en" else d for d in ds)
+        return pick(lang, "любой район", "any district", "ნებისმიერი უბანი")
+    return ", ".join(district_name(d, lang) for d in ds)
 
 
 def profile_summary(p, lang="ru", one_line=False):

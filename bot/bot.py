@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, KeyboardButton, MenuButtonDefault,
+from telegram import (BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, KeyboardButton, MenuButtonDefault,
                       MenuButtonWebApp, ReplyKeyboardMarkup, Update, WebAppInfo)
 from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
@@ -42,7 +42,7 @@ def map_kb(lang):
                                 [KeyboardButton(core.t(lang, "here_btn"), request_location=True)]], resize_keyboard=True)
 
 
-LANGS = [("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English")]  # core.T languages
+LANGS = [("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English"), ("ka", "🇬🇪 ქართული")]  # core.T languages = texts.LANGS
 
 
 def lang_kb():
@@ -300,7 +300,8 @@ async def search(chat_id, user, ctx, delay=2.5):
     st, prof = cl["state"], cl.get("profile") or {}
     tips = (core.t(lang, "tips") + ("" if st["images"] or prof.get("photos") else core.t(lang, "tip_photo")) +
             ("" if st["pin"] or prof.get("pin") else core.t(lang, "tip_map")))
-    await ctx.bot.send_message(chat_id, tips, reply_markup=Kb([[Btn(core.t(lang, "more"), callback_data="more")]]))
+    await ctx.bot.send_message(chat_id, tips, reply_markup=Kb([[Btn(core.t(lang, "more"), callback_data="more")],
+                                                              [Btn(core.t(lang, "lang_btn"), callback_data="lang:menu")]]))
 
 
 def schedule(update: Update, ctx, delay=2.5):
@@ -323,8 +324,8 @@ async def on_start(update: Update, ctx):
 
 
 async def on_lang(update: Update, ctx):
-    """/lang (and the first /start): pick the client language."""
-    await ctx.bot.send_message(update.effective_chat.id, "Выберите язык / Choose your language", reply_markup=lang_kb())
+    """/lang, «🌐 Язык» (lang:menu) and the first /start: pick the client language (saved in clients.lang)."""
+    await ctx.bot.send_message(update.effective_chat.id, "Выберите язык / Choose your language / აირჩიეთ ენა", reply_markup=lang_kb())
 
 
 async def on_lang_button(update: Update, ctx):
@@ -377,6 +378,9 @@ async def on_message(update: Update, ctx):
     if image:
         await asyncio.to_thread(journey.save_profile, cl, lambda p: p.update(photos=(p.get("photos") or 0) + 1))
     await asyncio.to_thread(core.add_input, cl, text=msg.text or msg.caption, image=image, pin=pin, pin_label=label, radius=radius)
+    if db.get_setting("auto_push_variants") != "1":  # new variants only by «Ещё»: the message refines the request
+        await msg.reply_text(core.t(cl["lang"], "noted"), reply_markup=Kb([[Btn(core.t(cl["lang"], "more"), callback_data="more")]]))
+        return
     schedule(update, ctx)
 
 
@@ -467,6 +471,9 @@ async def on_button(update: Update, ctx):
     elif q.data == "more":
         await journey.answer(q)
         schedule(update, ctx, delay=0)
+    elif q.data == "lang:menu":
+        await journey.answer(q)
+        await on_lang(update, ctx)
     elif q.data.startswith("lang:"):
         await on_lang_button(update, ctx)
     elif q.data.startswith("mod:"):
@@ -542,8 +549,21 @@ async def on_staff_cmd(update: Update, ctx):
 ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "channel_post", "edited_channel_post"]
 
 
-def build(token):
+COMMANDS = {"ru": (("start", "Подбор квартиры"), ("lang", "🌐 Язык")), "en": (("start", "Find a flat"), ("lang", "🌐 Language")),
+            "ka": (("start", "ბინის შერჩევა"), ("lang", "🌐 ენა"))}
+
+
+def build(token, staff=False):
+    """staff=True: the STAFF_BOT_TOKEN bot (notify sends staff cards through it): the same handlers, so its buttons
+    (lg:/ls:/lo:a:) work, but no channel/work-group intake and no background loop (the client bot does those)."""
     async def post_init(app):
+        if staff:
+            return
+        for lc, cmds in COMMANDS.items():  # the client's ☰ menu: /start and /lang in their Telegram language
+            try:
+                await app.bot.set_my_commands([BotCommand(c, d) for c, d in cmds], language_code=None if lc == "en" else lc)
+            except TelegramError as e:
+                print("set_my_commands", lc, "failed:", e)
         if panel_url():  # the panel menu button for every known staff user (and back to default for disabled ones)
             with db.tx() as c:
                 known = [r[0] for r in c.execute("SELECT tg_id FROM users WHERE tg_id IS NOT NULL")]
@@ -568,14 +588,14 @@ def build(token):
     app.add_handler(CommandHandler("lang", on_lang, filters=private))
     app.add_handler(CommandHandler(["leads_here", "leads_private", "moderate_all", "review"], on_staff_cmd, filters=new))
     app.add_handler(CallbackQueryHandler(on_button))
-    # the agency channel (the bot is its admin): videos of new posts by file_id
-    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS, on_channel_post))
+    if not staff:  # the agency channel (the bot is its admin): videos of new posts by file_id
+        app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS, on_channel_post))
     # a staff member forwards a #Rented post to the bot → pending deal (before the client journey sees the text)
     inbound.register_private(app)
     app.add_handler(MessageHandler(private & ((filters.TEXT & ~filters.COMMAND) | filters.PHOTO | filters.Document.IMAGE
                                               | filters.LOCATION | filters.StatusUpdate.WEB_APP_DATA), on_message))
-    # work group topics (listings, news, Make-Foto, #Rented) and the agency channel → backend (group 1: runs alongside)
-    inbound.register_groups(app)
+    if not staff:  # work group topics (listings, news, Make-Foto, #Rented) and the agency channel → backend (group 1: alongside)
+        inbound.register_groups(app)
     app.add_error_handler(on_error)
     return app
 
@@ -594,7 +614,28 @@ def main():
     if not db.stats()["listings"] and os.path.exists("listings.json"):  # first start on the DB: import the current base
         db.sync(full=False)
     print("bot up:", db.stats())
-    build(ENV["BOT_TOKEN"]).run_polling(allowed_updates=ALLOWED_UPDATES)
+    staff = ENV.get("STAFF_BOT_TOKEN", "").strip()
+    if not staff or staff == ENV["BOT_TOKEN"]:
+        build(ENV["BOT_TOKEN"]).run_polling(allowed_updates=ALLOWED_UPDATES)
+        return
+    asyncio.run(run_both(build(ENV["BOT_TOKEN"]), build(staff, staff=True)))
+
+
+async def run_both(*apps):
+    """The client bot and the staff bot in one process (run_polling handles one application only)."""
+    for app in apps:
+        await app.initialize()
+        if app.post_init:
+            await app.post_init(app)
+        await app.start()
+        await app.updater.start_polling(allowed_updates=ALLOWED_UPDATES)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        for app in apps:
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
 
 
 if __name__ == "__main__":

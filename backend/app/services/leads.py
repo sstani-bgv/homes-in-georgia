@@ -12,7 +12,7 @@ from app.services import jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import extract_phones
 from app.services.errors import DomainError, forbidden
-from app.telegram import notify, texts
+from app.telegram import notify, texts, userbot
 
 log = logging.getLogger(__name__)
 
@@ -350,27 +350,41 @@ def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) ->
 
 
 def message_client(db: Session, lead_id: int, text: str, actor: User) -> Lead:
+    """CRM «Написать клиенту»: from the operator's account (userbot) once the client wrote to the operator's DM, else
+    through the bot."""
     lead = _lead(db, lead_id)
     client = db.get(Client, lead.client_id)
-    if not _notify("client_message", client, text, lead.id):
+    dm = userbot.dm_active(client) and userbot.send_to_client(client, text)
+    if not dm and not _notify("client_message", client, text, lead.id):
         raise DomainError("delivery_failed", "Не удалось доставить сообщение клиенту в Telegram. Попробуйте ещё раз.", status=502)
-    _event(db, lead, "message_to_client", actor, note=text)
+    _event(db, lead, "message_to_client", actor, note=text, via="dm" if dm else "bot")
     _touch(lead)
     db.commit()
     return lead
 
 
-def message_from_client(db: Session, lead_id: int, client_id: int, text: str) -> Lead:
+def log_operator_dm(db: Session, lead_id: int, text: str, actor: User | None = None) -> Lead:
+    """The operator wrote to the client from their own Telegram (seen by the userbot): history only."""
+    lead = _lead(db, lead_id)
+    _event(db, lead, "message_to_client", actor, label=None if actor else "operator", note=text, via="dm")
+    _touch(lead)
+    db.commit()
+    return lead
+
+
+def message_from_client(db: Session, lead_id: int, client_id: int, text: str, via: str = "bot") -> Lead:
+    """via="dm": written to the operator's own account (userbot); the operator already has it, so staff aren't notified."""
     lead = _lead(db, lead_id, lock=True)
     if lead.client_id != client_id:
         raise forbidden("not your lead")
     text = text.strip()
     if not text:
         raise DomainError("empty_message", "message is empty")
-    _event(db, lead, "message_from_client", label="client", note=text)
+    _event(db, lead, "message_from_client", label="client", note=text, via=via)
     _touch(lead)
     db.commit()
-    _notify("lead_client_reply", lead, text)
+    if via != "dm":
+        _notify("lead_client_reply", lead, text)
     return lead
 
 

@@ -1,5 +1,6 @@
 """Every outgoing Telegram message (docs/ARCHITECTURE.md §6). Texts follow the journey screens (docs/user-journey.txt):
-clients in their language (clients.lang), staff in Russian. Arguments may be ORM objects or dicts. Message refs go to
+clients in their language (clients.lang: ru/en/ka), staff in Russian, through the staff bot when STAFF_BOT_TOKEN is set
+(ssend). Arguments may be ORM objects or dicts. Message refs go to
 the `messages` table (kind, ref) so cards can be edited later. No function ever raises (failures are logged)."""
 import contextvars
 import functools
@@ -9,10 +10,11 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from app import storage
 from app.telegram import client as tg
-from app.telegram import links, store, texts
+from app.telegram import links, store, texts, userbot
 from app.telegram.client import app_btn, cb, conf, kb, url_btn
 from app.telegram.store import g
 
@@ -36,6 +38,11 @@ def safe(fn):
             log.exception("notify.%s failed", fn.__name__)
             return None
     return wrap
+
+
+def ssend(*a, **kw):
+    """A message to staff (operators chat, operator/agent DMs): the STAFF_BOT_TOKEN bot when set, else the client bot."""
+    return tg.send(*a, staff=True, **kw)
 
 
 def env_int(k, d):
@@ -73,7 +80,7 @@ def is_private(chat):
 def to_operators(kind, ref, text, keyboard_for):
     """keyboard_for(private) -> markup (web_app buttons only work in private chats)."""
     for chat, topic in operators_targets():
-        m = tg.send(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
+        m = ssend(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
         if m and kind:
             store.remember(kind, ref, m["chat"]["id"], m["message_id"])
 
@@ -87,18 +94,18 @@ def to_lead_staff(lead, text, keyboard_for, keys=("operator_id", "agent_id")):
         tid = u.get("tg_id")
         if not tid or not u.get("is_active", True):
             continue
-        if str(tid) in sent or tg.send(tid, text, keyboard_for(True)):
+        if str(tid) in sent or ssend(tid, text, keyboard_for(True)):
             sent.add(str(tid))
             op_ok = op_ok or k == "operator_id"
     if not op_ok:
         for chat, topic in operators_targets():
             if str(chat) not in sent:
-                tg.send(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
+                ssend(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
 
 
 def edit_refs(kind, ref, text, keyboard_for):
     for chat, mid in store.refs(kind, ref):
-        tg.edit(chat, mid, text, keyboard_for(is_private(chat)))
+        tg.edit(chat, mid, text, keyboard_for(is_private(chat)), staff=True)  # staff cards only
 
 
 # ---------- what a lead is about ----------
@@ -112,14 +119,16 @@ def ctx(lead):
 
 def district(i, lang="ru"):
     d = i.get("details") or {}
-    if lang == "en":
+    if lang == "ka" and i.get("district") in texts.DISTRICT_KA:
+        return texts.DISTRICT_KA[i["district"]]
+    if lang != "ru":
         return i.get("district_en") or d.get("district_en") or texts.DISTRICT_EN.get(i.get("district"), i.get("district")) or "Tbilisi"
     return i.get("district") or "Тбилиси"
 
 
 def address(i, lang="ru"):
     d = i.get("details") or {}
-    a = (lang == "en" and d.get("address_en")) or d.get("address_ru") or i.get("address")
+    a = (lang != "ru" and d.get("address_en")) or d.get("address_ru") or i.get("address")
     return f"{district(i, lang)}, {a}" if a and district(i, lang) not in a else (a or district(i, lang))
 
 
@@ -127,15 +136,16 @@ def beds(n, lang):
     if n is None:
         return ""
     if n == 0:
-        return "studio" if lang == "en" else "студия"
-    return f"{n} {('bedroom' if n == 1 else 'bedrooms') if lang == 'en' else ('спальня' if n == 1 else 'спальни')}"
+        return texts.pick(lang, "студия", "studio", "სტუდიო")
+    return f"{n} {texts.pick(lang, 'спальня' if n == 1 else 'спальни', 'bedroom' if n == 1 else 'bedrooms', 'საძინებელი')}"
 
 
 def flat_line(i, lang="ru"):
     """2 спальни · 78 м² · $850 · ❗️ эксклюзив"""
     d = i.get("details") or {}
-    parts = [beds(i.get("bedrooms"), lang), i.get("area") and f"{i['area']:g} {'m²' if lang == 'en' else 'м²'}",
-             i.get("price_usd") and texts.money(i["price_usd"]), d.get("exclusive") and ("❗️ exclusive" if lang == "en" else "❗️ эксклюзив")]
+    parts = [beds(i.get("bedrooms"), lang), i.get("area") and f"{i['area']:g} {texts.pick(lang, 'м²', 'm²', 'მ²')}",
+             i.get("price_usd") and texts.money(i["price_usd"]),
+             d.get("exclusive") and texts.pick(lang, "❗️ эксклюзив", "❗️ exclusive", "❗️ ექსკლუზივი")]
     return " · ".join(p for p in parts if p)
 
 
@@ -172,7 +182,7 @@ def group_text(lead, timer=True):
     src = SOURCE_RU.get(src) or (src.startswith("tg:") and f"канал {src[3:]}") or (src.startswith("fb:") and "Facebook") or (src.startswith("ig:") and f"Instagram {src[3:]}") or src
     urls = i.get("urls") or []
     t = (f"🆕 <b>Заявка #{g(lead, 'id')}</b>" + (f"  ·  ⏱ {env_int('SLA_OPERATOR_TAKE_MIN', 5)} мин на назначение" if timer else "") +
-         f"\n\n👤 <b>{e(client_name(cl))}</b> · Telegram" + (f" · {cl.get('lang', 'ru')}" if cl.get("lang") == "en" else "") +
+         f"\n\n👤 <b>{e(client_name(cl))}</b> · Telegram" + (f" · {cl.get('lang', 'ru')}" if cl.get("lang") not in (None, "ru") else "") +
          "\n" + e(texts.profile_summary(cl.get("profile") or {}, "ru") or "анкета не заполнена"))
     if g(lead, "request"):
         t += f"\n💬 {e(g(lead, 'request'))}"
@@ -236,14 +246,16 @@ def lead_assigned_agent(lead):
         t += f"\n\n🕐 <b>Клиент предложил своё время:</b> {e(g(lead, 'client_note'))}"
     if urls := i.get("urls"):
         t += "\n\n🔗 " + "\n".join(f'<a href="{e(u)}">{e(u)}</a>' for u in urls[:3])
-    m = tg.send(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))],
+    m = ssend(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))],
                                      [cb("⚡ Время кнопками", f"ls:quick:{lid}"), cb("✍️ Написать время", f"ls:text:{lid}")]]))
     if m:
         store.remember("agent_lead", lid, m["chat"]["id"], m["message_id"])
 
 
-ACK = {"ru": "✅ Передано оператору · ответим в течение {n} минут", "en": "✅ Sent to an operator · we'll reply within {n} minutes"}
-FAV = {"ru": ("❤️ В избранном", "➡️ Следующий вариант"), "en": ("❤️ In favourites", "➡️ Next option")}
+ACK = {"ru": "✅ Передано оператору · ответим в течение {n} минут", "en": "✅ Sent to an operator · we'll reply within {n} minutes",
+       "ka": "✅ გადაეცა ოპერატორს · გიპასუხებთ {n} წუთში"}
+FAV = {"ru": ("❤️ В избранном", "➡️ Следующий вариант"), "en": ("❤️ In favourites", "➡️ Next option"),
+       "ka": ("❤️ რჩეულებშია", "➡️ შემდეგი ვარიანტი")}
 
 
 @safe
@@ -262,10 +274,56 @@ def lead_client_ack(lead):
             tg.edit(chat, mid, tg.clip(card["text"], 4096 - len(ack) - 2, html=False) + f"\n\n{ack}", markup, html=False)
     elif chat := chat_of(cl):
         tg.send(chat, f"{headline(i, lang)}\n\n{ack}" if i else ack, markup, html=False)
+    handoff(lead, cl, i, lang)
+
+
+HANDOFF = {  # (text, write button, back button, the prefilled first message)
+    "ru": ("💬 Чтобы договориться о просмотре, напишите оператору: нажмите кнопку ниже и отправьте готовое сообщение.\n\n"
+           "Подбор квартир остаётся здесь, в боте: «↩️ Вернуться в бот».", "💬 Написать оператору", "↩️ Вернуться в бот",
+           "Здравствуйте! Меня интересует объект #{obj} {what} (заявка #{lead})"),
+    "en": ("💬 To arrange a viewing, message the operator: tap the button below and send the ready message.\n\n"
+           "Flat search stays here in the bot: «↩️ Back to the bot».", "💬 Message the operator", "↩️ Back to the bot",
+           "Hello! I'm interested in property #{obj} {what} (request #{lead})"),
+    "ka": ("💬 ნახვის შესათანხმებლად მიწერეთ ოპერატორს: დააჭირეთ ქვემოთ ღილაკს და გაგზავნეთ მზა შეტყობინება.\n\n"
+           "ბინების შერჩევა აქ, ბოტში გრძელდება: „↩️ ბოტში დაბრუნება“.", "💬 ოპერატორისთვის მიწერა", "↩️ ბოტში დაბრუნება",
+           "გამარჯობა! მაინტერესებს ობიექტი #{obj} {what} (განაცხადი #{lead})"),
+}
+
+
+def operator_username():
+    """Who the client writes to after ❤️: OPERATOR_TG_USERNAME, else the first active operator with a @username."""
+    u = conf("OPERATOR_TG_USERNAME").strip().lstrip("@")
+    if not u:
+        r = store.q("SELECT username FROM users WHERE is_active AND role = 'operator' AND COALESCE(username, '') != '' ORDER BY id LIMIT 1",
+                    one=True)
+        u = r and r["username"].lstrip("@")
+    return u or None
+
+
+def handoff_url(lead, i, lang):
+    """t.me/<operator>?text=<the first message>: one tap opens the operator's chat with it, the client presses send, so
+    the first message comes from the client (no paid/privacy limits on the operator writing first)."""
+    u = operator_username()
+    if not u:
+        return None
+    what = " · ".join(x for x in (address(i, lang) if i else "", i.get("price_usd") and texts.money(i["price_usd"])) if x)
+    text = HANDOFF[lang][3].format(obj=g(lead, "property_id") or g(lead, "listing_id"), what=what, lead=g(lead, "id"))
+    return f"https://t.me/{u}?text={quote(text)}"
+
+
+def handoff(lead, cl, i, lang):
+    """After ❤️: «Написать оператору» (prefilled DM, handled by the operator's userbot) + «Вернуться в бот»."""
+    url, chat = handoff_url(lead, i, lang), chat_of(cl)
+    if not url or not chat:
+        log.info("lead %s: no operator @username for the DM handoff", g(lead, "id"))
+        return
+    text, write, back, _ = HANDOFF[lang]
+    tg.send(chat, text, kb([[url_btn(write, url)], [url_btn(back, links.tg_user(conf("BOT_USERNAME")))]]), html=False)
 
 
 SLOTS = {"ru": ("Собственник готов показать квартиру 🏡\n<b>Выберите удобное время:</b>", "🕐 Предложить своё время", "Открыть объявление"),
-         "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Suggest my own time", "Open the listing")}
+         "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Suggest my own time", "Open the listing"),
+         "ka": ("მესაკუთრე მზადაა ბინის საჩვენებლად 🏡\n<b>აირჩიეთ მოსახერხებელი დრო:</b>", "🕐 ჩემი დროის შეთავაზება", "განცხადების გახსნა")}
 
 
 def listing_link(i):
@@ -291,6 +349,11 @@ def slots_to_client(lead, slots):
         return
     lid = g(lead, "id")
     ask, own, open_ = SLOTS[lang]
+    if userbot.dm_active(cl):  # the client talks to the operator in DM: numbered options from the operator's account
+        plain = f"{headline(i, lang)}\n📍 {address(i, lang)}\n\n" + re.sub(r"<[^>]+>", "", ask)
+        if userbot.send_to_client(cl, plain, [texts.slot_label(g(s, "starts_at"), lang) for s in slots],
+                                  {"lead": lid, "slots": [g(s, "id") for s in slots]}):
+            return
     text = f"<b>{e(headline(i, lang))}</b>\n📍 {e(address(i, lang))}\n\n{ask}"
     rows = [[url_btn(open_, listing_link(i))]] + [[cb(texts.slot_label(g(s, "starts_at"), lang), f"ls:pick:{g(s, 'id')}")] for s in slots]
     rows.append([cb(own, f"ls:own:{lid}")])
@@ -306,7 +369,9 @@ def slots_to_client(lead, slots):
 CONFIRMED = {"ru": ("✅ <b>Просмотр: {when}</b>\n📍 {addr}\n\n👤 Ваш агент: <b>{agent}</b>{phone}",
                     "💬 Написать агенту в Telegram", "📅 Добавить в календарь", "⏰ Опаздываю", "🔁 Перенести"),
              "en": ("✅ <b>Viewing: {when}</b>\n📍 {addr}\n\n👤 Your agent: <b>{agent}</b>{phone}",
-                    "💬 Message the agent in Telegram", "📅 Add to calendar", "⏰ Running late", "🔁 Reschedule")}
+                    "💬 Message the agent in Telegram", "📅 Add to calendar", "⏰ Running late", "🔁 Reschedule"),
+             "ka": ("✅ <b>ნახვა: {when}</b>\n📍 {addr}\n\n👤 თქვენი აგენტი: <b>{agent}</b>{phone}",
+                    "💬 აგენტისთვის მიწერა Telegram-ში", "📅 კალენდარში დამატება", "⏰ მაგვიანდება", "🔁 გადატანა")}
 
 
 @safe
@@ -341,7 +406,7 @@ def contacts_to_agent(lead):
          f"🔓 <b>Контакты клиента</b>\n\n👤 {e(cl.get('name') or '—')}" + (f"\n📞 {e(cl['phone'])}" if cl.get("phone") else "") +
          (f"\n💬 @{e(cl['username'])}" if cl.get("username") else "") +
          "\n\nНапишите клиенту до встречи. Напомню вам и клиенту за 1 час.")
-    tg.send(ag["tg_id"], t, kb([[url_btn("💬 Написать", contact)], [app_btn("📍 Адрес объекта", links.map_pin(i))]]))
+    ssend(ag["tg_id"], t, kb([[url_btn("💬 Написать", contact)], [app_btn("📍 Адрес объекта", links.map_pin(i))]]))
 
 
 VIEWING_UPDATE = {"ok": "👍 Клиент {name} подтвердил просмотр #{id}: «Буду»", "late": "⏰ Клиент {name} опаздывает на просмотр #{id}"}
@@ -353,11 +418,12 @@ def viewing_update(lead, what):
     cl, _, _ = ctx(lead)
     ag = store.user(g(lead, "agent_id")) or {}
     if ag.get("tg_id") and what in VIEWING_UPDATE:
-        tg.send(ag["tg_id"], VIEWING_UPDATE[what].format(name=e(client_name(cl)), id=g(lead, "id")))
+        ssend(ag["tg_id"], VIEWING_UPDATE[what].format(name=e(client_name(cl)), id=g(lead, "id")))
 
 
 REMIND = {"ru": ("⏰ Через час просмотр: <b>{hm}</b>, {addr}\nАгент {agent}", "👍 Буду", "⏰ Опаздываю", "🔁 Перенести"),
-          "en": ("⏰ Viewing in an hour: <b>{hm}</b>, {addr}\nAgent {agent}", "👍 I'll be there", "⏰ Running late", "🔁 Reschedule")}
+          "en": ("⏰ Viewing in an hour: <b>{hm}</b>, {addr}\nAgent {agent}", "👍 I'll be there", "⏰ Running late", "🔁 Reschedule"),
+          "ka": ("⏰ ერთ საათში ნახვაა: <b>{hm}</b>, {addr}\nაგენტი {agent}", "👍 მოვალ", "⏰ მაგვიანდება", "🔁 გადატანა")}
 
 
 @safe
@@ -371,12 +437,13 @@ def viewing_reminder(lead):
         tg.send(chat, t.format(hm=hm, addr=e(address(i, lang)), agent=e(staff_name(ag))),
                 kb([[cb(ok, f"lv:ok:{lid}"), cb(late, f"lv:late:{lid}")], [cb(resched, f"lv:resched:{lid}")]]))
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"⏰ Через час просмотр #{lid}: <b>{hm}</b>, {e(address(i))}\nКлиент {e(client_name(cl))}"
+        ssend(ag["tg_id"], f"⏰ Через час просмотр #{lid}: <b>{hm}</b>, {e(address(i))}\nКлиент {e(client_name(cl))}"
                 + (f", 📞 {e(cl['phone'])}" if cl.get("phone") else ""))
 
 
 SURVEY = {"ru": ("{name}, как прошёл просмотр квартиры в {where}?", "Снимаю ✅", "Не подошло ❌", "Думаю 🤔"),
-          "en": ("{name}, how was the viewing of the flat in {where}?", "I'm renting it ✅", "Not for me ❌", "Thinking 🤔")}
+          "en": ("{name}, how was the viewing of the flat in {where}?", "I'm renting it ✅", "Not for me ❌", "Thinking 🤔"),
+          "ka": ("{name}, როგორ ჩაიარა ბინის ნახვამ ({where})?", "ვქირაობ ✅", "არ მომერგო ❌", "ვფიქრობ 🤔")}
 
 
 @safe
@@ -386,20 +453,20 @@ def post_viewing_survey(lead):
     lid = g(lead, "id")
     t, yes, no, think = SURVEY[lang]
     if chat := chat_of(cl):
-        m = tg.send(chat, t.format(name=e(cl.get("name") or ("Hi" if lang == "en" else "Здравствуйте")), where=e(district(i, lang))),
+        m = tg.send(chat, t.format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა")), where=e(district(i, lang))),
                     kb([[cb(yes, f"lo:c:{lid}:rented")], [cb(no, f"lo:c:{lid}:refused")], [cb(think, f"lo:c:{lid}:thinking")]]))
         if m:
             store.remember("survey_client", lid, m["chat"]["id"], m["message_id"])
     ag = store.user(g(lead, "agent_id")) or {}
     if ag.get("tg_id"):
-        m = tg.send(ag["tg_id"], f"Как прошёл просмотр #{lid}?\n{e(address(i))} · клиент {e(client_name(cl))}",
+        m = ssend(ag["tg_id"], f"Как прошёл просмотр #{lid}?\n{e(address(i))} · клиент {e(client_name(cl))}",
                     kb([[cb("Сдано ✅", f"lo:a:{lid}:rented"), cb("Не подошло ❌", f"lo:a:{lid}:refused")],
                         [cb("Думает 🤔", f"lo:a:{lid}:thinking"), cb("Перенос 🔁", f"lo:a:{lid}:reschedule")]]))
         if m:
             store.remember("survey_agent", lid, m["chat"]["id"], m["message_id"])
 
 
-REASON_ASK = {"ru": "Жаль 😔 Что не подошло?", "en": "Sorry to hear that 😔 What didn't fit?"}
+REASON_ASK = {"ru": "Жаль 😔 Что не подошло?", "en": "Sorry to hear that 😔 What didn't fit?", "ka": "სამწუხაროა 😔 რა არ მოგეწონათ?"}
 
 
 @safe
@@ -437,7 +504,7 @@ def sla_warning(lead, stage):
     if stage == "agent_slots":
         ag = store.user(g(lead, "agent_id")) or {}
         if ag.get("tg_id"):
-            tg.send(ag["tg_id"], f"{head}{left_t}, чтобы предложить время просмотра.\n{info}",
+            ssend(ag["tg_id"], f"{head}{left_t}, чтобы предложить время просмотра.\n{info}",
                     kb([[app_btn("🕐 Предложить время", links.lead_app(lid))], [cb("⚡ Время кнопками", f"ls:quick:{lid}")]]))
         return
     action = cb("✋ Взять заявку", f"lg:take:{lid}") if stage == "operator_take" else None
@@ -461,7 +528,7 @@ def sla_overdue(lead, stage):
     text = f"{head}{body}\n{info}"
     to_operators(None, lid, text, lambda private: kb([rows, [app_btn("📋 Открыть в панели", links.lead_app(lid), private)]]))
     for sa in superadmins():
-        tg.send(sa, text, kb([[app_btn("📋 Открыть в панели", links.lead_app(lid))]]))
+        ssend(sa, text, kb([[app_btn("📋 Открыть в панели", links.lead_app(lid))]]))
 
 
 def deal_lead(deal):
@@ -488,7 +555,7 @@ def deal_confirmed(deal):
             t += f"\n\n🗓 T14 напомню <b>{fmt_date(g(deal, 't14_date'))[:5] if g(deal, 't14_date') else '—'}</b>"
         if g(deal, "rent_to"):
             t += f"\n🔔 Конец договора {fmt_date(g(deal, 'rent_to'))}: напомню за 30, 7 и 1 день"
-        tg.send(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(did))]]))
+        ssend(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(did))]]))
     chat, topic = chat_and_topic("WORK_GROUP_CHAT_ID", "TOPIC_DEAL")
     if chat:
         try:
@@ -500,7 +567,8 @@ def deal_confirmed(deal):
 
 
 T14_INTRO = {"ru": "{name}, вы живёте в новой квартире 14 дней 🏡\nВсё ли хорошо? Оцените, пожалуйста, три пункта (это 10 секунд):",
-             "en": "{name}, you've been living in your new flat for 14 days 🏡\nIs everything fine? Please rate three points (10 seconds):"}
+             "en": "{name}, you've been living in your new flat for 14 days 🏡\nIs everything fine? Please rate three points (10 seconds):",
+             "ka": "{name}, ახალ ბინაში უკვე 14 დღეა ცხოვრობთ 🏡\nყველაფერი რიგზეა? გთხოვთ, შეაფასოთ სამი პუნქტი (10 წამი):"}
 
 
 def t14_question(deal_id, n, lang):
@@ -517,7 +585,7 @@ def t14_client(deal):
     chat, lang = chat_of(cl), texts.lang_of(cl.get("lang"))
     if not chat:
         return
-    tg.send(chat, T14_INTRO[lang].format(name=e(cl.get("name") or ("Hi" if lang == "en" else "Здравствуйте"))))
+    tg.send(chat, T14_INTRO[lang].format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა"))))
     tg.send(chat, *t14_question(g(deal, "id"), 1, lang))
 
 
@@ -525,7 +593,7 @@ def t14_client(deal):
 def t14_agent(deal):
     ag = store.user(g(deal, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"🗓 <b>T14 по сделке #{g(deal, 'id')}</b>\n{e(g(deal, 'address') or '')}\nКлиент живёт 14 дней: оцените сделку.",
+        ssend(ag["tg_id"], f"🗓 <b>T14 по сделке #{g(deal, 'id')}</b>\n{e(g(deal, 'address') or '')}\nКлиент живёт 14 дней: оцените сделку.",
                 kb([[app_btn("📝 T14: оценить", links.deal_app(g(deal, "id")))]]))
 
 
@@ -533,7 +601,7 @@ def t14_agent(deal):
 def contract_expiry(deal, days):
     ag = store.user(g(deal, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"🔔 Через <b>{days} дн.</b> заканчивается договор: {e(g(deal, 'address') or '')} "
+        ssend(ag["tg_id"], f"🔔 Через <b>{days} дн.</b> заканчивается договор: {e(g(deal, 'address') or '')} "
                 f"(до {fmt_date(g(deal, 'rent_to'))}).\nКлиент: {e(g(deal, 'client_name') or '—')}",
                 kb([[app_btn("📄 Открыть сделку", links.deal_app(g(deal, "id")))]]))
 
@@ -546,7 +614,7 @@ def prop_title(prop):
 def property_call_retry(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"📞 Пора перезвонить собственнику: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
+        ssend(ag["tg_id"], f"📞 Пора перезвонить собственнику: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
 
@@ -554,7 +622,7 @@ def property_call_retry(prop):
 def property_owner_followup(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"🤔 Собственник обещал подумать — пора перезвонить: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
+        ssend(ag["tg_id"], f"🤔 Собственник обещал подумать — пора перезвонить: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
 
@@ -570,7 +638,7 @@ def property_review_request(prop):
 def property_returned(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"↩️ <b>Объект #{g(prop, 'id')} вернули на доработку</b>\n{e(prop_title(prop))}\n\n"
+        ssend(ag["tg_id"], f"↩️ <b>Объект #{g(prop, 'id')} вернули на доработку</b>\n{e(prop_title(prop))}\n\n"
                 f"Комментарий оператора: {e(g(prop, 'review_comment') or '—')}",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
@@ -580,7 +648,7 @@ def exclusive_conflict(prop, source, url):
     """Stage 4: the agent's exclusive showed up on another site → a task to get the owner to take the ad down."""
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"🔴 <b>Эксклюзив #{g(prop, 'id')} висит на {e(source)}</b>\n{e(prop_title(prop))}\n\n"
+        ssend(ag["tg_id"], f"🔴 <b>Эксклюзив #{g(prop, 'id')} висит на {e(source)}</b>\n{e(prop_title(prop))}\n\n"
                 f"Задача: попросить собственника снять объявление {e(url or '')}\n"
                 "Публикация как эксклюзив закрыта, пока оператор не отметит «Проверено: снято».",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
@@ -591,7 +659,7 @@ def property_published(prop):
     """C5: the agent gets the link to the channel post."""
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        tg.send(ag["tg_id"], f"✅ <b>Объект #{g(prop, 'id')} опубликован в канале</b>\n{e(prop_title(prop))}",
+        ssend(ag["tg_id"], f"✅ <b>Объект #{g(prop, 'id')} опубликован в канале</b>\n{e(prop_title(prop))}",
                 kb([[url_btn("📢 Пост в канале", g(prop, "post_url"))]]))
 
 
@@ -628,7 +696,7 @@ def change_request_decided(cr):
         return
     ok = g(cr, "status") == "approved"
     comment = g(cr, "decision_comment")
-    tg.send(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
+    ssend(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
             f"{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))}\n{cr_changes(cr)}" + (f"\n\nКомментарий оператора: {e(comment)}" if comment else ""),
             kb([[app_btn("🏠 Открыть объект", links.property_app(g(cr, "entity_id")))]]))
 
@@ -767,9 +835,11 @@ def client_message(client, text, lead_id):
     """Operator -> client via the bot (CRM «Написать клиенту»)."""
     cl = client if isinstance(client, dict) else {k: g(client, k) for k in ("chat_id", "external_id", "channel", "lang")}
     if chat := chat_of(cl):
-        head = "💬 Message from the operator:" if cl.get("lang") == "en" else "💬 Сообщение от оператора:"
-        hint = "Use Reply below or reply to this message." if cl.get("lang") == "en" else "Нажмите «Ответить» или ответьте на это сообщение."
-        label = "💬 Reply" if cl.get("lang") == "en" else "💬 Ответить"
+        lang = texts.lang_of(cl.get("lang"))
+        head = texts.pick(lang, "💬 Сообщение от оператора:", "💬 Message from the operator:", "💬 შეტყობინება ოპერატორისგან:")
+        hint = texts.pick(lang, "Нажмите «Ответить» или ответьте на это сообщение.", "Use Reply below or reply to this message.",
+                          "დააჭირეთ „პასუხი“ ან უპასუხეთ ამ შეტყობინებას.")
+        label = texts.pick(lang, "💬 Ответить", "💬 Reply", "💬 პასუხი")
         m = tg.send(chat, f"{head} #{lead_id}\n{e(text)}\n\n{hint}", kb([[cb(label, f"lm:reply:{lead_id}")]]))
         if m:
             store.remember("client_message", lead_id, m["chat"]["id"], m["message_id"])

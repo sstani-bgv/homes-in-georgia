@@ -15,7 +15,7 @@ from llm import ask, obj
 
 BRAND = "Homes in Georgia"
 
-# ---------- client-facing texts (ru / en) ----------
+# ---------- client-facing texts (ru / en / ka) ----------
 
 T = {
     "ru": {
@@ -42,6 +42,7 @@ T = {
         "radius": "📍 Ищу в радиусе {r:g} км от {label}",
         "pin": "отмеченной точки", "here": "вашего местоположения", "picked": "выбранной точки",
         "from": "от", "km": "км", "month": "мес", "beds": "сп.", "floor": "этаж", "sqm": "м²", "city": "Тбилиси",
+        "lang_btn": "🌐 Язык", "noted": "Учёл ✍️ Нажмите «🔄 Ещё варианты», и я подберу квартиры с учётом этого.",
     },
     "en": {
         "greeting": f"""Hi! I'm the AI apartment finder of {BRAND} 🏙
@@ -67,6 +68,33 @@ Optional:
         "radius": "📍 Searching within {r:g} km of {label}",
         "pin": "the pinned point", "here": "your location", "picked": "the selected point",
         "from": "from", "km": "km", "month": "mo", "beds": "bd", "floor": "floor", "sqm": "m²", "city": "Tbilisi",
+        "lang_btn": "🌐 Language", "noted": "Noted ✍️ Tap «🔄 More options» and I'll pick flats with this in mind.",
+    },
+    "ka": {
+        "greeting": f"""გამარჯობა! მე ვარ {BRAND}-ის ხელოვნური ინტელექტის ასისტენტი და ბინის შერჩევაში დაგეხმარებით 🏙
+
+უბრალოდ მომწერეთ, რას ეძებთ: უბანი ან ადგილი, რომლის მახლობლადაც გსურთ ცხოვრება, ბიუჯეტი, რამდენი საძინებელი, ცხოველით თუ მის გარეშე.
+
+მაგალითად: „2 საძინებელი $1000-მდე, მეტრო რუსთაველთან ახლოს, ნათელი, აივნით“.
+
+სურვილისამებრ:
+📸 გამომიგზავნეთ თქვენთვის სასურველი ბინების ფოტოები (თუნდაც Pinterest-იდან) და მსგავს სტილს შეგირჩევთ;
+🗺 აირჩიეთ ადგილი რუკაზე ქვემოთ მოცემული ღილაკით და ახლომახლო ბინებს გაჩვენებთ.""",
+        "map_btn": "🗺 ადგილის არჩევა რუკაზე", "here_btn": "📍 სად ვარ ახლა",
+        "searching": "🔎 ვარჩევ ვარიანტებს, ამას ერთ წუთამდე დასჭირდება…",
+        "error": "რაღაც შეცდომა მოხდა, სცადეთ თავიდან.",
+        "none": "გავიგე: {understood}\n\nამჟამად შესაფერისი ვარიანტი არ არის 😔 სცადეთ ბიუჯეტის ან უბნების გაფართოება.",
+        "found": "გავიგე: {understood}\n\nბაზის {base} ბინიდან {total} გერგებათ, გაჩვენებთ {n} საუკეთესოს 👇",
+        "tips": "დააზუსტეთ მოთხოვნა შეტყობინებით ან დააჭირეთ „მეტი ვარიანტი“.",
+        "tip_photo": "\n\n📸 გსურთ სტილით უფრო ზუსტი შერჩევა? გამომიგზავნეთ სასურველი ბინების ფოტოები და მსგავსებს გაჩვენებთ.",
+        "tip_map": "\n🗺 ან აირჩიეთ ადგილი რუკაზე ქვემოთ მოცემული ღილაკით და ახლოს მდებარე ბინებს მოგიძებნით.",
+        "more": "🔄 მეტი ვარიანტი", "like": "❤️ მომწონს", "dislike": "👎 არ მინდა", "sent": "✅ გადაეცა აგენტს", "on_map": "📍 რუკაზე",
+        "liked": "მშვენიერია!", "disliked": "გავითვალისწინებ 👌", "gone": "განცხადება აღარ არის აქტუალური",
+        "lead_sent": f"გადავეცი {BRAND}-ის აგენტს 🙌 ის დაუკავშირდება მესაკუთრეს, შეათანხმებს ნახვას და მოგწერთ.",
+        "radius": "📍 ვეძებ {r:g} კმ რადიუსში · {label}",
+        "pin": "მონიშნული წერტილი", "here": "თქვენი მდებარეობა", "picked": "არჩეული წერტილი",
+        "from": "—", "km": "კმ", "month": "თვე", "beds": "საძ.", "floor": "სართული", "sqm": "მ²", "city": "თბილისი",
+        "lang_btn": "🌐 ენა", "noted": "გავითვალისწინე ✍️ დააჭირეთ „🔄 მეტი ვარიანტი“ და ამის გათვალისწინებით შეგირჩევთ ბინებს.",
     },
 }
 
@@ -77,14 +105,17 @@ def t(lang, key, **kw):
 
 
 def detect_lang(text, current=None, hint=None):
-    """Cyrillic -> ru, Latin -> en; otherwise keep the current one or use the platform language hint."""
+    """Georgian script -> ka, Cyrillic -> ru, Latin -> en; otherwise keep the current one or use the platform language hint."""
+    if text and re.search(r"[\u10A0-\u10FF]", text):
+        return "ka"
     if text and re.search(r"[А-Яа-яЁё]", text):
         return "ru"
     if text and len(re.findall(r"[A-Za-z]", text)) >= 3:
         return "en"
     if current:
         return current
-    return "ru" if (hint or "ru")[:2] in ("ru", "uk", "be", "kk") else "en"
+    h = (hint or "ru")[:2]
+    return "ka" if h == "ka" else "ru" if h in ("ru", "uk", "be", "kk") else "en"
 
 
 # never show the client where a listing came from: links, handles, phones, site and competitor names
@@ -132,8 +163,8 @@ def reset(cl, lang_hint=None):
     """New conversation (/start): forget the request; likes and leads stay.
     lang_hint (Telegram language_code): the greeting follows the app language until the client writes something."""
     def fn(st, r):
-        # card texts (A3 edits), T14 answers and the language picked by the client outlive a /start
-        keep = {k: st[k] for k in ("cards", "t14", "lang_set") if k in st}
+        # card texts (A3 edits), T14 answers, the language picked by the client and the operator DM mark outlive a /start
+        keep = {k: st[k] for k in ("cards", "t14", "lang_set", "operator_dm", "dm_choice") if k in st}
         st.clear(), st.update(json.loads(json.dumps(NEW_STATE)), **keep)
         if lang_hint and not st.get("lang_set"):
             r["lang"] = detect_lang(None, hint=lang_hint)
@@ -219,7 +250,7 @@ top: id из каталога + reason — одна фраза, почему п�
 {feedback}
 Каталог (id | район | $/мес | спальни | м² | этаж | ремонт, стиль, свет, мебель | особенности | впечатление 1-5 | как выглядит):
 {catalog}"""
-LANG_NAME = {"ru": "русский", "en": "English"}
+LANG_NAME = {"ru": "русский", "en": "English", "ka": "ქართული (грузинский)"}
 
 NEAR = obj(place={"type": ["string", "null"]}, label={"type": ["string", "null"]}, radius_km={"type": ["number", "null"]})
 NEAR_PROMPT = """Клиент ищет квартиру в Тбилиси. Если он хочет жить рядом с конкретным местом (метро, улица, парк, ТЦ,
@@ -355,7 +386,7 @@ def search_llm(cl):
 
 def _finish(cl, items, understood, total, base, **state):
     """Common end of a search: English texts, mark shown, keep the caches (state), count the search."""
-    if cl["lang"] == "en":
+    if cl["lang"] != "ru":  # en and ka clients see the English card texts
         translate([x["listing"] for x in items])
     update(cl, lambda s, r: (s["shown"].extend(x["listing"]["id"] for x in items), s.update(state)))
     with db.tx() as c:
@@ -516,7 +547,7 @@ EN_VOCAB = {"новый": "new", "евроремонт": "modern renovation", "�
 
 def template_reason(i, lang):
     """final_llm=off: a short reason from the profile, no model."""
-    if lang == "en":
+    if lang != "ru":
         v = lambda k: EN_VOCAB.get(i.get(k) or "", i.get(k) or "")
         return f"{v('style').capitalize()} style, {v('light')}, {v('renovation')} renovation, {v('furniture')} furniture"
     return (i.get("looks") or f"{i.get('style')}, {i.get('light')}, ремонт {i.get('renovation')}").rstrip(".")
@@ -607,8 +638,8 @@ def card_body(i, lang="ru", escape=None):
     No headline -> the indexed description. escape: html.escape for HTML messages (agents)."""
     blocks = facts.card_lines(i, lang)
     d = i.get("details") or {}
-    if not d.get("headline_ru" if lang != "en" else "headline_en"):
-        desc = (lang == "en" and i.get("description_en")) or i.get("description_ru") or ""
+    if not d.get("headline_ru" if lang == "ru" else "headline_en"):
+        desc = (lang != "ru" and i.get("description_en")) or i.get("description_ru") or ""
         if desc := public(desc):
             blocks.insert(1, [desc])
     text = "\n\n".join("\n".join(public(ln) for ln in b) for b in blocks)
@@ -642,9 +673,9 @@ def pin_query(i, lang="ru"):
     """'pin=lat,lng&prec=…&title=…&lang=…' for /map, or None without coordinates. Title: district · price (no id or source)."""
     if i.get("lat") is None or i.get("lng") is None:
         return None
-    district = (lang == "en" and i.get("district_en")) or i.get("district") or t(lang, "city")
+    district = (lang != "ru" and i.get("district_en")) or i.get("district") or t(lang, "city")
     return urlencode({"pin": f"{i['lat']:.6f},{i['lng']:.6f}", "prec": i.get("geo_precision") or "",
-                      "title": f"{district} · ${i.get('price_usd')}", "lang": "en" if lang == "en" else "ru"})
+                      "title": f"{district} · ${i.get('price_usd')}", "lang": "ru" if lang == "ru" else "en"})
 
 
 def pin_link(i, base=None, lang="ru"):
