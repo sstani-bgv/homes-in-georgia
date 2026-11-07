@@ -215,28 +215,33 @@ class NotifyTest(unittest.TestCase):
         with db.tx() as c:
             c.execute("UPDATE clients SET lang = 'en' WHERE id = ?", (self.cid,))
         at = datetime.now(texts.tz()).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        with db.tx() as c:  # what add_slots stores: the slot set and its inline-query token
-            c.execute("UPDATE leads SET status = 'slots_sent', slots_token = 'tok123456' WHERE id = ?", (self.lid,))
+        with db.tx() as c:  # what add_slots stores; the token: what notify.new_card gives the userbot
+            c.execute("UPDATE leads SET status = 'slots_sent' WHERE id = ?", (self.lid,))
             ids = [c.execute("INSERT INTO lead_slots (lead_id, starts_at) VALUES (?, ?) RETURNING id", (self.lid, t)).fetchone()[0]
                    for t in (at, at + timedelta(hours=5))]
         m = self.fake.mark()
-        title, text, rows = notify.slots_card("tok123456")                # the bot's inline answer for the operator's userbot
+        title, text, rows = notify.card("slots", notify.new_card("slots", self.lid))   # the bot's inline answer
         self.assertEqual(title, "Vake · 2 bedrooms · $850")
         self.assertIn("<b>Vake · 2 bedrooms · $850</b>", text)
         self.assertEqual([(b["text"], b.get("callback_data") or b.get("url")) for r in rows for b in r],
                          [("Open the listing", "https://t.me/rent_tbilisi_ge/1"), ("Tomorrow 12:00", f"ls:pick:{ids[0]}"),
                           ("Tomorrow 17:00", f"ls:pick:{ids[1]}"), ("🕐 Another time", f"ls:own:{self.lid}")])
-        self.assertEqual(notify.slots_to_client(self.lead, []), notify.USERBOT_OFF)   # no USERBOT_URL: an error for the agent
-        self.assertFalse(self.fake.calls(chat=42, since=m))               # never through the bot
-        lead = {**self.lead, "agent_id": self.ag, "viewing_at": at}
-        m = self.fake.mark()
-        notify.post_viewing_survey(lead)
-        self.assertEqual([b[1] for b in self.buttons(self.last("sendMessage", 42, m))],
+        self.assertEqual(notify.slots_to_client(self.lead), notify.USERBOT_OFF)   # no USERBOT_URL: an error for the agent
+        title, text, rows = notify.card("survey", notify.new_card("survey", self.lid))
+        self.assertEqual([b["callback_data"] for r in rows for b in r],
                          [f"lo:c:{self.lid}:rented", f"lo:c:{self.lid}:refused", f"lo:c:{self.lid}:thinking"])
-        self.assertEqual(len(self.buttons(self.last("sendMessage", 600, m))), 4)
-        m = self.fake.mark()
+        title, text, rows = notify.card("reason", notify.new_card("reason", self.lid))
+        self.assertEqual([b["text"] for r in rows for b in r], ["Price", "Location", "Condition", "Other"])
+        lead = {**self.lead, "agent_id": self.ag, "viewing_at": at}
+        notify.post_viewing_survey(lead)
+        self.assertEqual(len(self.buttons(self.last("sendMessage", 600, m))), 4)          # the agent: through the bot
         notify.refusal_reason_ask(lead)
-        self.assertEqual([b[0] for b in self.buttons(self.last("sendMessage", 42, m))], ["Price", "Location", "Condition", "Other"])
+        self.assertFalse(self.fake.calls(chat=42, since=m))                               # the client: never through the bot
+        with db.tx() as c:
+            notes = [r[0] for r in c.execute("SELECT data->>'note' FROM events WHERE entity = 'lead' AND entity_id = ? AND "
+                                             "action = 'client_card_not_delivered' ORDER BY id", (str(self.lid),))]
+        self.assertEqual(notes, ["опрос после просмотра: Userbot оператора не подключён",
+                                 "вопрос о причине отказа: Userbot оператора не подключён"])
 
     def test_work_group_posts_and_channel_publish(self):
         os.environ.update(WORK_GROUP_CHAT_ID="-200", TOPIC_PHOTO="12", PUBLISH_CHAT_ID="-300")
@@ -303,7 +308,7 @@ class NotifyTest(unittest.TestCase):
         self.assertIsNone(notify.lead_new_group(None))
         os.environ["USERBOT_URL"] = "http://127.0.0.1:9"
         try:
-            self.assertIsNone(notify.slots_to_client({"id": 999999}, [object()]))
+            self.assertEqual(notify.slots_to_client({"id": 999999}), notify.USERBOT_FAILED)   # no such lead: nothing to send
         finally:
             os.environ.pop("USERBOT_URL")
         self.assertIsNone(tgc.call("sendMessage", files={"photo": "/nonexistent.jpg"}, chat_id=1))

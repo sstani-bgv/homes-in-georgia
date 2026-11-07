@@ -110,7 +110,7 @@ class Lead(Base):
     __tablename__ = "leads"
     __table_args__ = (UniqueConstraint("client_id", "listing_id", name="leads_client_id_listing_id_key"),
                       CheckConstraint(f"status IN {LEAD_STATUSES}", name="leads_status_check"),
-                      Index("leads_status_idx", "status"), Index("leads_slots_token_key", "slots_token", unique=True))
+                      Index("leads_status_idx", "status"))
     id = Column(Integer, primary_key=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     listing_id = Column(Text, ForeignKey("listings.id"))
@@ -127,7 +127,6 @@ class Lead(Base):
     agent_outcome = Column(Text)
     refusal_reason = Column(Text)
     client_note = Column(Text)
-    slots_token = Column(Text)  # the inline query «slots:<token>» of the current slot set (migration 0013)
     deal_id = Column(Integer, ForeignKey("deals.id", ondelete="SET NULL", use_alter=True, name="leads_deal_id_fkey"))
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
@@ -192,6 +191,16 @@ class ChannelVideo(Base):
     media_group_id = Column(Text)
     file_id = Column(Text)
     at = Column(Text, nullable=False)
+
+
+class InlineCard(Base):
+    """«<kind>:<token>» inline query of the operator's userbot -> the client card the bot answers with (migration 0013)."""
+    __tablename__ = "inline_cards"
+    __table_args__ = (Index("inline_cards_kind_ref_idx", "kind", "ref"),)
+    token = Column(Text, primary_key=True)
+    kind = Column(Text, nullable=False)
+    ref = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class Message(Base):

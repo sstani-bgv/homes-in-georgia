@@ -309,7 +309,8 @@ def schedule(update: Update, ctx, delay=2.5):
     uid = update.effective_user.id
     if uid in tasks and not tasks[uid].done():
         tasks[uid].cancel()
-    tasks[uid] = asyncio.create_task(search(update.effective_chat.id, update.effective_user, ctx, delay))
+    chat = update.effective_chat.id if update.effective_chat else uid  # «🔄 Да, подобрать» on a card in the operator's DM
+    tasks[uid] = asyncio.create_task(search(chat, update.effective_user, ctx, delay))
 
 
 async def on_start(update: Update, ctx):

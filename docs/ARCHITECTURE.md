@@ -280,15 +280,15 @@ lead_new_group(lead)                 B1 card in operators group, button "✋ В�
 lead_taken_group(lead, operator)     edits the group card(s): "✋ Взяла <name>", button "Назначить агента" (lg:assign:<id>) visible
 lead_assigned_agent(lead)            C6 to agent: object + client profile without contacts, button "🕒 Ввести время" (Mini App link /m/leads/<id>)
 lead_client_ack(lead)                A3: edits the client's card text: "✅ Передано оператору · ответим в течение N минут", button "❤️ В избранном"
-slots_to_client(lead, slots)         A4a via the operator's userbot: inline query "slots:<leads.slots_token>" -> the bot answers with slots_card (text "Район · N спальни · $price" + slot buttons ls:pick:<slot_id> + "Другое время" ls:own:<lead_id>), the userbot sends it into the client's DM; inline fails -> numbered list; no userbot -> error to the agent
+slots_to_client(lead)                A4a via the operator's userbot: inline query "slots:<inline_cards.token>" -> the bot answers with notify.card (text "Район · N спальни · $price" + slot buttons ls:pick:<slot_id> + "Другое время" ls:own:<lead_id>), the userbot sends it into the client's DM; inline fails -> numbered list; no userbot -> error to the agent
 slot_confirmed_client(lead, agent)   A4b as a plain DM from the operator's account: address, agent name/phone, agent's t.me link, calendar link (/api/public/ics/<token>); the bot edits the slot card to "✅ Вы выбрали: <time>"
 contacts_to_agent(lead)              C8
-viewing_reminder(lead)               1h before, to client and agent
-post_viewing_survey(lead)            A5a to client (lo:c:<id>:rented|refused|thinking) + C9a to agent (lo:a:<id>:rented|refused|thinking|reschedule)
-refusal_reason_ask(lead)             A5b reasons buttons (lr:<id>:price|location|condition|other)
+viewing_reminder(lead)               1h before: the agent (bot) and the client (card "remind:<token>" via the userbot: lv:ok|late|resched)
+post_viewing_survey(lead)            A5a to client (card "survey:<token>" via the userbot: lo:c:<id>:rented|refused|thinking) + C9a to agent (lo:a:<id>:rented|refused|thinking|reschedule)
+refusal_reason_ask(lead)             A5b card "reason:<token>" via the userbot (lr:<id>:price|location|condition|other; «other» -> the client's comment by DM)
 sla_warning(lead, stage) / sla_overdue(lead, stage)     B4 reminder → escalation to operators group (+ superadmins)
 deal_confirmed(deal)                 C9c to agent; #Rented to TOPIC_DEAL
-t14_client(deal)                     A6: three questions 0-3 (t14:<deal_id>:<q>:<0-3>) + "Есть проблема"
+t14_client(deal)                     A6: card "t14:<token>" via the userbot, edited per question 0-3 (t14:<deal_id>:<q>:<0-3>) + "Есть проблема" (text by DM)
 t14_agent(deal) / contract_expiry(deal, days)
 property_call_retry(prop)            C2a reminder
 property_review_request(prop)        to operators

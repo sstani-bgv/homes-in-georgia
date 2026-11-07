@@ -6,9 +6,11 @@ cards can be edited later. No function ever raises (failures are logged)."""
 import contextvars
 import functools
 import html
+import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -343,7 +345,7 @@ SLOTS = {"ru": ("Собственник готов показать кварти
          "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Another time", "Open the listing"),
          "ka": ("მესაკუთრე მზადაა ბინის საჩვენებლად 🏡\n<b>აირჩიეთ მოსახერხებელი დრო:</b>", "🕐 სხვა დრო", "განცხადების გახსნა")}
 USERBOT_OFF = "Userbot оператора не подключён"
-USERBOT_FAILED = "Userbot оператора не смог отправить время клиенту"
+USERBOT_FAILED = "Userbot оператора не смог отправить сообщение клиенту"
 
 
 def listing_link(i):
@@ -365,34 +367,135 @@ def plain(template, **kw):
     return re.sub(r"</?b>", "", template).format(**kw)
 
 
-@safe
-def slots_to_client(lead, slots):
-    """A4a from the operator's account: the userbot sends the bot's inline result «slots:<token>» (slots_card: buttons
-    whose presses come to the bot) into the client's DM; if the inline query fails it sends numbered options itself.
-    -> None when sent, else the error text for the agent (USERBOT_OFF / USERBOT_FAILED)."""
-    if not conf("USERBOT_URL").strip():
-        return USERBOT_OFF
-    cl, i, lang = ctx(lead)
-    lid = g(lead, "id")
-    text = f"{headline(i, lang)}\n📍 {address(i, lang)}\n\n" + plain(SLOTS[lang][0])
-    ok = userbot.send_to_client(cl, text, [texts.slot_label(g(s, "starts_at"), lang) for s in slots],
-                                {"lead": lid, "slots": [g(s, "id") for s in slots]}, inline=f"slots:{g(lead, 'slots_token')}")
-    return None if ok else USERBOT_FAILED
+def plain_html(text):
+    """A card's HTML as plain text (the userbot's numbered fallback)."""
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
-def slots_card(token):
-    """The inline result for «slots:<token>» -> (title, HTML text, button rows) or None (unknown token, no open slots):
-    the object, a button per slot (ls:pick:<slot>) and «Другое время» (ls:own:<lead>)."""
-    lead = store.q("SELECT * FROM leads WHERE slots_token = %s AND status = 'slots_sent'", (token,), one=True)
-    slots = lead and store.q("SELECT id, starts_at FROM lead_slots WHERE lead_id = %s AND NOT chosen ORDER BY starts_at", (lead["id"],))
+# ---------- client cards from the operator's account ----------
+# Beyond the listing cards nothing goes to the client through the bot. The userbot sends the bot's inline result
+# «<kind>:<token>» into the client's DM (the bot answers card(kind, token) only for the userbot's account, journey.
+# on_inline_query); presses come to the bot with inline_message_id (journey.on_client_journey). The inline query failing
+# -> the userbot sends the same text with numbered options (clients.state.dm_choice, userbot.on_incoming).
+
+def new_card(kind, ref):
+    """A fresh token for «<kind>:<token>»; an older card of the same kind and ref stops resolving."""
+    token = secrets.token_urlsafe(9)
+    store.q("DELETE FROM inline_cards WHERE kind = %s AND ref = %s", (kind, str(ref)))
+    store.q("INSERT INTO inline_cards (token, kind, ref) VALUES (%s, %s, %s)", (token, kind, str(ref)))
+    return token
+
+
+def card(kind, token):
+    """The bot's inline answer for «<kind>:<token>» -> (title, HTML text, button rows) or None."""
+    r = kind in CARDS and store.q("SELECT ref FROM inline_cards WHERE token = %s AND kind = %s", (token, kind), one=True)
+    return CARDS[kind](int(r["ref"])) if r else None
+
+
+def _slots_card(lead_id):
+    """A4a: the object, a button per open slot (ls:pick:<slot>) and «Другое время» (ls:own:<lead>)."""
+    lead = store.q("SELECT * FROM leads WHERE id = %s AND status = 'slots_sent'", (lead_id,), one=True)
+    slots = lead and store.q("SELECT id, starts_at FROM lead_slots WHERE lead_id = %s AND NOT chosen ORDER BY starts_at", (lead_id,))
     if not slots:
         return None
     _, i, lang = ctx(lead)
     ask, own, open_ = SLOTS[lang]
     rows = [[url_btn(open_, listing_link(i))]] + [[cb(texts.slot_label(s["starts_at"], lang), f"ls:pick:{s['id']}")] for s in slots]
-    rows.append([cb(own, f"ls:own:{lead['id']}")])
+    rows.append([cb(own, f"ls:own:{lead_id}")])
     text = f"<b>{e(headline(i, lang))}</b>\n📍 {e(address(i, lang))}\n\n{ask}"
     return headline(i, lang) or plain(ask).splitlines()[-1], text, kb(rows)["inline_keyboard"]
+
+
+def _remind_card(lead_id):
+    """An hour before the viewing: «Буду» / «Опаздываю» / «Перенести» (lv:)."""
+    lead = store.q("SELECT * FROM leads WHERE id = %s AND status = 'time_chosen'", (lead_id,), one=True)
+    if not lead:
+        return None
+    _, i, lang = ctx(lead)
+    hm = texts.local(lead["viewing_at"]).strftime("%H:%M") if lead["viewing_at"] else "—"
+    text = REMIND[lang][0].format(hm=hm, addr=e(address(i, lang)), agent=e(staff_name(store.user(lead["agent_id"]))))
+    return plain_html(text).splitlines()[0], text, viewing_rows(lead_id, lang, ok=True)
+
+
+def viewing_rows(lead_id, lang, ok=False):
+    """[«Буду»,] «Опаздываю» / «Перенести»: the reminder and the slot card after the choice."""
+    _, yes, late, resched = REMIND[lang]
+    return kb([[cb(yes, f"lv:ok:{lead_id}") if ok else None, cb(late, f"lv:late:{lead_id}")],
+               [cb(resched, f"lv:resched:{lead_id}")]])["inline_keyboard"]
+
+
+def _survey_card(lead_id):
+    """A5a: «Снимаю» / «Не подошло» / «Думаю» (lo:c:)."""
+    lead = store.lead(lead_id)
+    if not lead:
+        return None
+    cl, i, lang = ctx(lead)
+    t, yes, no, think = SURVEY[lang]
+    text = t.format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა")), where=e(district(i, lang)))
+    rows = kb([[cb(yes, f"lo:c:{lead_id}:rented")], [cb(no, f"lo:c:{lead_id}:refused")], [cb(think, f"lo:c:{lead_id}:thinking")]])
+    return plain_html(text), text, rows["inline_keyboard"]
+
+
+def _reason_card(lead_id):
+    """After «Не подошло»: price / location / condition / other (lr:)."""
+    lead = store.lead(lead_id)
+    if not lead:
+        return None
+    _, _, lang = ctx(lead)
+    r = {k: v[lang] for k, v in texts.REFUSAL.items()}
+    rows = kb([[cb(r["price"], f"lr:{lead_id}:price"), cb(r["location"], f"lr:{lead_id}:location")],
+               [cb(r["condition"], f"lr:{lead_id}:condition"), cb(r["other"], f"lr:{lead_id}:other")]])
+    return REASON_ASK[lang], REASON_ASK[lang], rows["inline_keyboard"]
+
+
+def _t14_card(deal_id):
+    """A6: the intro + question 1 (t14:<deal>:1:<0-3>); the bot edits the card to the next questions."""
+    ld = store.q("SELECT l.* FROM deals d JOIN leads l ON l.id = d.lead_id WHERE d.id = %s", (deal_id,), one=True)
+    if not ld:
+        return None
+    cl, _, lang = ctx(ld)
+    intro = T14_INTRO[lang].format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა")))
+    q, rows = t14_question(deal_id, 1, lang)
+    return plain_html(intro).splitlines()[0], f"{intro}\n\n{q}", rows["inline_keyboard"]
+
+
+CARD_WHAT = {"slots": "время просмотра", "remind": "напоминание о просмотре", "survey": "опрос после просмотра",
+             "reason": "вопрос о причине отказа", "t14": "опрос T14"}
+
+
+def client_card(kind, ref, lead, fallback=None, choice=None):
+    """The card «kind» (ref: lead id, t14: deal id) to the lead's client from the operator's account. Numbered fallback:
+    the card's callback buttons (not «Другое время») as options, unless `fallback` text/`choice` are given.
+    -> None when the userbot sent it, else the error text (USERBOT_OFF / USERBOT_FAILED)."""
+    if not conf("USERBOT_URL").strip():
+        return USERBOT_OFF
+    built = CARDS[kind](ref)
+    if not built:
+        return USERBOT_FAILED
+    _, text, rows = built
+    btns = [b for r in rows for b in r if b.get("callback_data") and not b["callback_data"].startswith("ls:own")]
+    cl = store.client(g(lead, "client_id")) or {}
+    ok = userbot.send_to_client(cl, fallback or plain_html(text), None if fallback else [b["text"] for b in btns],
+                                choice or {"lead": g(lead, "id"), "kind": kind, "options": [b["callback_data"] for b in btns]},
+                                inline=f"{kind}:{new_card(kind, ref)}")
+    return None if ok else USERBOT_FAILED
+
+
+def card_to_client(kind, ref, lead, **kw):
+    """client_card for the worker's jobs and the client's own answers: not delivered -> an event in the lead history."""
+    err = client_card(kind, ref, lead, **kw)
+    if err:
+        store.q("INSERT INTO events (entity, entity_id, action, actor_label, data, at) VALUES ('lead', %s, 'client_card_not_delivered', "
+                "'bot', %s::jsonb, now())", (str(g(lead, "id")), json.dumps({"kind": kind, "note": f"{CARD_WHAT[kind]}: {err}"},
+                                                                            ensure_ascii=False)))
+        log.warning("lead %s: %s not delivered: %s", g(lead, "id"), kind, err)
+    return err
+
+
+@safe
+def slots_to_client(lead):
+    """A4a: the slot card -> None when sent, else the error text for the agent (add_slots logs it)."""
+    return client_card("slots", g(lead, "id"), lead)
 
 
 CONFIRMED = {"ru": ("✅ <b>Просмотр: {when}</b>\n📍 {addr}\n\n👤 Ваш агент: <b>{agent}</b>{phone}",
@@ -453,14 +556,11 @@ REMIND = {"ru": ("⏰ Через час просмотр: <b>{hm}</b>, {addr}\n�
 
 @safe
 def viewing_reminder(lead):
-    cl, i, lang = ctx(lead)
+    cl, i, _ = ctx(lead)
     lid, at = g(lead, "id"), g(lead, "viewing_at")
     hm = texts.local(at).strftime("%H:%M") if at else "—"
     ag = store.user(g(lead, "agent_id")) or {}
-    t, ok, late, resched = REMIND[lang]
-    if chat := chat_of(cl):
-        tg.send(chat, t.format(hm=hm, addr=e(address(i, lang)), agent=e(staff_name(ag))),
-                kb([[cb(ok, f"lv:ok:{lid}"), cb(late, f"lv:late:{lid}")], [cb(resched, f"lv:resched:{lid}")]]))
+    card_to_client("remind", lid, lead)                      # the client: from the operator's account
     if ag.get("tg_id"):
         tg.send(ag["tg_id"], f"⏰ Через час просмотр #{lid}: <b>{hm}</b>, {e(address(i))}\nКлиент {e(client_name(cl))}"
                 + (f", 📞 {e(cl['phone'])}" if cl.get("phone") else ""))
@@ -473,15 +573,10 @@ SURVEY = {"ru": ("{name}, как прошёл просмотр квартиры 
 
 @safe
 def post_viewing_survey(lead):
-    """A5a to the client (lo:c:) and C9a to the agent (lo:a:)."""
-    cl, i, lang = ctx(lead)
+    """A5a to the client (the survey card from the operator's account, lo:c:) and C9a to the agent (lo:a:)."""
+    cl, i, _ = ctx(lead)
     lid = g(lead, "id")
-    t, yes, no, think = SURVEY[lang]
-    if chat := chat_of(cl):
-        m = tg.send(chat, t.format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა")), where=e(district(i, lang))),
-                    kb([[cb(yes, f"lo:c:{lid}:rented")], [cb(no, f"lo:c:{lid}:refused")], [cb(think, f"lo:c:{lid}:thinking")]]))
-        if m:
-            store.remember("survey_client", lid, m["chat"]["id"], m["message_id"])
+    card_to_client("survey", lid, lead)
     ag = store.user(g(lead, "agent_id")) or {}
     if ag.get("tg_id"):
         m = tg.send(ag["tg_id"], f"Как прошёл просмотр #{lid}?\n{e(address(i))} · клиент {e(client_name(cl))}",
@@ -496,12 +591,8 @@ REASON_ASK = {"ru": "Жаль 😔 Что не подошло?", "en": "Sorry to
 
 @safe
 def refusal_reason_ask(lead):
-    cl, _, lang = ctx(lead)
-    lid = g(lead, "id")
-    r = {k: v[lang] for k, v in texts.REFUSAL.items()}
-    if chat := chat_of(cl):
-        tg.send(chat, REASON_ASK[lang], kb([[cb(r["price"], f"lr:{lid}:price"), cb(r["location"], f"lr:{lid}:location")],
-                                            [cb(r["condition"], f"lr:{lid}:condition"), cb(r["other"], f"lr:{lid}:other")]]))
+    """The reason card from the operator's account (lr:)."""
+    card_to_client("reason", g(lead, "id"), lead)
 
 
 STAGE_RU = {"operator_take": "назначение агента", "agent_slots": "время от агента", "slots_to_client": "передачу времени клиенту"}
@@ -602,16 +693,23 @@ def t14_question(deal_id, n, lang):
             kb([[cb(str(s), f"t14:{deal_id}:{n}:{s}") for s in range(4)]]))
 
 
+T14_PLAIN = {"ru": "Ответьте тремя цифрами от 0 до 3 по порядку, например «3 2 3».",
+             "en": "Reply with three digits from 0 to 3 in order, e.g. «3 2 3».",
+             "ka": "უპასუხეთ სამი ციფრით 0-დან 3-მდე თანმიმდევრობით, მაგალითად „3 2 3“."}
+
+
 @safe
 def t14_client(deal):
-    """A6: intro + the first of three questions; the bot asks the next ones as the client answers."""
+    """A6: the T14 card from the operator's account (intro + question 1; the bot edits it to the next ones). Numbered
+    fallback: all three questions, the client answers «3 2 3» (userbot.on_incoming)."""
     ld = deal_lead(deal)
-    cl = store.client(ld.get("client_id")) or {}
-    chat, lang = chat_of(cl), texts.lang_of(cl.get("lang"))
-    if not chat:
+    if not ld:
         return
-    tg.send(chat, T14_INTRO[lang].format(name=e(cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა"))))
-    tg.send(chat, *t14_question(g(deal, "id"), 1, lang))
+    cl = store.client(ld.get("client_id")) or {}
+    lang = texts.lang_of(cl.get("lang"))
+    fallback = (plain(T14_INTRO[lang], name=cl.get("name") or texts.pick(lang, "Здравствуйте", "Hi", "გამარჯობა")) + "\n\n" +
+                "\n".join(f"{n}. {q}" for n, q in enumerate(texts.T14_QUESTIONS[lang], 1)) + "\n\n" + T14_PLAIN[lang])
+    card_to_client("t14", g(deal, "id"), ld, fallback=fallback, choice={"lead": ld["id"], "kind": "t14", "deal": g(deal, "id")})
 
 
 @safe
@@ -885,3 +983,6 @@ def evaluation_alert(evaluation):
     if g(evaluation, "complaints_text") or g(evaluation, "comment"):
         text += f"\n\n💬 {e(g(evaluation, 'complaints_text') or g(evaluation, 'comment'))}"
     to_operators(None, did, text, lambda private: kb([[app_btn("📄 Открыть сделку", links.deal_app(did), private)]]))
+
+
+CARDS = {"slots": _slots_card, "remind": _remind_card, "survey": _survey_card, "reason": _reason_card, "t14": _t14_card}

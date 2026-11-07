@@ -43,9 +43,11 @@ operator_take(db, lead_id, operator: User) -> Lead             # DomainError('al
 assign_agent(db, lead_id, agent_id: int, actor: User) -> Lead   # also sets operator_id if nobody took it
 reassign(db, lead_id, agent_id, actor) -> Lead
 recommend_agents(db, lead_id) -> list[{"agent": {...}, "score", "reasons": [...], "active_leads", "recommended"?}]
-add_slots(db, lead_id, starts: list[datetime], actor: User | None) -> Lead   # naive datetimes = Asia/Tbilisi; new slots_token,
+add_slots(db, lead_id, starts: list[datetime], actor: User | None) -> Lead   # naive datetimes = Asia/Tbilisi;
     # the userbot sends the slot card; not delivered -> DomainError userbot_off (503), lead back to agent_assigned
 choose_slot(db, slot_id, client_id: int | None = None) -> Lead              # contacts shared, jobs scheduled
+client_action(db, data, client_id) -> Lead   # a client card button (bot) or its number typed in the operator's DM (userbot)
+client_comment(db, lead_id, client_id, text) -> Lead   # the client's words after the refusal reason «Другое»
 client_own_time(db, lead_id, text) -> Lead      # "Другое время": back to agent_slots SLA, agent re-notified
 client_late(db, lead_id) -> Lead                # history only
 request_reschedule(db, lead_id, by='client'|'agent', actor=None) -> Lead   # → agent_assigned, slots deleted

@@ -10,14 +10,16 @@ http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id
 - incoming private message -> the client (clients.external_id = sender id, else the @username) and its latest open lead
   -> lead event message_from_client (via dm);
 - the operator's own messages to a client typed in Telegram -> message_to_client (via dm);
-- viewing slots (notify.slots_to_client): a user account can't attach buttons, but it can send an inline-bot result
-  («via @bot») that carries the bot's keyboard: inline_query(BOT_USERNAME, "slots:<token>") -> results[0].click(client).
-  The presses go to the bot (journey.on_client_journey, inline_message_id). On start the userbot saves its Telegram id
-  (settings.userbot_tg_id): the bot answers «slots:» queries from that account only. If the inline query fails
-  (inline mode off, bot down) the options go as a numbered list («1. Завтра 12:00»);
-- clients.state["dm_choice"] keeps what the numbers mean; a reply «1»/«2.»/«#3» picks the slot (leads.choose_slot),
-  a reply that reads as a time (or any reply after «Другое время», dm_choice.own) is the client's own time
-  (leads.client_own_time).
+- client cards (notify.client_card: slots, viewing reminder, survey, refusal reason, T14): a user account can't attach
+  buttons, but it can send an inline-bot result («via @bot») that carries the bot's keyboard:
+  inline_query(BOT_USERNAME, "<kind>:<token>") -> results[0].click(client). The presses go to the bot
+  (journey.on_client_journey, inline_message_id). On start the userbot saves its Telegram id (settings.userbot_tg_id):
+  the bot answers those queries from that account only. If the inline query fails (inline mode off, bot down) the
+  options go as a numbered list («1. Завтра 12:00»);
+- clients.state["dm_choice"] = what the client's next DM answers (dm_answer): {kind, lead, options: [callback data]}
+  -> a reply «1»/«2.»/«#3» does that button (leads.client_action); slots: a reply that reads as a time is the own
+  time; {own} after «Другое время» -> leads.client_own_time; {comment} after the refusal reason «Другое» ->
+  leads.client_comment; {kind: t14, deal} -> «3 2 3» = the three T14 scores; {problem: deal} -> a T14 complaint.
 
 Creating the StringSession (the operator logs in THEMSELVES, on their own computer; nobody else sees the code):
     pip install telethon
@@ -41,8 +43,10 @@ from app.telegram.client import conf
 log = logging.getLogger(__name__)
 OPEN = ("new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done", "deal_pending", "thinking",
         "in_work", "viewing")
-PICK_HINT = {"ru": "Ответьте цифрой варианта или напишите своё время.", "en": "Reply with the option number or write your own time.",
-             "ka": "უპასუხეთ ვარიანტის ნომრით ან დაწერეთ თქვენთვის სასურველი დრო."}
+PICK_HINT = {"ru": "Ответьте цифрой варианта.", "en": "Reply with the option number.", "ka": "უპასუხეთ ვარიანტის ნომრით."}
+TIME_PICK_HINT = {"ru": "Ответьте цифрой варианта или напишите своё время.", "en": "Reply with the option number or write your own time.",
+                  "ka": "უპასუხეთ ვარიანტის ნომრით ან დაწერეთ თქვენთვის სასურველი დრო."}
+T14_SCORES = re.compile(r"\s*([0-3])\D{1,3}([0-3])\D{1,3}([0-3])\s*")
 SENT = set()  # (peer id, text) sent by send(): the outgoing-message handler must not log them twice
 # a reply that reads as a time («завтра после 18», «15:30», «tomorrow 6 pm») while slots wait = the client's own time
 TIME_HINT = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*(?:ч|h|am|pm)\b|после|after|завтра|сегодня|tomorrow|today|ხვალ|დღეს|შემდეგ", re.I)
@@ -59,6 +63,14 @@ def set_state(client_id, **kv):
 
 
 # ---------- the CRM / bot side ----------
+
+def forget_choice(client_id, data):
+    """A card answered by its button (the bot): drop dm_choice if it waits for that card (`data` among its options, or
+    its kind), so a number typed later doesn't repeat the answer."""
+    store.q("UPDATE clients SET state = (COALESCE(NULLIF(state, ''), '{}')::jsonb - 'dm_choice')::text WHERE id = %s AND "
+            "(COALESCE(NULLIF(state, ''), '{}')::jsonb->'dm_choice'->'options' ? %s "
+            "OR COALESCE(NULLIF(state, ''), '{}')::jsonb->'dm_choice'->>'kind' = %s)", (client_id, data, data))
+
 
 def send_to_client(cl, text, options=None, choice=None, inline=None):
     """Send through the userbot (USERBOT_URL) -> {"message_id": …} or None (not configured / failed). inline: the bot's
@@ -96,8 +108,9 @@ def open_lead(client_id):
                    (client_id, list(OPEN)), one=True)
 
 
-def options_text(text, options, lang):
-    return text + "\n\n" + "\n".join(f"{n}. {o}" for n, o in enumerate(options, 1)) + "\n\n" + PICK_HINT[texts.lang_of(lang)]
+def options_text(text, options, lang, kind=None):
+    hint = (TIME_PICK_HINT if kind == "slots" else PICK_HINT)[texts.lang_of(lang)]
+    return text + "\n\n" + "\n".join(f"{n}. {o}" for n, o in enumerate(options, 1)) + "\n\n" + hint
 
 
 def parse_choice(text, n):
@@ -117,25 +130,46 @@ def _svc(fn, *a, **kw):
         return None, e.code
 
 
+def dm_answer(cl, choice, text):
+    """The client's DM as the answer dm_choice waits for -> 'slot' | 'choice' | 'own_time' | 'comment' | 't14' |
+    'problem', or None (not an answer: an ordinary message)."""
+    from app.services import evaluations, leads
+    cid, lead_id = cl["id"], choice.get("lead")
+    if choice.get("problem"):
+        _, err = _svc(evaluations.create, {"deal_id": choice["problem"], "kind": "t14", "author": "client", "complaints": True,
+                                           "complaints_text": text}, None)
+        return None if err else "problem"
+    if choice.get("kind") == "t14":
+        m = T14_SCORES.fullmatch(text)
+        _, err = (None, "no") if not m else _svc(evaluations.create, {"deal_id": choice["deal"], "kind": "t14", "author": "client",
+                                                                      "h2o_client": int(m[1]), "h2o_owner": int(m[2]),
+                                                                      "h2o_process": int(m[3])}, None)
+        return None if err else "t14"
+    if choice.get("comment"):
+        _, err = _svc(leads.client_comment, lead_id, cid, text)
+        return None if err else "comment"
+    own = choice.get("own")
+    n = not own and parse_choice(text, len(choice.get("options") or []))
+    if n:
+        data = choice["options"][n - 1]
+        _, err = _svc(leads.client_action, data, cid)
+        return None if err else ("slot" if data.startswith("ls:") else "choice")
+    if own or (choice.get("kind") == "slots" and TIME_HINT.search(text)):
+        _, err = _svc(leads.client_own_time, lead_id, text)
+        return None if err else "own_time"
+    return None
+
+
 def on_incoming(tg_id, username, text):
-    """A private message to the operator -> 'unknown' | 'no_lead' | 'slot' | 'own_time' | 'logged' (tests read it)."""
+    """A private message to the operator -> 'unknown' | 'no_lead' | 'logged' | a dm_answer result (tests read it)."""
     from app.services import leads
     cl = match_client(tg_id, username)
     if not cl or not (text or "").strip():
         return "unknown"
     choice = cl["state"].get("dm_choice") or {}
-    if choice.get("slots") or choice.get("own"):
-        n = not choice.get("own") and parse_choice(text, len(choice["slots"]))
-        if n:
-            _, err = _svc(leads.choose_slot, choice["slots"][n - 1], cl["id"])
-            if not err:
-                set_state(cl["id"], dm_choice=None)
-                return "slot"
-        elif choice.get("own") or TIME_HINT.search(text):
-            _, err = _svc(leads.client_own_time, choice["lead"], text)
-            if not err:
-                set_state(cl["id"], dm_choice=None)
-                return "own_time"
+    if choice and (res := dm_answer(cl, choice, text)):
+        set_state(cl["id"], dm_choice=None)
+        return res
     lead = open_lead(cl["id"])
     if not lead:
         return "no_lead"
@@ -184,7 +218,7 @@ async def send(client, client_id, text, options=None, choice=None, inline=None):
             return m.id
         except Exception as e:  # noqa: BLE001 — inline mode off, bot down, no result: the numbered text
             log.warning("userbot inline %r to client %s failed: %r", inline, client_id, e)
-    body = options_text(text, options, cl.get("lang")) if options else text
+    body = options_text(text, options, cl.get("lang"), (choice or {}).get("kind")) if options else text
     if len(SENT) > 1000:  # ponytail: own sends may never come back as events; a full reset is enough to bound it
         SENT.clear()
     SENT.add((peer, body))

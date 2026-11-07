@@ -1,7 +1,7 @@
 from app.db import Base
 from app.models.people import ADMINS, FIELD, ROLES, STAFF, User
-from app.models.catalog import (LEAD_STATUSES, ChannelVideo, Client, ClientView, JourneyAnswer, Lead, LeadEvent, LeadSlot, Listing,
-                                Message, Reaction, Search, Setting, Source, TgFile)
+from app.models.catalog import (LEAD_STATUSES, ChannelVideo, Client, ClientView, InlineCard, JourneyAnswer, Lead, LeadEvent, LeadSlot,
+                                Listing, Message, Reaction, Search, Setting, Source, TgFile)
 from app.models.objects import (ARCHIVE_REASONS, PROPERTY_STATUSES, PUBLICATION_CHANNELS, ChangeRequest, Event, ListingMatch,
                                 Owner, Property, PropertyListing, PropertyMedia, PropertyPublication)
 from app.models.deals import Deal, Evaluation

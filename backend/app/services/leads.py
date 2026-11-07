@@ -1,6 +1,5 @@
 """Funnel 2: client like → operator → agent → slots → viewing → outcome → deal (docs/ARCHITECTURE.md §4.3, §5)."""
 import logging
-import secrets
 from datetime import datetime, timedelta
 
 from sqlalchemy import Text, and_, cast, func, or_, select
@@ -229,6 +228,42 @@ def client_own_time(db: Session, lead_id: int, text: str) -> Lead:
     return lead
 
 
+def client_action(db: Session, data: str, client_id: int) -> Lead:
+    """A client's button on a card from the operator's account (the bot gets the press) or its number typed in the
+    operator's DM (the userbot): ls:pick:<slot> | lv:ok|late|resched:<lead> | lo:c:<lead>:<outcome> | lr:<lead>:<reason>.
+    Only the lead's own client."""
+    p = data.split(":")
+    if p[0] == "ls" and p[1] == "pick":
+        return choose_slot(db, int(p[2]), client_id)
+    lead = _lead(db, int(p[2] if p[0] in ("lv", "lo") else p[1]))
+    if lead.client_id != client_id:
+        raise forbidden("not your lead")
+    if p[0] == "lv" and p[1] == "ok":
+        _event(db, lead, "client_confirmed", label="client", note="Клиент: «Буду»")
+        db.commit()
+        _notify("viewing_update", lead, "ok")
+        return lead
+    if p[0] == "lv" and p[1] == "late":
+        return client_late(db, lead.id)
+    if p[0] == "lv" and p[1] == "resched":
+        return request_reschedule(db, lead.id, "client")
+    if p[0] == "lo" and p[1] == "c":
+        return set_outcome(db, lead.id, "client", p[3])
+    if p[0] == "lr":
+        return set_outcome(db, lead.id, "client", "refused", p[2] if p[2] in REFUSAL_REASONS else "other")
+    raise DomainError("bad_action", f"unknown client action {data}")
+
+
+def client_comment(db: Session, lead_id: int, client_id: int, text: str) -> Lead:
+    """The client's own words after a refusal («Другое»), written to the operator's DM: history only."""
+    lead = _lead(db, lead_id)
+    if lead.client_id != client_id:
+        raise forbidden("not your lead")
+    _event(db, lead, "client_comment", label="client", note=text.strip()[:1000], via="dm")
+    db.commit()
+    return lead
+
+
 def client_late(db: Session, lead_id: int) -> Lead:
     lead = _lead(db, lead_id)
     _require_status(lead, "time_chosen")
@@ -399,7 +434,7 @@ def reject_past_slots(starts: list[datetime]) -> None:
 
 
 def add_slots(db: Session, lead_id: int, starts: list[datetime], actor: User | None) -> Lead:
-    """C7: agent enters free windows → the operator's userbot sends them to the client as the bot's inline result
+    """C7: agent enters free windows → the operator's userbot sends them to the client as the bot's inline card
     «slots:<token>» (A4a, notify.slots_to_client); agent SLA stops. Not delivered (no userbot) → the lead is back at
     agent_assigned without these slots, and the agent gets the reason (503)."""
     lead = _lead(db, lead_id, lock=True)
@@ -411,15 +446,13 @@ def add_slots(db: Session, lead_id: int, starts: list[datetime], actor: User | N
     db.query(LeadSlot).filter(LeadSlot.lead_id == lead.id, LeadSlot.chosen.is_(False)).delete()
     slots = [LeadSlot(lead_id=lead.id, starts_at=s, created_by=actor.id if actor else None) for s in starts]
     db.add_all(slots)
-    lead.slots_token = secrets.token_urlsafe(9)
     _touch(lead, "slots_sent")
     _set_sla(db, lead, None)
     _event(db, lead, "slots_sent", actor, slots=[s.isoformat() for s in starts])
-    db.commit()  # before the send: the bot reads the slots by the token while the userbot asks it
-    if err := _notify("slots_to_client", lead, slots):
+    db.commit()  # before the send: the bot reads the slots while the userbot asks it for the card
+    if err := _notify("slots_to_client", lead):
         lead = _lead(db, lead_id, lock=True)
         db.query(LeadSlot).filter(LeadSlot.lead_id == lead.id, LeadSlot.chosen.is_(False)).delete()
-        lead.slots_token = None
         _touch(lead, "agent_assigned")
         _set_sla(db, lead, "agent_slots")
         _event(db, lead, "slots_not_delivered", label="bot", note=err)

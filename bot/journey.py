@@ -1,7 +1,8 @@
 """The client journey in the bot (docs/user-journey.txt): questionnaire A1a-A2a (q:), ❤️ → lead (A3), the operators
 group (B1, lg:), the agent's quick slots (C7, ls:quick/t/send/text), the slot card in the client's DM with the operator
-(A4a: the inline query «slots:<token>» from the operator's userbot, its buttons ls:pick/own come back here with
-inline_message_id), viewing buttons (lv:), outcomes (A5/C9a, lo:, lr:) and T14 (A6, t14:). Business rules live in the
+and the other client cards (A4a slots ls:pick/own, the reminder lv:, the survey lo:c:, the refusal reason lr:, T14
+t14:): the operator's userbot sends the bot's inline result «<kind>:<token>» into the client's DM and the presses come
+back here with inline_message_id; the agent's outcome (C9a, lo:a:). Business rules live in the
 backend services (app.services.*); outgoing cards in app.telegram.notify. Client transient state: clients.state["await"];
 staff: ctx.user_data."""
 import asyncio
@@ -823,100 +824,119 @@ def pressed_label(query):
     return next((b.text for row in rows for b in row if b.callback_data == query.data), "")
 
 
-CHOSEN = ("✅ Вы выбрали: {when}", "✅ You chose: {when}", "✅ თქვენ აირჩიეთ: {when}")
+def label_of(query, cl):
+    """The pressed button's text: from the message's keyboard, or (an inline message: Telegram doesn't send it) from
+    the card's own labels (notify.REMIND / SURVEY, texts.REFUSAL)."""
+    if got := pressed_label(query):
+        return got
+    p, lang = query.data.split(":"), L(cl)
+    if p[0] == "lv":
+        return notify.REMIND[lang][{"ok": 1, "late": 2, "resched": 3}[p[1]]]
+    if p[0] == "lo":
+        return notify.SURVEY[lang][{"rented": 1, "refused": 2, "thinking": 3}.get(p[3], 2)]
+    if p[0] == "lr":
+        return texts.REFUSAL.get(p[2], texts.REFUSAL["other"])[lang]
+    return ""
 
 
-def _pick(s, slot_id, client_id, lang):
-    """leads.choose_slot (only the lead's client) -> the chosen time's label."""
-    from app.services import leads
-    return texts.slot_label(leads.choose_slot(s, slot_id, client_id).viewing_at, lang)
-
-
-async def edit_quietly(query, text):
-    """The pressed message (in a chat, or an inline one sent via the bot) shows `text`, buttons gone; a photo card
-    or a gone message stays as it is."""
+async def edit_card(query, text, rows=None):
+    """The pressed card (an inline message from the operator's account, or an older bot message) shows `text` and
+    `rows` (None: no buttons); «not modified», a photo card or a gone message are not errors."""
     try:
-        await edit_text(query, text)
+        await edit_text(query, text, parse_mode="HTML", reply_markup=markup(rows) if rows else None)
     except TelegramError as ex:
         log.info("edit %s: %s", query.inline_message_id or (query.message and query.message.message_id), ex)
 
 
-async def on_client_journey(update: Update, ctx, cl):
-    """ls:pick / ls:own (the slot card from the operator's account: an inline message, no chat) / lv:* / lo:c:* / lr:* /
-    t14:* pressed by a client."""
+def _act(s, data, client_id, lang):
+    """leads.client_action (only the lead's client) -> (lead id, the chosen time's label for ls:pick)."""
     from app.services import leads
-    query, bot = update.callback_query, ctx.bot
-    chat = update.effective_chat and update.effective_chat.id
+    lead = leads.client_action(s, data, client_id)
+    return lead.id, texts.slot_label(lead.viewing_at, lang) if data.startswith("ls:pick") else ""
+
+
+def card_text(kind, lead_id):
+    """The card's current HTML text (an inline message's text doesn't come with the press)."""
+    return (notify.CARDS[kind](lead_id) or ("", "", None))[1]
+
+
+CHOSEN = ("✅ Вы выбрали: {when}", "✅ You chose: {when}", "✅ თქვენ აირჩიეთ: {when}")
+NOT_YOURS = ("Это не ваша заявка", "This is not your request", "ეს თქვენი განაცხადი არ არის")
+OWN_ASK = ("Напишите удобное время ответным сообщением, например «завтра после 18:00». Передам агенту.",
+           "Reply with a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent.",
+           "უპასუხეთ თქვენთვის მოსახერხებელი დროით, მაგალითად „ხვალ 18:00-ის შემდეგ“. აგენტს გადავცემ.")
+COMMENT_ASK = ("Если хотите, напишите ответным сообщением, что не подошло: передам агенту.",
+               "If you like, reply with what didn't fit: I'll pass it to the agent.",
+               "თუ გსურთ, უპასუხეთ, რა არ მოგეწონათ: აგენტს გადავცემ.")
+
+
+async def on_client_journey(update: Update, ctx, cl):
+    """A client's press on a card from the operator's account (an inline message: inline_message_id, no chat) or on an
+    older bot message: ls:pick / ls:own / lv:* / lo:c:* / lr:* / t14:*. Recording: leads.client_action (the same as a
+    number typed in the operator's DM, userbot.dm_answer); then the card itself is edited."""
+    query = update.callback_query
     parts = query.data.split(":")
     kind = parts[0]
-    if kind == "ls" and parts[1] == "pick":  # notify: A4b details to the client (userbot), C8 contacts to the agent, the operator
-        when, err = await svc(_pick, int(parts[2]), cl["id"], L(cl))
-        if err:
-            await answer(query, tr(cl, "Это не ваша заявка", "This is not your request", "ეს თქვენი განაცხადი არ არის") if err == "forbidden"
-                         else tr(cl, "Это время уже недоступно", "This time is no longer available", "ეს დრო უკვე აღარ არის ხელმისაწვდომი"),
-                         show_alert=True)
-            return
-        await answer(query, "✅")
-        await edit_quietly(query, texts.pick(L(cl), *CHOSEN).format(when=when))
-        return
     if kind == "t14":
         return await on_t14(update, ctx, cl, parts)
-    lead_id = int(parts[2] if kind in ("ls", "lv", "lo") else parts[1])
-    ld = await th(my_lead, cl, lead_id)
-    if not ld:
-        await answer(query, core.t(cl["lang"], "gone"))
+    lead_id = None if kind == "ls" and parts[1] == "pick" else int(parts[2] if kind in ("ls", "lv", "lo") else parts[1])
+    if lead_id is not None and not await th(my_lead, cl, lead_id):
+        await answer(query, texts.pick(L(cl), *NOT_YOURS), show_alert=True)
         return
-    if kind == "ls":  # «Другое время»: the client writes it to the operator's DM, the userbot saves it (dm_choice.own)
+    if kind == "ls" and parts[1] == "own":  # «Другое время»: the client writes it to the operator's DM (dm_choice.own)
         await th(userbot.set_state, cl["id"], dm_choice={"lead": lead_id, "own": True})
         await answer(query)
-        await edit_quietly(query, tr(cl, "Напишите удобное время ответным сообщением, например «завтра после 18:00». Передам агенту.",
-                                     "Reply with a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent.",
-                                     "უპასუხეთ თქვენთვის მოსახერხებელი დროით, მაგალითად „ხვალ 18:00-ის შემდეგ“. აგენტს გადავცემ."))
-    elif kind == "lv":
-        act = parts[1]
-        if act == "ok":
-            await answer(query, tr(cl, "Отлично, ждём вас 👍", "Great, see you there 👍", "მშვენიერია, გელოდებით 👍"))
-            await mark_choice(query, pressed_label(query))
-            await th(notify.viewing_update, ld, "ok")
-        elif act == "late":
-            await svc(leads.client_late, lead_id)
-            await answer(query)
-            await th(notify.viewing_update, ld, "late")
-            await bot.send_message(chat, tr(cl, "Передал агенту, что вы опаздываете 👌", "I told the agent you're running late 👌", "აგენტს გადავეცი, რომ აგვიანებთ 👌"))
-        elif act == "resched":
-            _, err = await svc(leads.request_reschedule, lead_id, "client")
-            await answer(query)
-            await bot.send_message(chat, tr(cl, "Передал агенту: он согласует с собственником новое время и пришлёт варианты 🙌",
-                                            "I asked the agent: they'll agree a new time with the owner and send options 🙌",
-                                            "აგენტს გადავეცი: ის მესაკუთრესთან ახალ დროს შეათანხმებს და ვარიანტებს გამოგიგზავნით 🙌")
-                                   if not err else tr(cl, "Перенести уже нельзя, напишите оператору.", "Can't reschedule now, please write to the operator.",
-                                                      "გადატანა უკვე შეუძლებელია, მიწერეთ ოპერატორს."))
-    elif kind == "lo":
-        outcome = parts[3]
-        _, err = await svc(leads.set_outcome, lead_id, "client", outcome)  # refused -> notify.refusal_reason_ask
+        await edit_card(query, texts.pick(L(cl), *OWN_ASK))
+        return
+    if kind == "lr" and not first_tap(query, "lr"):  # a double tap (or a second reason on the same card): one answer
         await answer(query)
-        if err:
-            return
-        await mark_choice(query, pressed_label(query))
-        if outcome in OUTCOME_REPLY:
-            ag = await th(user_row, ld["agent_id"]) or {}
-            await bot.send_message(chat, texts.pick(L(cl), *OUTCOME_REPLY[outcome]).format(agent=ag.get("name") or ""))
+        return
+    label = label_of(query, cl)
+    res, err = await svc(_act, query.data, cl["id"], L(cl))  # notify: C8 contacts, staff updates, the next card
+    if err:
+        await answer(query, texts.pick(L(cl), *NOT_YOURS) if err == "forbidden" else
+                     tr(cl, "Это время уже недоступно", "This time is no longer available", "ეს დრო უკვე აღარ არის ხელმისაწვდომი")
+                     if kind == "ls" else tr(cl, "Уже нельзя изменить, напишите оператору.", "Can't change this now, please write to the operator.",
+                                             "ამის შეცვლა უკვე შეუძლებელია, მიწერეთ ოპერატორს."), show_alert=True)
+        return
+    await th(userbot.forget_choice, cl["id"], query.data)  # answered by the button: a typed number won't repeat it
+    if kind == "ls":  # A4b: the details come as a DM from the operator; the card keeps «Опаздываю» / «Перенести»
+        await answer(query, "✅")
+        await edit_card(query, texts.pick(L(cl), *CHOSEN).format(when=res[1]), notify.viewing_rows(res[0], L(cl)))
+        return
+    ld = await th(lead_row, lead_id)
+    if kind == "lv":
+        if parts[1] == "ok":
+            await answer(query, tr(cl, "Отлично, ждём вас 👍", "Great, see you there 👍", "მშვენიერია, გელოდებით 👍"))
+            await edit_card(query, f"{await th(card_text, 'remind', lead_id)}\n\n✓ {e(label)}", notify.viewing_rows(lead_id, L(cl)))
+        elif parts[1] == "late":
+            await answer(query, tr(cl, "Передал агенту, что вы опаздываете 👌", "I told the agent you're running late 👌",
+                                   "აგენტს გადავეცი, რომ აგვიანებთ 👌"), show_alert=True)
+        else:
+            await answer(query)
+            await edit_card(query, tr(cl, "🔁 Передал агенту: он согласует с собственником новое время и пришлёт варианты 🙌",
+                                      "🔁 I asked the agent: they'll agree a new time with the owner and send options 🙌",
+                                      "🔁 აგენტს გადავეცი: ის მესაკუთრესთან ახალ დროს შეათანხმებს და ვარიანტებს გამოგიგზავნით 🙌"))
+    elif kind == "lo":  # refused -> notify.refusal_reason_ask sends the reason card
+        await answer(query)
+        reply = OUTCOME_REPLY.get(parts[3])
+        ag = await th(user_row, ld["agent_id"]) or {}
+        await edit_card(query, f"{await th(card_text, 'survey', lead_id)}\n\n✓ {e(label)}" +
+                        ("\n\n" + e(texts.pick(L(cl), *reply).format(agent=ag.get("name") or "")) if reply else ""))
     elif kind == "lr":
         reason = parts[2] if len(parts) > 2 and parts[2] in REASON_MSG else "other"
-        if not first_tap(query, "lr"):  # a double tap (or a second reason on the same card): one answer
-            await answer(query)
-            return
-        await svc(leads.set_outcome, lead_id, "client", "refused", reason)
         await answer(query)
-        await mark_choice(query, pressed_label(query))
         i = await th(core.listing, ld["listing_id"]) or {}
         await th(core.react, cl, ld["listing_id"], "dislike")
         hint = texts.pick(L(cl), *REASON_MSG[reason])
         if hint:
             await th(core.add_input, cl, text=hint.format(p=i.get("price_usd") or "", d=i.get("district") or ""))
-        await bot.send_message(chat, texts.pick(L(cl), *REASON_REPLY[reason]),
-                               reply_markup=markup([[cb(tr(cl, "🔄 Да, подобрать", "🔄 Yes, find", "🔄 დიახ, შემირჩიე"), "more")],
-                                                    [cb(tr(cl, "Пока нет", "Not now", "ჯერ არა"), "noop")]]))
+        text = f"{await th(card_text, 'reason', lead_id)}\n\n✓ {e(label)}\n\n" + e(texts.pick(L(cl), *REASON_REPLY[reason]))
+        if reason == "other":  # the client's own words come as a DM to the operator (userbot: leads.client_comment)
+            await th(userbot.set_state, cl["id"], dm_choice={"lead": lead_id, "comment": True})
+            text += "\n\n" + e(texts.pick(L(cl), *COMMENT_ASK))
+        await edit_card(query, text, [[cb(tr(cl, "🔄 Да, подобрать", "🔄 Yes, find", "🔄 დიახ, შემირჩიე"), "more")],
+                                      [cb(tr(cl, "Пока нет", "Not now", "ჯერ არა"), "noop")]])
 
 
 def _deal_client(deal_id):
@@ -933,28 +953,28 @@ def _t14_scored(deal_id):
 
 
 async def on_t14(update, ctx, cl, parts):
-    """t14:<deal>:<1-3>:<0-3> -> next question; after the third an evaluation (author=client). t14:<deal>:problem -> free text."""
+    """t14:<deal>:<1-3>:<0-3> -> the same card shows the next question; after the third an evaluation (author=client)
+    and «Есть проблема» (t14:<deal>:problem -> the client describes it in the operator's DM, userbot dm_answer)."""
     from app.services import evaluations
     query = update.callback_query
     deal_id = int(parts[1])
     if await th(_deal_client, deal_id) != cl["id"]:
-        await answer(query, core.t(cl["lang"], "gone"))
+        await answer(query, texts.pick(L(cl), *NOT_YOURS), show_alert=True)
         return
     await answer(query)
-    if not first_tap(query, "t14"):  # a double tap on a score: one next question / one evaluation
+    if not first_tap(query, "t14:" + parts[2]):  # a double tap on a score: one next question / one evaluation (one card)
         return
     if parts[2] == "problem":
-        await th(set_await, cl, "problem", deal_id)
-        await ctx.bot.send_message(update.effective_chat.id, tr(cl, "Опишите, пожалуйста, проблему одним сообщением, оператор ответит.",
-                                                                 "Please describe the problem in one message, an operator will reply.",
-                                                                 "გთხოვთ, აღწეროთ პრობლემა ერთი შეტყობინებით, ოპერატორი გიპასუხებთ."))
+        await th(userbot.set_state, cl["id"], dm_choice={"problem": deal_id})
+        await edit_card(query, tr(cl, "Опишите, пожалуйста, проблему одним сообщением в этот чат, оператор ответит.",
+                                  "Please describe the problem in one message in this chat, an operator will reply.",
+                                  "გთხოვთ, აღწეროთ პრობლემა ერთი შეტყობინებით ამ ჩატში, ოპერატორი გიპასუხებთ."))
         return
     n, score = int(parts[2]), int(parts[3])
     await th(core.update, cl, lambda st, r: st.setdefault("t14", {}).setdefault(str(deal_id), {}).update({str(n): score}))
-    await mark_choice(query, str(score))
     if n < 3:
         text, mk = notify.t14_question(deal_id, n + 1, L(cl))
-        await ctx.bot.send_message(update.effective_chat.id, text, parse_mode="HTML", reply_markup=markup(mk["inline_keyboard"]))
+        await edit_card(query, f"✓ {n}: {score}\n\n{text}", mk["inline_keyboard"])
         return
     a = cl["state"]["t14"][str(deal_id)]
     async with lock_for(("t14", deal_id)):
@@ -962,29 +982,20 @@ async def on_t14(update, ctx, cl, parts):
             return
         await svc(evaluations.create, {"deal_id": deal_id, "kind": "t14", "author": "client", "h2o_client": a.get("1"),
                                        "h2o_owner": a.get("2"), "h2o_process": a.get("3")}, None)
-    await ctx.bot.send_message(update.effective_chat.id, tr(cl, "Спасибо! 🙏 0 = плохо, 3 = отлично. Если есть проблема, напишите, оператор ответит.",
-                                                             "Thank you! 🙏 0 = bad, 3 = great. If there is a problem, write it, an operator will reply.",
-                                                             "გმადლობთ! 🙏 0 = ცუდი, 3 = შესანიშნავი. თუ რამე პრობლემაა, მოგვწერეთ, ოპერატორი გიპასუხებთ."),
-                               reply_markup=markup([[cb(tr(cl, "✍️ Есть проблема", "✍️ There is a problem", "✍️ პრობლემა მაქვს"), f"t14:{deal_id}:problem")]]))
+    await th(userbot.forget_choice, cl["id"], "t14")
+    await edit_card(query, tr(cl, "Спасибо! 🙏 0 = плохо, 3 = отлично. Если есть проблема, напишите, оператор ответит.",
+                              "Thank you! 🙏 0 = bad, 3 = great. If there is a problem, write it, an operator will reply.",
+                              "გმადლობთ! 🙏 0 = ცუდი, 3 = შესანიშნავი. თუ რამე პრობლემაა, მოგვწერეთ, ოპერატორი გიპასუხებთ."),
+                    [[cb(tr(cl, "✍️ Есть проблема", "✍️ There is a problem", "✍️ პრობლემა მაქვს"), f"t14:{deal_id}:problem")]])
 
 
 async def on_client_text(update: Update, ctx, cl):
-    """Free text the client's state is waiting for (budget, T14 problem). -> True if handled."""
-    from app.services import evaluations
-    kind, ref = awaiting(cl)
+    """Free text the client's state is waiting for in the bot (the budget). -> True if handled."""
+    kind, _ = awaiting(cl)
     text = update.effective_message and update.effective_message.text
-    if not text or not kind:
+    if kind != "budget" or not text:
         return False
-    bot, chat = ctx.bot, update.effective_chat.id
-    if kind == "budget":
-        await on_budget_text(bot, cl, text)
-    elif kind == "problem":
-        await th(set_await, cl)
-        await svc(evaluations.create, {"deal_id": int(ref), "kind": "t14", "author": "client", "complaints": True,
-                                       "complaints_text": text}, None)  # -> notify.evaluation_alert to operators
-        await bot.send_message(chat, tr(cl, "Передал оператору, он скоро ответит 🙏", "Sent to an operator, they'll reply soon 🙏", "ოპერატორს გადავეცი, მალე გიპასუხებთ 🙏"))
-    else:
-        return False
+    await on_budget_text(ctx.bot, cl, text)
     return True
 
 
@@ -1015,21 +1026,21 @@ async def on_agent_outcome(update: Update, ctx, parts):
         await ctx.bot.send_message(chat, "Хорошо, напомним клиенту завтра.")
 
 
-# ---------- A4a: the slot card for the operator's userbot (inline mode) ----------
+# ---------- client cards for the operator's userbot (inline mode) ----------
 
 async def on_inline_query(update: Update, ctx):
-    """«slots:<token>» from the operator's userbot (settings.userbot_tg_id) -> one personal article: the object, the
-    slots and their buttons (notify.slots_card); the userbot sends it into the client's DM. Anyone else / an unknown
-    token: no results."""
+    """«<kind>:<token>» (slots / remind / survey / reason / t14) from the operator's userbot (settings.userbot_tg_id)
+    -> one personal article: the card's text and buttons (notify.card); the userbot sends it into the client's DM.
+    Anyone else / an unknown token: no results."""
     iq = update.inline_query
-    m = re.fullmatch(r"slots:([\w-]{6,32})", (iq.query or "").strip())
+    m = re.fullmatch(r"(\w+):([\w-]{6,32})", (iq.query or "").strip())
     card = None
     if m and str(iq.from_user.id) == (await th(store.setting, "userbot_tg_id") or ""):
-        card = await th(notify.slots_card, m[1])
+        card = await th(notify.card, m[1], m[2])
     results = []
     if card:
         title, text, rows = card
-        results = [InlineQueryResultArticle(m[1], title, InputTextMessageContent(text, parse_mode="HTML",
+        results = [InlineQueryResultArticle(m[2], title, InputTextMessageContent(text, parse_mode="HTML",
                                                                                  link_preview_options=LinkPreviewOptions(is_disabled=True)),
                                             reply_markup=markup(rows))]
     else:

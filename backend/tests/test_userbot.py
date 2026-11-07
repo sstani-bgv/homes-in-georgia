@@ -84,17 +84,18 @@ def test_numbered_slot_choice_and_own_time(db, sent, monkeypatch):
     slots = [s.id for s in db.query(LeadSlot).filter_by(lead_id=lead.id).order_by(LeadSlot.starts_at)]
     fake = FakeTelethon()                                # not cached: falls back to the @username
     mid = asyncio.run(userbot.send(fake, cl.id, "Выберите время", ["Завтра 12:00", "Завтра 15:00"],
-                                   {"lead": lead.id, "slots": slots}))
+                                   {"lead": lead.id, "kind": "slots", "options": [f"ls:pick:{x}" for x in slots]}))
     assert mid == 1 and fake.sent[0][0] == "anna_demo"
     assert "1. Завтра 12:00\n2. Завтра 15:00" in fake.sent[0][1] and "Ответьте цифрой" in fake.sent[0][1]
-    assert state(db, cl.id)["dm_choice"]["slots"] == slots
+    assert state(db, cl.id)["dm_choice"]["options"] == [f"ls:pick:{x}" for x in slots]
     assert userbot.on_incoming(5550001, None, "А с собакой можно?") == "logged"   # not a number, not a time: a message
     assert userbot.on_incoming(5550001, None, "завтра после 18") == "own_time"
     db.expire_all()
     assert db.get(Lead, lead.id).client_note == "завтра после 18"
     leads.add_slots(db, lead.id, [at, at + timedelta(hours=3)], ag)
     slots = [s.id for s in db.query(LeadSlot).filter_by(lead_id=lead.id).order_by(LeadSlot.starts_at)]
-    asyncio.run(userbot.send(FakeTelethon(cached={5550001}), cl.id, "Выберите", ["a", "b"], {"lead": lead.id, "slots": slots}))
+    asyncio.run(userbot.send(FakeTelethon(cached={5550001}), cl.id, "Выберите", ["a", "b"],
+                             {"lead": lead.id, "kind": "slots", "options": [f"ls:pick:{x}" for x in slots]}))
     assert userbot.on_incoming(5550001, None, "2.") == "slot"
     db.expire_all()
     assert db.get(Lead, lead.id).status == "time_chosen" and db.get(LeadSlot, slots[1]).chosen
@@ -108,7 +109,7 @@ def test_slot_card_goes_as_the_bots_inline_result(db, sent, monkeypatch):
     monkeypatch.setenv("BOT_USERNAME", "@homes_test_bot")
     cl = make_client(db)
     fake = FakeTelethon(cached={5550001})
-    choice = {"lead": 1, "slots": [7, 8]}
+    choice = {"lead": 1, "kind": "slots", "options": ["ls:pick:7", "ls:pick:8"]}
     mid = asyncio.run(userbot.send(fake, cl.id, "Выберите время", ["a", "b"], choice, inline="slots:AbC123xyz"))
     assert (mid, fake.queries, fake.clicked, fake.sent) == (101, [("homes_test_bot", "slots:AbC123xyz")], [5550001], [])
     assert state(db, cl.id)["dm_choice"] == choice                 # a «1»/«2» typed reply still works
@@ -166,10 +167,21 @@ def test_one_bot_and_the_dm_handoff(db, monkeypatch):
     assert not hasattr(notify, "client_message") and not hasattr(notify, "lead_client_reply")
 
 
-def test_slots_go_to_the_userbot_as_an_inline_query(db, monkeypatch):
-    """add_slots -> a fresh leads.slots_token -> POST USERBOT_URL/send {inline: "slots:<token>", the numbered fallback};
-    nothing to the client through the bot. notify.slots_card(token) is what the bot answers that inline query with."""
+def fake_userbot(monkeypatch, posts):
     import httpx
+    monkeypatch.setenv("USERBOT_URL", "http://userbot:8091/")
+    monkeypatch.setattr(httpx, "post", lambda url, json=None, headers=None, timeout=None: posts.append((url, json, headers))
+                        or type("R", (), {"status_code": 200, "json": lambda self: {"ok": True, "message_id": 9}})())
+
+
+def token_of(body):
+    kind, token = body["inline"].split(":")
+    return kind, token
+
+
+def test_slots_go_to_the_userbot_as_an_inline_query(db, monkeypatch):
+    """add_slots -> a fresh inline_cards token -> POST USERBOT_URL/send {inline: "slots:<token>", the numbered
+    fallback}; nothing to the client through the bot. notify.card(kind, token) is what the bot answers it with."""
     from app.telegram import client as tg
     op, ag, cl = make_user(db, "operator"), make_user(db, "agent"), make_client(db)
     lead = leads.create_from_like(db, cl.id, make_listing(db).id)              # (notify stubbed by `sent`)
@@ -177,28 +189,86 @@ def test_slots_go_to_the_userbot_as_an_inline_query(db, monkeypatch):
     monkeypatch.undo()                                                         # the real notify.slots_to_client
     http, posts = FakeHttp(), []
     monkeypatch.setattr(tg, "_client", lambda: http)
-    monkeypatch.setenv("USERBOT_URL", "http://userbot:8091/")
-    monkeypatch.setattr(httpx, "post", lambda url, json=None, headers=None, timeout=None: posts.append((url, json, headers))
-                        or type("R", (), {"status_code": 200, "json": lambda self: {"ok": True, "message_id": 9}})())
+    fake_userbot(monkeypatch, posts)
     at = datetime(2031, 3, 4, 12, tzinfo=timezone.utc)
     leads.add_slots(db, lead.id, [at, at + timedelta(hours=2)], ag)
-    db.expire_all()
-    token = db.get(Lead, lead.id).slots_token
     slots = [s.id for s in db.query(LeadSlot).filter_by(lead_id=lead.id).order_by(LeadSlot.starts_at)]
     url, body, headers = posts[0]
+    kind, token = token_of(body)
     assert url == "http://userbot:8091/send" and headers == {"X-Userbot-Token": "test-secret-key-that-is-long-enough-for-hs256-ok"}
-    assert token and body["inline"] == f"slots:{token}" and body["client_id"] == cl.id
-    assert body["choice"] == {"lead": lead.id, "slots": slots} and len(body["options"]) == 2
+    assert kind == "slots" and len(token) >= 6 and body["client_id"] == cl.id
+    assert body["choice"] == {"lead": lead.id, "kind": "slots", "options": [f"ls:pick:{x}" for x in slots]} and len(body["options"]) == 2
     assert "Выберите удобное время:" in body["text"] and "<b>" not in body["text"]
     assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]     # nothing to the client through the bot
-    title, text, rows = notify.slots_card(token)
+    title, text, rows = notify.card("slots", token)
     assert "Ваке" in title and "<b>Выберите удобное время:</b>" in text
     assert [b["callback_data"] for r in rows for b in r if "callback_data" in b] == [f"ls:pick:{slots[0]}", f"ls:pick:{slots[1]}",
                                                                                     f"ls:own:{lead.id}"]
     assert rows[-1][0]["text"] == "🕐 Другое время"
-    assert notify.slots_card("nope-token") is None
+    assert notify.card("slots", "nope-token") is None and notify.card("survey", token) is None
     leads.add_slots(db, lead.id, [at + timedelta(days=1)], ag)                 # a new slot set: a new token, the old one is dead
-    assert notify.slots_card(token) is None
+    assert notify.card("slots", token) is None and notify.card("slots", token_of(posts[-1][1])[1])
+
+
+def test_viewing_cards_and_answers_from_the_dm(db, monkeypatch):
+    """Reminder, survey, refusal reason and T14 go as inline cards from the operator's account; a numbered reply in the
+    DM does what the button does (leads.client_action); «Другое» -> the client's comment; «3 2 3» -> T14 scores."""
+    from app.models import Deal, Evaluation, Event
+    from app.telegram import client as tg
+    op, ag, cl = make_user(db, "operator"), make_user(db, "agent", username="geo"), make_client(db)
+    lead = leads.create_from_like(db, cl.id, make_listing(db).id)
+    leads.assign_agent(db, lead.id, ag.id, op)
+    at = datetime.now(timezone.utc) + timedelta(days=2)
+    leads.add_slots(db, lead.id, [at], ag)
+    leads.choose_slot(db, db.query(LeadSlot).filter_by(lead_id=lead.id).one().id, cl.id)
+    monkeypatch.undo()
+    http, posts = FakeHttp(), []
+    monkeypatch.setattr(tg, "_client", lambda: http)
+    fake_userbot(monkeypatch, posts)
+    notify.viewing_reminder(db.get(Lead, lead.id))
+    kind, token = token_of(posts[-1][1])
+    title, text, rows = notify.card(kind, token)
+    assert kind == "remind" and "Через час просмотр" in title
+    assert [b["callback_data"] for r in rows for b in r] == [f"lv:ok:{lead.id}", f"lv:late:{lead.id}", f"lv:resched:{lead.id}"]
+    assert posts[-1][1]["choice"]["options"] == [f"lv:ok:{lead.id}", f"lv:late:{lead.id}", f"lv:resched:{lead.id}"]
+    userbot.set_state(cl.id, dm_choice=posts[-1][1]["choice"])                 # what the userbot keeps after sending
+    assert userbot.on_incoming(5550001, None, "2") == "choice"                  # «2. ⏰ Опаздываю»
+    assert events(db, lead.id, "client_late") == ["Клиент опаздывает"]
+    with pytest.raises(DomainError):
+        leads.client_action(db, f"lv:ok:{lead.id}", make_client(db, external_id=5550009).id)   # not their lead
+
+    leads.mark_viewing_done(db, lead.id)                                       # -> the survey card
+    body = posts[-1][1]
+    assert token_of(body)[0] == "survey" and body["options"] == ["Снимаю ✅", "Не подошло ❌", "Думаю 🤔"]
+    userbot.set_state(cl.id, dm_choice=body["choice"])
+    assert userbot.on_incoming(5550001, None, "2") == "choice"                  # refused -> the reason card
+    body = posts[-1][1]
+    assert token_of(body)[0] == "reason" and body["choice"]["options"][-1] == f"lr:{lead.id}:other"
+    assert leads.client_action(db, f"lr:{lead.id}:other", cl.id).refusal_reason == "other"
+    userbot.set_state(cl.id, dm_choice={"lead": lead.id, "comment": True})     # the bot after «Другое»
+    assert userbot.on_incoming(5550001, None, "Слишком шумно") == "comment"
+    assert events(db, lead.id, "client_comment") == ["Слишком шумно"]
+
+    deal = Deal(lead_id=lead.id, agent_id=ag.id, price=850, status="confirmed")
+    db.add(deal)
+    db.commit()
+    notify.t14_client(deal)
+    body = posts[-1][1]
+    kind, token = token_of(body)
+    title, text, rows = notify.card(kind, token)
+    assert kind == "t14" and [b["callback_data"] for b in rows[0]] == [f"t14:{deal.id}:1:{n}" for n in range(4)]
+    assert "3 2 3" in body["text"] and body["choice"] == {"lead": lead.id, "kind": "t14", "deal": deal.id}
+    userbot.set_state(cl.id, dm_choice=body["choice"])
+    assert userbot.on_incoming(5550001, None, "3, 2, 1") == "t14"
+    ev = db.query(Evaluation).filter_by(deal_id=deal.id, author="client").one()
+    assert (ev.h2o_client, ev.h2o_owner, ev.h2o_process) == (3, 2, 1)
+    assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]     # nothing to the client through the bot
+
+    monkeypatch.delenv("USERBOT_URL")                                          # the userbot is down: an event in the history
+    notify.refusal_reason_ask(db.get(Lead, lead.id))
+    db.expire_all()
+    ev = db.query(Event).filter_by(entity="lead", entity_id=str(lead.id), action="client_card_not_delivered").one()
+    assert ev.data["note"] == "вопрос о причине отказа: Userbot оператора не подключён"
 
 
 def test_slots_without_the_userbot_are_an_error_for_the_agent(db, monkeypatch):
@@ -215,7 +285,7 @@ def test_slots_without_the_userbot_are_an_error_for_the_agent(db, monkeypatch):
     assert (ex.value.code, ex.value.status, ex.value.message) == ("userbot_off", 503, "Userbot оператора не подключён")
     db.expire_all()
     ld = db.get(Lead, lead.id)
-    assert (ld.status, ld.slots_token, ld.sla_stage) == ("agent_assigned", None, "agent_slots")
+    assert (ld.status, ld.sla_stage) == ("agent_assigned", "agent_slots")
     assert db.query(LeadSlot).filter_by(lead_id=lead.id).count() == 0
     assert events(db, lead.id, "slots_not_delivered") == ["Userbot оператора не подключён"]
     assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]

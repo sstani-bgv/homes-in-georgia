@@ -131,11 +131,12 @@ class FakeTelegram:
         return imid
 
     def press_inline(self, u, out, button_text):
-        """Press a button of an inline message (a viaBot log entry): the callback has inline_message_id and no message."""
+        """Press a button of an inline message (a viaBot log entry, or the bot's later edit of it): the callback has
+        inline_message_id and no message."""
         data = next(b["callback_data"] for row in self.markup(out) for b in row if b["text"] == button_text)
         cq = {"id": str(next(self.seq) * 1000), "from": self.user(u), "inline_message_id": out["inline_message_id"],
               "chat_instance": "dm", "data": data}
-        self.push("press", {"callback_query": cq}, {"chat": out["chat"], "from": u["name"], "button": button_text, "cq": cq["id"]})
+        self.push("press", {"callback_query": cq}, {"chat": out.get("chat"), "from": u["name"], "button": button_text, "cq": cq["id"]})
 
     def userbot_text(self, chat, text):
         """A plain message the operator's account (userbot) sent into `chat`."""

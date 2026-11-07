@@ -315,7 +315,7 @@ class JourneyE2E(unittest.TestCase):
         self.assertIn(times[0], labels)
         self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing from the bot itself
         with db.tx() as c:
-            token = c.execute("SELECT slots_token FROM leads WHERE id = 1").fetchone()[0]
+            token = c.execute("SELECT token FROM inline_cards WHERE kind = 'slots' AND ref = '1'").fetchone()[0]
         for who in (CLIENT, AGENT):                                              # only the operator's account resolves the token
             mark = f.mark()
             qid = f.inline_query(who, f"slots:{token}")
@@ -332,7 +332,7 @@ class JourneyE2E(unittest.TestCase):
         ans, ed = self.press_inline(CLIENT, slots, times[0])                     # A4b
         self.assertEqual(ans.get("text"), "✅")
         self.assertEqual(ed["text"], f"✅ Вы выбрали: {times[0]}")
-        self.assertNotIn("reply_markup", ed)                                     # the slot buttons are gone
+        self.assertEqual([b["text"] for row in f.markup(ed) for b in row], ["⏰ Опаздываю", "🔁 Перенести"])   # instead of the slots
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "time_chosen")
         conf = self.find(cid, lambda c: c["method"] == "userbotText" and "✅ Просмотр:" in c["text"], m, "details from the operator")
@@ -347,20 +347,29 @@ class JourneyE2E(unittest.TestCase):
             hist = [r[0] for r in c.execute("SELECT kind FROM lead_events WHERE lead_id = 1 ORDER BY id")]
         self.assertIn("time_chosen", hist)                                       # the CRM history shows the client's choice
 
-        from app.telegram import notify, store
+        from app.telegram import notify, store, userbot
         m = f.mark()
         notify.viewing_reminder(store.lead(1))                                   # the worker's job an hour before
-        m = self.press(CLIENT, cid, "⏰ Опаздываю", since=m)
+        remind = self.inline_card(cid, m, "reminder card")                       # from the operator's account too
+        self.assertIn("Через час просмотр", remind["text"])
+        self.with_text(AGENT["id"], "⏰ Через час просмотр #1", m)               # the agent: from the bot
+        m = f.mark()
+        ans, _ = self.press_inline(CLIENT, remind, "⏰ Опаздываю")
+        self.assertIn("опаздываете", ans["text"])
         self.with_text(AGENT["id"], "опаздывает на просмотр #1", m)
+        time.sleep(0.5)
+        self.assertEqual(len([c for c in f.calls(chat=AGENT["id"], since=m) if "опаздывает" in (c.get("text") or "")]), 1)
 
         from app.services import deals, leads
         m = f.mark()
         self.svc(leads.mark_viewing_done, 1)                                     # what the worker does after the viewing
-        self.with_text(cid, "как прошёл просмотр квартиры", m)                   # A5a
+        card = self.inline_card(cid, m, "survey card")                           # A5a
+        self.assertIn("как прошёл просмотр квартиры", card["text"])
         self.with_text(AGENT["id"], "Как прошёл просмотр #1?", m)                # C9a
         survey = m
-        m = self.press(CLIENT, cid, "Снимаю ✅", since=survey)
-        self.with_text(cid, "Отлично, поздравляем", m)
+        _, ed = self.press_inline(CLIENT, card, "Снимаю ✅")
+        self.assertIn("✓ Снимаю ✅", ed["text"])
+        self.assertIn("Отлично, поздравляем", ed["text"])
         m = self.press(AGENT, AGENT["id"], "Сдано ✅", since=survey)
         form = self.with_text(AGENT["id"], "Заполните сделку", m)
         self.assertEqual(f.markup(form)[0][0]["web_app"]["url"], "https://crm.e2e.test/m/deals/new?lead=1")
@@ -378,22 +387,27 @@ class JourneyE2E(unittest.TestCase):
 
         m = f.mark()
         notify.t14_client(deal)                                                  # the worker's t14_client job
-        self.with_text(cid, "вы живёте в новой квартире 14 дней", m)             # A6
-        m = self.press(CLIENT, cid, "3", since=m)
-        m = self.press(CLIENT, cid, "2", since=m)
-        m = self.press(CLIENT, cid, "1", since=m)
-        self.with_button(cid, "✍️ Есть проблема", m)
+        card = self.inline_card(cid, m, "T14 card")                              # A6: one card, edited per question
+        self.assertIn("вы живёте в новой квартире 14 дней", card["text"])
+        _, ed = self.press_inline(CLIENT, card, "3")
+        self.assertIn("<b>2.</b>", ed["text"])
+        _, ed = self.press_inline(CLIENT, ed, "2")
+        m = f.mark()
+        _, ed = self.press_inline(CLIENT, ed, "1")
+        self.assertIn("Спасибо", ed["text"])
         self.with_text(GROUP["id"], f"Сигнал по сделке #{deal.id}", m)           # low score → operators
-        m = self.press(CLIENT, cid, "✍️ Есть проблема", since=m)
-        m = self.say(CLIENT, "Не работает бойлер")
-        self.with_text(cid, "Передал оператору", m)
+        _, ed = self.press_inline(CLIENT, ed, "✍️ Есть проблема")
+        self.assertIn("Опишите, пожалуйста, проблему", ed["text"])
+        self.assertEqual(userbot.on_incoming(cid, "anna_e2e", "Не работает бойлер"), "problem")   # written in the operator's DM
         with db.tx() as c:
             evs = c.execute("SELECT author, h2o_client, h2o_owner, h2o_process, complaints, complaints_text FROM evaluations "
                             "WHERE deal_id = ? ORDER BY id", (deal.id,)).fetchall()
             self.assertEqual([tuple(r) for r in evs], [("client", 3, 2, 1, False, None), ("client", None, None, None, True, "Не работает бойлер")])
             self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "rented")
             kinds = {r[0] for r in c.execute("SELECT DISTINCT kind FROM messages")}
-        self.assertTrue({"card", "group_lead", "agent_lead", "survey_client", "survey_agent"} <= kinds, kinds)
+        self.assertTrue({"card", "group_lead", "agent_lead", "survey_agent"} <= kinds, kinds)
+        self.assertFalse([c for c in f.calls(chat=cid) if c["method"].startswith("send") and any(  # the bot: listings only
+            (b.get("callback_data") or "").startswith(("ls:", "lv:", "lo:", "lr:", "t14:")) for row in f.markup(c) for b in row)])
         self.assertFalse([b for c in f.calls(chat=cid) for row in f.markup(c) for b in row         # no «Ответить» to the client
                           if b["text"] == "💬 Ответить" or (b.get("callback_data") or "").startswith("lm:")])
 
@@ -467,6 +481,39 @@ class JourneyE2E(unittest.TestCase):
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, client_note FROM leads WHERE id = ?", (lead.id,)).fetchone()[:],
                              ("slots_sent", "Saturday after 3 pm"))
+
+    def test_refusal_reason_and_comment(self):
+        """«Не подошло» on the survey card -> the reason card from the operator's account -> «Другое»: the client's
+        words come as a DM (userbot: client_comment); «🔄 Да, подобрать» on that card searches in the bot."""
+        from app.services import leads
+        from app.telegram import userbot
+        f, u = self.fake, {"id": 1030, "name": "Ира", "username": "ira_e2e", "lang": "ru"}
+        cl = core.client("tg", u["id"], chat_id=u["id"], username="ira_e2e", name="Ира", lang_hint="ru")
+        lead = self.svc(leads.create_from_like, cl["id"], "tg2")
+        self.svc(lambda s: leads.assign_agent(s, lead.id, self.user(s, AGENT["id"]).id, self.user(s, OPERATOR["id"])))
+        from datetime import datetime, timezone
+        self.svc(lambda s: leads.add_slots(s, lead.id, [datetime.now(timezone.utc) + timedelta(days=1)], self.user(s, AGENT["id"])))
+        with db.tx() as c:
+            slot = c.execute("SELECT id FROM lead_slots WHERE lead_id = ?", (lead.id,)).fetchone()[0]
+        self.svc(leads.choose_slot, slot, cl["id"])
+        m = f.mark()
+        self.svc(leads.mark_viewing_done, lead.id)
+        survey = self.inline_card(u["id"], m, "survey card")
+        m = f.mark()
+        _, ed = self.press_inline(u, survey, "Не подошло ❌")
+        self.assertIn("✓ Не подошло ❌", ed["text"])
+        reason = self.inline_card(u["id"], m, "reason card")
+        self.assertIn("Что не подошло?", reason["text"])
+        _, ed = self.press_inline(u, reason, "Другое")
+        self.assertIn("напишите ответным сообщением, что не подошло", ed["text"])
+        self.assertEqual(userbot.on_incoming(u["id"], "ira_e2e", "Слишком шумная улица"), "comment")
+        with db.tx() as c:
+            self.assertEqual(c.execute("SELECT status, refusal_reason FROM leads WHERE id = ?", (lead.id,)).fetchone()[:], ("refused", "other"))
+            self.assertEqual(c.execute("SELECT note FROM lead_events WHERE lead_id = ? AND kind = 'client_comment'", (lead.id,)).fetchone()[0],
+                             "Слишком шумная улица")
+        m = f.mark()
+        self.press_inline(u, ed, "🔄 Да, подобрать")
+        self.with_text(u["id"], "Смотрю варианты", m)                            # listings: from the bot, as always
 
     def test_client_text_refines_the_request(self):
         """Operators talk to clients in their own DMs: the bot has no «Ответить» flow; a client's message is always a
