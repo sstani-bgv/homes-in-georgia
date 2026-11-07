@@ -285,11 +285,13 @@ def serve_http(client, loop, port):
     return srv
 
 
-async def run():
+async def run(client=None):
+    """client: an already connected Telethon client (a local stand passes its own session); else OPERATOR_USERBOT_SESSION."""
     from telethon import TelegramClient, events
     from telethon.sessions import StringSession
-    client = TelegramClient(StringSession(conf("OPERATOR_USERBOT_SESSION").strip()), int(conf("API_ID")), conf("API_HASH"))
-    await client.connect()
+    if client is None:
+        client = TelegramClient(StringSession(conf("OPERATOR_USERBOT_SESSION").strip()), int(conf("API_ID")), conf("API_HASH"))
+        await client.connect()
     if not await client.is_user_authorized():  # never an interactive login on the server
         raise SystemExit("userbot: OPERATOR_USERBOT_SESSION is not a valid login; the operator must create a new one")
     me = await client.get_me()
