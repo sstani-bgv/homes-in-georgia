@@ -800,22 +800,28 @@ def funnel2():
         S["m_like"] = f.mark()
         s.chat("A2b_cards.png", cid, since=m)
 
-    with Step("A3", "❤️ Нравится → то же сообщение меняется («✅ Передано оператору · 30 минут», «❤️ В избранном»), создана заявка") as s:
+    with Step("A3", "❤️ Нравится (клиент ещё не писал оператору) → личка оператора с готовым сообщением; заявка, когда оно пришло; "
+                    "карточка отмечает «❤️ Нравится ✅»") as s:
+        from urllib.parse import unquote
+        from app.telegram import userbot
+
+        def like_dm(card):  # the client taps the ❤️ link and sends the prefilled message; the userbot sees it
+            url = next(b["url"] for b in buttons(card) if b["text"] == "❤️ Нравится")
+            return url, userbot.on_incoming(CLIENT["id"], CLIENT["username"], unquote(url.split("text=", 1)[1]))
         m = S["m_like"]
-        f.press(CLIENT, S["card1"], "❤️ Нравится")
+        url, res = like_dm(S["card1"])
+        s.ok(url.startswith("https://t.me/") and "?text=" in url and res == "liked", "❤️ = ссылка в личку оператора, заявка из первого сообщения")
         grp = with_text(GROUP["id"], "🆕 <b>Заявка #", m)
         S["lead1"] = lead1 = int(re.search(r"Заявка #(\d+)", grp["text"])[1])
-        ack = find(cid, lambda c: c["method"] == "editMessageText" and "✅ Передано оператору" in c["text"], m, "A3 edit")
-        # the second card: liked too (it becomes lead 2 → B2/B3 in the CRM, B4, A5b)
+        ack = find(cid, lambda c: c["method"] == "editMessageReplyMarkup" and c.get("message_id") == S["card1"]["message_id"], m, "A3 mark")
+        # the second card (sent before the client wrote, so a link too): liked as well (lead 2 → B2/B3 in the CRM, B4, A5b)
         S["m_like2"] = m2 = f.mark()
         card2 = find(cid, lambda c: any("ss9104" in (b.get("callback_data") or "") for b in buttons(c))
                      and any(b["text"] == "❤️ Нравится" for b in buttons(c)), S["m_search"], "card ss9104")
-        f.press(CLIENT, card2, "❤️ Нравится")
+        like_dm(card2)
         g2 = find(GROUP["id"], lambda c: "Заявка #" in (c.get("text") or "") and "Пекини" in (c.get("text") or ""), m2, "lead 2")
         S["lead2"] = int(re.search(r"Заявка #(\d+)", g2["text"])[1])
-        s.eq(ack["message_id"], S["card1"]["message_id"], "изменилось то же сообщение")
-        s.ok("в течение 30 минут" in ack["text"], "обещание «ответим в течение 30 минут»")
-        s.eq(f.markup(ack)[0][0]["text"], "❤️ В избранном", "кнопка")
+        s.eq(f.markup(ack)[0][0]["text"], "❤️ Нравится ✅", "кнопка")
         r = lead_row(lead1)
         s.eq((r[0], r[1], r[8]), ("new", "operator_take", S.get("p1")), "заявка: статус, таймер 5 мин, связана с объектом воронки 1")
         s.chat("A3_like.png", cid, since=S["m_search"])

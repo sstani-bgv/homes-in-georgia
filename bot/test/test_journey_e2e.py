@@ -1,6 +1,6 @@
 """End-to-end client journey (docs/user-journey.txt, funnel 2) through the real bot application and the real backend
 services against the fake Bot API (test/e2e/fake_tg.py) and the test Postgres schema; LLM and geocoding are stubbed:
-/start → questionnaire (A1a-A2a) → search → ❤️ (A3 + DM handoff) → operators group take + assign (B1/B3) → agent quick
+/start → questionnaire (A1a-A2a) → search → ❤️ (A3: the operator DM link, the lead from that DM) → operators group take + assign (B1/B3) → agent quick
 slots (C6/C7) → the operator's userbot sends the bot's inline slot card into the client's DM (A4a) → the client presses a
 slot on that inline message (A4b, edited «✅ Вы выбрали») → contacts to the agent (C8), details as the operator's DM →
 late → survey (A5a/C9a) → deal confirmed (C9c) → T14 (A6). The userbot is the real app.telegram.userbot HTTP endpoint
@@ -264,22 +264,28 @@ class JourneyE2E(unittest.TestCase):
         self.assertTrue(views and len(views) == views[0][2], views)
         self.assertEqual([r[0] for r in saved], ["900"])
 
+        # A3, a client who never contacted the operator: ❤️ opens the operator's DM with the first message (no bot message);
+        # the lead comes when that DM reaches the operator's account (the userbot)
+        like = next(b for row in f.markup(card) for b in row if b["text"] == "❤️ Нравится")
+        lid = next(b["callback_data"][3:] for row in f.markup(card) for b in row if (b.get("callback_data") or "").startswith("no:"))
+        self.assertNotIn("callback_data", like)
+        with db.tx() as c:
+            obj, district, price = c.execute("SELECT COALESCE((SELECT p.id::text FROM properties p WHERE p.listing_id = s.id ORDER BY p.id "
+                                             "LIMIT 1), s.id), s.district, s.price_usd FROM listings s WHERE s.id = ?", (lid,)).fetchone()[:]
+        from urllib.parse import quote, unquote
+        first_dm = f"Здравствуйте! Мне нравится вариант #{obj} · {district}, ул. Каштановая, 12 · ${price:g}"
+        self.assertEqual(like["url"], "https://t.me/nino_e2e?text=" + quote(first_dm))
+        from app.telegram import userbot
         m = self.fake.mark()
-        f.press(CLIENT, card, "❤️ Нравится")                           # A3
+        self.assertEqual(userbot.on_incoming(cid, "anna_e2e", unquote(like["url"].split("text=", 1)[1])), "liked")
         grp = self.with_text(GROUP["id"], "Заявка #1", m)              # B1
         self.assertIn("2 человека", grp["text"])
-        ack = self.find(cid, lambda c: c["method"] == "editMessageText" and "✅ Передано оператору" in c["text"], m, "A3 edit")
-        self.assertEqual(ack["message_id"], card["message_id"])       # the same card changed
-        self.assertEqual(self.fake.markup(ack)[0][0]["text"], "❤️ В избранном")
-        hand = self.with_button(cid, "💬 Написать оператору", m)       # DM handoff: prefilled first message to the operator
+        ack = self.find(cid, lambda c: c["method"] == "editMessageReplyMarkup" and c.get("message_id") == card["message_id"], m, "A3 mark")
+        self.assertEqual(self.fake.markup(ack)[0][0]["text"], "❤️ Нравится ✅")   # the same card marks the like
+        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing else to the client
         with db.tx() as c:
-            obj, district, price = c.execute("SELECT COALESCE(l.property_id::text, l.listing_id), s.district, s.price_usd FROM leads l "
-                                             "JOIN listings s ON s.id = l.listing_id WHERE l.id = 1").fetchone()[:]
-        from urllib.parse import quote
-        urls = [b["url"] for row in f.markup(hand) for b in row]
-        self.assertEqual(urls[0], "https://t.me/nino_e2e?text=" + quote(f"Здравствуйте! Меня интересует объект #{obj} "
-                                                                         f"{district}, ул. Каштановая, 12 · ${price:g} (заявка #1)"))
-        self.assertTrue(urls[1].startswith("https://t.me/") and urls[1] != urls[0])   # «↩️ Вернуться в бот»
+            self.assertEqual([tuple(r) for r in c.execute("SELECT kind, note FROM lead_events WHERE lead_id = 1 AND kind = "
+                                                          "'message_from_client'")], [("message_from_client", first_dm)])
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, sla_stage FROM leads WHERE id = 1").fetchone()[:], ("new", "operator_take"))
 
@@ -336,8 +342,9 @@ class JourneyE2E(unittest.TestCase):
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "time_chosen")
         conf = self.find(cid, lambda c: c["method"] == "userbotText" and "✅ Просмотр:" in c["text"], m, "details from the operator")
-        for want in ("Ваш агент: Георгий", "+995 555 000 588", "https://t.me/georgiy_e2e", "ул. Каштановая, 12"):
+        for want in ("Ваш агент: Георгий", "💬 https://t.me/georgiy_e2e", "ул. Каштановая, 12"):   # his t.me: the contact
             self.assertIn(want, conf["text"])
+        self.assertNotIn("календар", conf["text"])
         contacts = self.with_text(AGENT["id"], "🔓 <b>Контакты клиента</b>", m)   # C8
         self.assertIn("@anna_e2e", contacts["text"])
         picked = self.with_text(OPERATOR["id"], "Клиент выбрал время просмотра · заявка #1", m)   # the operator too
@@ -534,6 +541,16 @@ class JourneyE2E(unittest.TestCase):
         self.find(u["id"], lambda c: c is not noted and any(b.get("callback_data") == "more" for row in f.markup(c) for b in row)
                   and "Учёл" not in (c.get("text") or ""), mark, "search after «Ещё»")
         self.assertGreater(len(self.prompts), before)
+        card = self.find(u["id"], lambda c: any(b["text"] == "❤️ Нравится" and (b.get("callback_data") or "").startswith("like:")
+                                                and b["callback_data"] != "like:tg1" for row in f.markup(c) for b in row), mark, "❤️ as the callback: Лера has a lead")
+        like = next(b["callback_data"] for row in f.markup(card) for b in row if b["text"] == "❤️ Нравится")
+        m = self.press(u, u["id"], "❤️ Нравится", since=mark)
+        ack = self.find(u["id"], lambda c: c["method"] == "editMessageReplyMarkup" and c.get("message_id") == card["message_id"], m)
+        self.assertEqual(f.markup(ack)[0][0]["text"], "❤️ Нравится ✅")
+        time.sleep(0.5)
+        self.assertFalse([c for c in f.calls(chat=u["id"], since=m) if c["method"].startswith("send")])   # no redirect, no message
+        with db.tx() as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM leads WHERE client_id = ? AND listing_id = ?", (cl["id"], like[5:])).fetchone()[0], 1)
         db.set_setting("auto_push_variants", "1")                     # the old behaviour: a message searches at once
         try:
             before, mark = len(self.prompts), self.say(u, "Ищу квартиру до 1000")
@@ -550,7 +567,8 @@ class JourneyE2E(unittest.TestCase):
         time.sleep(0.5)
         self.assertFalse([c for c in f.calls(chat=u["id"], since=mark) if c["method"].startswith("send")])
         with db.tx() as c:
-            self.assertEqual(c.execute("SELECT count(*) FROM lead_events WHERE kind = 'message_from_client'").fetchone()[0], 0)
+            self.assertEqual(c.execute("SELECT count(*) FROM lead_events e JOIN leads l ON l.id = e.lead_id WHERE e.kind = "
+                                       "'message_from_client' AND l.client_id = ?", (cl["id"],)).fetchone()[0], 0)
 
     def test_z_staff_robustness(self):
         """An operator added in the CRM by @username takes a lead from the group; «📤 Отправить» tapped twice sends the

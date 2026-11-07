@@ -1,13 +1,14 @@
-"""Operator userbot: the operator's own Telegram account (Telethon). After ❤️ the dialogue lives in the operator's DMs
-(notify.handoff gives the client a t.me/<operator>?text=… button; the client sends the first message); the operator
-talks to clients there, and the CRM keeps the history. Enabled only when OPERATOR_USERBOT_SESSION (a Telethon
+"""Operator userbot: the operator's own Telegram account (Telethon). The dialogue lives in the operator's DMs: a client
+who never contacted the operator gets ❤️ as a t.me/<operator>?text=«…вариант #<obj> · …» link (notify.like_button), and
+that first DM makes the lead here; the operator talks to clients there, and the CRM keeps the history. Enabled only when OPERATOR_USERBOT_SESSION (a Telethon
 StringSession) + API_ID + API_HASH are set.
 
 Run: `cd backend && python -m app.telegram.userbot` (compose: the commented `userbot` service). One process owns the
 session (two clients on one session get it revoked), so the CRM/bot reach it over HTTP: USERBOT_URL (e.g.
 http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id, text, options?, choice?, inline?}.
 
-- incoming private message -> the client (clients.external_id = sender id, else the @username) and its latest open lead
+- incoming «…вариант #<obj>…» (LIKE_CODE) -> leads.create_from_like for that object + message_from_client in it;
+- any other incoming private message -> the client (clients.external_id = sender id, else the @username) and its latest open lead
   -> lead event message_from_client (via dm);
 - the operator's own messages to a client typed in Telegram -> message_to_client (via dm);
 - client cards (notify.client_card: slots, viewing reminder, survey, refusal reason, T14): a user account can't attach
@@ -49,6 +50,8 @@ TIME_PICK_HINT = {"ru": "Ответьте цифрой варианта или �
 T14_SCORES = re.compile(r"\s*([0-3])\D{1,3}([0-3])\D{1,3}([0-3])\s*")
 SENT = set()  # (peer id, text) sent by send(): the outgoing-message handler must not log them twice
 # a reply that reads as a time («завтра после 18», «15:30», «tomorrow 6 pm») while slots wait = the client's own time
+# the object code in notify.LIKE_DM («вариант #12 · …»): a property id, else a listing id
+LIKE_CODE = re.compile(r"(?:вариант|option|ვარიანტი) #([\w-]+)", re.I)
 TIME_HINT = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*(?:ч|h|am|pm)\b|после|after|завтра|сегодня|tomorrow|today|ხვალ|დღეს|შემდეგ", re.I)
 
 
@@ -160,8 +163,21 @@ def dm_answer(cl, choice, text):
     return None
 
 
+def like_dm(cl, text):
+    """The ❤️ link's first message («…вариант #<obj> · …») -> the lead id (create_from_like: the same B1 card, auto-assign
+    and card mark as a ❤️ press), or None (no code / no such object / not available to clients)."""
+    from app.services import leads
+    m = LIKE_CODE.search(text)
+    if not m:
+        return None
+    code = m[1]
+    prop = code.isdigit() and store.q("SELECT listing_id FROM properties WHERE id = %s AND listing_id IS NOT NULL", (int(code),), one=True)
+    lead_id, _ = _svc(lambda s: leads.create_from_like(s, cl["id"], prop["listing_id"] if prop else code).id)
+    return lead_id
+
+
 def on_incoming(tg_id, username, text):
-    """A private message to the operator -> 'unknown' | 'no_lead' | 'logged' | a dm_answer result (tests read it)."""
+    """A private message to the operator -> 'unknown' | 'no_lead' | 'logged' | 'liked' | a dm_answer result (tests read it)."""
     from app.services import leads
     cl = match_client(tg_id, username)
     if not cl or not (text or "").strip():
@@ -170,8 +186,14 @@ def on_incoming(tg_id, username, text):
     if choice and (res := dm_answer(cl, choice, text)):
         set_state(cl["id"], dm_choice=None)
         return res
+    if lead_id := like_dm(cl, text):
+        _, err = _svc(leads.message_from_client, lead_id, cl["id"], text)   # «Клиент написал оператору в личку»
+        return "liked" if not err else err
     lead = open_lead(cl["id"])
-    if not lead:
+    if not lead:  # remembered: this client's ❤️ is a plain callback from now on (notify.knows_operator)
+        store.q("INSERT INTO events (entity, entity_id, action, actor_label, data, at) SELECT 'client', %s, 'dm_to_operator', 'client', "
+                "'{}'::jsonb, now() WHERE NOT EXISTS (SELECT 1 FROM events WHERE entity = 'client' AND entity_id = %s AND "
+                "action = 'dm_to_operator')", (str(cl["id"]), str(cl["id"])))
         return "no_lead"
     _, err = _svc(leads.message_from_client, lead["id"], cl["id"], text)
     return "logged" if not err else err

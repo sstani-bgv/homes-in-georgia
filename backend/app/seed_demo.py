@@ -5,12 +5,15 @@ Logins: david / nino / georgiy (password `demo`)."""
 import sys
 from datetime import date, datetime, timedelta, timezone
 
+from unittest.mock import patch
+
 from sqlalchemy import select, update
 
 from app.db import SessionLocal
 from app.models import Client, Job, Lead, LeadSlot, Listing, Property, TickerMessage, User
 from app.services import deals, evaluations, leads, properties, reports, users
 from app.services.common import jdump, now, now_text
+from app.telegram import notify
 
 PHOTO = "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800"
 LISTINGS = [
@@ -123,7 +126,8 @@ def seed():
             properties.review(db, p.id, nino, False, "Нет фото спальни")
         elif final == "published":
             p = properties.review(db, p.id, nino, True, "Отлично")
-            p.post_url = p.post_url or f"https://t.me/rent_tbilisi_ge/{1000 + p.id}"
+            p.post_url = p.post_url or f"https://t.me/rent_tbilisi_ge/{1000 + p.id}"   # no bot locally: a fake post
+            p.post_message_id = p.post_message_id or str(1000 + p.id)
             p.is_exclusive = lid == "ss5010"
             db.commit()
             pub.append(p)
@@ -145,8 +149,9 @@ def seed():
             return lead
         past = status in ("viewing_done", "thinking", "deal_pending", "rented", "refused")
         base = now() - timedelta(hours=3) if past else now() + timedelta(days=1)
-        leads.add_slots(db, lead.id, [base.replace(minute=0, second=0, microsecond=0),
-                                      (base + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)], agent)
+        with patch.object(notify, "slots_to_client", lambda lead: None):  # demo clients aren't real: no userbot send
+            leads.add_slots(db, lead.id, [base.replace(minute=0, second=0, microsecond=0),
+                                          (base + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)], agent)
         if status == "slots_sent":
             return lead
         slot = db.scalars(select(LeadSlot).where(LeadSlot.lead_id == lead.id).order_by(LeadSlot.starts_at)).first()

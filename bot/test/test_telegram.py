@@ -207,9 +207,10 @@ class NotifyTest(unittest.TestCase):
     def test_client_ack_edits_the_card(self):
         m = self.fake.mark()
         notify.lead_client_ack(self.lead)
-        ed = self.last("editMessageText", 42, m)
-        self.assertEqual((ed["message_id"], ed["text"]), (77, "CARD\n\n✅ Передано оператору · ответим в течение 30 минут"))
-        self.assertEqual(self.buttons(ed), [("❤️ В избранном", "noop"), ("➡️ Следующий вариант", "more"), ("📍 На карте", "https://x")])
+        ed = self.last("editMessageReplyMarkup", 42, m)                  # the card just marks the like: no text, no message
+        self.assertEqual(ed["message_id"], 77)
+        self.assertEqual(self.buttons(ed), [("❤️ Нравится ✅", "noop"), ("➡️ Следующий вариант", "more"), ("📍 На карте", "https://x")])
+        self.assertFalse([c for c in self.fake.calls(since=m) if c["method"] == "sendMessage"])
 
     def test_slots_confirmation_and_survey_en(self):
         with db.tx() as c:

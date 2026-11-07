@@ -1,6 +1,6 @@
 """Every outgoing Telegram message (docs/ARCHITECTURE.md §6). Texts follow the journey screens (docs/user-journey.txt):
 clients in their language (clients.lang: ru/en/ka), staff in Russian, all through the one bot (BOT_TOKEN). To the client
-the bot sends only listing cards (❤️ ack + the DM handoff); viewing time and the visit details come from the operator's
+the bot sends only listing cards (❤️ marks the card); viewing time and the visit details come from the operator's
 own account (userbot). Arguments may be ORM objects or dicts. Message refs go to the `messages` table (kind, ref) so
 cards can be edited later. No function ever raises (failures are logged)."""
 import contextvars
@@ -250,46 +250,31 @@ def lead_assigned_agent(lead):
         store.remember("agent_lead", lid, m["chat"]["id"], m["message_id"])
 
 
-ACK = {"ru": "✅ Передано оператору · ответим в течение {n} минут", "en": "✅ Sent to an operator · we'll reply within {n} minutes",
-       "ka": "✅ გადაეცა ოპერატორს · გიპასუხებთ {n} წუთში"}
-FAV = {"ru": ("❤️ В избранном", "➡️ Следующий вариант"), "en": ("❤️ In favourites", "➡️ Next option"),
-       "ka": ("❤️ რჩეულებშია", "➡️ შემდეგი ვარიანტი")}
+LIKED = {"ru": ("❤️ Нравится ✅", "➡️ Следующий вариант"), "en": ("❤️ I like it ✅", "➡️ Next option"),
+         "ka": ("❤️ მომწონს ✅", "➡️ შემდეგი ვარიანტი")}
 
 
 @safe
 def lead_client_ack(lead):
-    """A3: the same card message changes: text + «✅ Передано оператору…», buttons «❤️ В избранном», «➡️ Следующий вариант»."""
-    cl, i, lang = ctx(lead)
-    ack = ACK[lang].format(n=env_int("CLIENT_PROMISE_MIN", 30))
+    """A3: the card just marks «❤️ Нравится ✅» (+ «➡️ Следующий вариант»), no message: the tapped card, or (a lead
+    made by the userbot from the ❤️ DM) the latest card of that listing."""
+    cl, _, lang = ctx(lead)
     card = (cl.get("state") or {}).get("cards", {}).get(str(g(lead, "listing_id"))) or {}
-    fav, nxt = FAV[lang]
-    markup = kb([[cb(fav, "noop")], [cb(nxt, "more")], *(card.get("rows") or [])])
+    liked, nxt = LIKED[lang]
     refs = store.refs("card", f"{g(lead, 'client_id')}:{g(lead, 'listing_id')}")
     if tapped := tapped_card.get():
         refs = [tuple(tapped)]
-    if refs and card.get("text"):
-        for chat, mid in refs[-1:]:
-            tg.edit(chat, mid, tg.clip(card["text"], 4096 - len(ack) - 2, html=False) + f"\n\n{ack}", markup, html=False)
-    elif chat := chat_of(cl):
-        tg.send(chat, f"{headline(i, lang)}\n\n{ack}" if i else ack, markup, html=False)
-    handoff(lead, cl, i, lang)
+    for chat, mid in refs[-1:]:
+        tg.edit_markup(chat, mid, kb([[cb(liked, "noop")], [cb(nxt, "more")], *(card.get("rows") or [])]))
 
 
-HANDOFF = {  # (text, write button, back button, the prefilled first message)
-    "ru": ("💬 Чтобы договориться о просмотре, напишите оператору: нажмите кнопку ниже и отправьте готовое сообщение.\n\n"
-           "Подбор квартир остаётся здесь, в боте: «↩️ Вернуться в бот».", "💬 Написать оператору", "↩️ Вернуться в бот",
-           "Здравствуйте! Меня интересует объект #{obj} {what} (заявка #{lead})"),
-    "en": ("💬 To arrange a viewing, message the operator: tap the button below and send the ready message.\n\n"
-           "Flat search stays here in the bot: «↩️ Back to the bot».", "💬 Message the operator", "↩️ Back to the bot",
-           "Hello! I'm interested in property #{obj} {what} (request #{lead})"),
-    "ka": ("💬 ნახვის შესათანხმებლად მიწერეთ ოპერატორს: დააჭირეთ ქვემოთ ღილაკს და გაგზავნეთ მზა შეტყობინება.\n\n"
-           "ბინების შერჩევა აქ, ბოტში გრძელდება: „↩️ ბოტში დაბრუნება“.", "💬 ოპერატორისთვის მიწერა", "↩️ ბოტში დაბრუნება",
-           "გამარჯობა! მაინტერესებს ობიექტი #{obj} {what} (განაცხადი #{lead})"),
-}
+# the first message of a client who never wrote to the operator; userbot.LIKE_CODE reads the object code back from it
+LIKE_DM = {"ru": "Здравствуйте! Мне нравится вариант #{obj} · {what}", "en": "Hello! I like option #{obj} · {what}",
+           "ka": "გამარჯობა! მომწონს ვარიანტი #{obj} · {what}"}
 
 
 def operator_username():
-    """Who the client writes to after ❤️: OPERATOR_TG_USERNAME, else the first active operator with a @username."""
+    """Who the client writes to: OPERATOR_TG_USERNAME, else the first active operator with a @username."""
     u = conf("OPERATOR_TG_USERNAME").strip().lstrip("@")
     if not u:
         r = store.q("SELECT username FROM users WHERE is_active AND role = 'operator' AND COALESCE(username, '') != '' ORDER BY id LIMIT 1",
@@ -298,25 +283,24 @@ def operator_username():
     return u or None
 
 
-def handoff_url(lead, i, lang):
-    """t.me/<operator>?text=<the first message>: one tap opens the operator's chat with it, the client presses send, so
-    the first message comes from the client (no paid/privacy limits on the operator writing first)."""
-    u = operator_username()
-    if not u:
-        return None
-    what = " · ".join(x for x in (address(i, lang) if i else "", i.get("price_usd") and texts.money(i["price_usd"])) if x)
-    text = HANDOFF[lang][3].format(obj=g(lead, "property_id") or g(lead, "listing_id"), what=what, lead=g(lead, "id"))
-    return f"https://t.me/{u}?text={quote(text)}"
+def knows_operator(client_id):
+    """The client has a lead or has written to the operator's account (the userbot's client event dm_to_operator)."""
+    return (store.q("SELECT EXISTS (SELECT 1 FROM leads WHERE client_id = %s) OR EXISTS (SELECT 1 FROM events WHERE entity = 'client' "
+                    "AND entity_id = %s AND action = 'dm_to_operator') AS k", (client_id, str(client_id)), one=True) or {}).get("k")
 
 
-def handoff(lead, cl, i, lang):
-    """After ❤️: «Написать оператору» (prefilled DM, handled by the operator's userbot) + «Вернуться в бот»."""
-    url, chat = handoff_url(lead, i, lang), chat_of(cl)
-    if not url or not chat:
-        log.info("lead %s: no operator @username for the DM handoff", g(lead, "id"))
-        return
-    text, write, back, _ = HANDOFF[lang]
-    tg.send(chat, text, kb([[url_btn(write, url)], [url_btn(back, links.tg_user(conf("BOT_USERNAME")))]]), html=False)
+def like_button(cl, listing_id, label):
+    """❤️ on a client card. A client who never contacted the operator: t.me/<operator>?text=«…вариант #<obj> · …», one
+    tap opens the operator's DM with that first message and the userbot makes the lead when it arrives (so the operator
+    can then write to clients with paid messages or no @username). Everyone else: the bot's callback like:<id>."""
+    u = not knows_operator(cl["id"]) and operator_username()
+    i = u and store.listing(listing_id)
+    if not i:
+        return cb(label, f"like:{listing_id}")
+    lang = texts.lang_of(cl.get("lang"))
+    prop = store.q("SELECT id FROM properties WHERE listing_id = %s ORDER BY id LIMIT 1", (listing_id,), one=True)
+    what = " · ".join(x for x in (address(i, lang), i.get("price_usd") and texts.money(i["price_usd"])) if x)
+    return url_btn(label, f"https://t.me/{u}?text=" + quote(LIKE_DM[lang].format(obj=prop["id"] if prop else listing_id, what=what)))
 
 
 PUSH = {"ru": ("🏡 Новый вариант под ваш запрос, его ещё нет в канале:", "❤️ Нравится", "👎 Не то"),
@@ -335,7 +319,7 @@ def object_to_client(cl, listing_id):
     lang = texts.lang_of(cl.get("lang"))
     intro, like, no = PUSH[lang]
     text = "\n".join(x for x in (intro, f"<b>{e(headline(i, lang))}</b>", f"📍 {e(address(i, lang))}", e(flat_line(i, lang))) if x)
-    markup = kb([[cb(like, f"like:{i['id']}"), cb(no, f"no:{i['id']}")]])
+    markup = kb([[like_button(cl, i["id"], like), cb(no, f"no:{i['id']}")]])
     photo = first_photo(i)
     m = photo and tg.send_photo(chat, photo if os.path.exists(photo) else os.path.join(bot_dir(), photo), text, markup)
     return m or tg.send(chat, text, markup)
@@ -498,25 +482,28 @@ def slots_to_client(lead):
     return client_card("slots", g(lead, "id"), lead)
 
 
-CONFIRMED = {"ru": ("✅ <b>Просмотр: {when}</b>\n📍 {addr}\n\n👤 Ваш агент: <b>{agent}</b>{phone}",
-                    "💬 Написать агенту в Telegram", "📅 Добавить в календарь"),
-             "en": ("✅ <b>Viewing: {when}</b>\n📍 {addr}\n\n👤 Your agent: <b>{agent}</b>{phone}",
-                    "💬 Message the agent in Telegram", "📅 Add to calendar"),
-             "ka": ("✅ <b>ნახვა: {when}</b>\n📍 {addr}\n\n👤 თქვენი აგენტი: <b>{agent}</b>{phone}",
-                    "💬 აგენტისთვის მიწერა Telegram-ში", "📅 კალენდარში დამატება")}
+CONFIRMED = {"ru": "✅ <b>Просмотр: {when}</b>\n📍 {addr}\n\n👤 Ваш агент: <b>{agent}</b>{contact}",
+             "en": "✅ <b>Viewing: {when}</b>\n📍 {addr}\n\n👤 Your agent: <b>{agent}</b>{contact}",
+             "ka": "✅ <b>ნახვა: {when}</b>\n📍 {addr}\n\n👤 თქვენი აგენტი: <b>{agent}</b>{contact}"}
+
+
+def intl_phone(p):
+    """«+995 555 00 05 88» / «555000588» -> «+995555000588» (Telegram makes it tappable), '' without digits."""
+    d = re.sub(r"\D", "", p or "")
+    return d and "+" + ("995" + d if len(d) == 9 else d)
 
 
 @safe
 def slot_confirmed_client(lead, agent):
-    """A4b as a plain DM from the operator's account (userbot): time, address, the agent's name/phone, his Telegram and
-    the calendar link. The bot itself only edits the slot message to «✅ Вы выбрали: …»."""
+    """A4b as a plain DM from the operator's account (userbot): time, address, the agent and a working contact: his
+    t.me link, else his phone as +995…. The bot itself only edits the slot message to «✅ Вы выбрали: …»."""
     cl, i, lang = ctx(lead)
     lid, at = g(lead, "id"), g(lead, "viewing_at")
     ag = agent if isinstance(agent, dict) else {k: g(agent, k) for k in ("id", "name", "username", "phone", "tg_id")}
-    t, write, cal = CONFIRMED[lang]
-    text = plain(t, when=texts.when_long(at, lang) if at else "—", addr=address(i, lang), agent=staff_name(ag),
-                 phone=f"\n📞 {ag['phone']}" if ag.get("phone") else "")
-    text += "".join(f"\n\n{label}: {url}" for label, url in ((write, links.tg_user(ag.get("username"))), (cal, links.ics_url(lid))) if url)
+    contact = (f"\n💬 {links.tg_user(ag['username'])}" if ag.get("username") else
+               f"\n📞 {phone}" if (phone := intl_phone(ag.get("phone"))) else "")
+    text = plain(CONFIRMED[lang], when=texts.when_long(at, lang) if at else "—", addr=address(i, lang), agent=staff_name(ag),
+                 contact=contact)
     if not userbot.send_to_client(cl, text):
         log.warning("lead %s: the viewing details were not delivered (userbot)", lid)
 

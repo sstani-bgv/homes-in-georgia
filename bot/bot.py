@@ -20,7 +20,7 @@ import inbound
 from imgutil import to_jpeg
 import journey
 import sheets
-from app.telegram import links
+from app.telegram import links, notify
 
 ENV = {}
 LEGACY_MAP_URL = "https://tbilisi-rent-map.vercel.app/"  # old static copy of webapp/index.html
@@ -292,7 +292,8 @@ async def search(chat_id, user, ctx, delay=2.5):
             logging.getLogger(__name__).warning("album of %s failed: %r", i.get("id"), e)
         try:
             # buttons can't sit on an album, so ❤️/👎 and "📍 On the map" (approximate zone only) go on the text card
-            text, markup = core.card(i, x["reason"], x["near"], lang), core.card_keyboard(i, lang)
+            like = await asyncio.to_thread(notify.like_button, cl, i["id"], core.t(lang, "like"))
+            text, markup = core.card(i, x["reason"], x["near"], lang), core.card_keyboard(i, lang, like=like)
             m = await ctx.bot.send_message(chat_id, text, reply_markup=kb_of(markup))
             await asyncio.to_thread(journey.remember_card, cl, i["id"], chat_id, m.message_id, text, markup["inline_keyboard"][1:],
                                     res.get("search_id"))

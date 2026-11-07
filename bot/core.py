@@ -688,11 +688,12 @@ def pin_link(i, base=None, lang="ru"):
     return f"{base}/map?{q}" if q and base else None
 
 
-def card_keyboard(i, lang="ru", base=None, liked=False):
+def card_keyboard(i, lang="ru", base=None, liked=False, like=None):
     """Client card buttons (Bot API JSON): ❤️/👎 (or "sent" after a like) and, when possible, "📍 On the map"
-    (a web_app button: private chats only, which is where clients are)."""
+    (a web_app button: private chats only, which is where clients are). like: the ❤️ button (notify.like_button: the
+    operator DM link for a client who never contacted the operator), default the callback like:<id>."""
     rows = [[{"text": t(lang, "sent"), "callback_data": "noop"}] if liked else
-            [{"text": t(lang, "like"), "callback_data": f"like:{i['id']}"},
+            [like or {"text": t(lang, "like"), "callback_data": f"like:{i['id']}"},
              {"text": t(lang, "dislike"), "callback_data": f"no:{i['id']}"}]]
     extra = facts.media_links(i, lang)  # 🎥 video / 🧊 3D tour links, only on hosts that don't reveal the source
     if url := pin_link(i, base, lang):

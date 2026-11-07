@@ -279,9 +279,10 @@ response times per agent/operator), `jobs.py` (schedule/cancel/due), `settings.p
 lead_new_group(lead)                 B1 card in operators group, button "✋ Взять" (lg:take:<id>)
 lead_taken_group(lead, operator)     edits the group card(s): "✋ Взяла <name>", button "Назначить агента" (lg:assign:<id>) visible
 lead_assigned_agent(lead)            C6 to agent: object + client profile without contacts, button "🕒 Ввести время" (Mini App link /m/leads/<id>)
-lead_client_ack(lead)                A3: edits the client's card text: "✅ Передано оператору · ответим в течение N минут", button "❤️ В избранном"
+like_button(cl, listing_id, label)   ❤️ on client cards: never contacted the operator (no lead, no DM seen by the userbot) -> t.me/<operator>?text="…вариант #<obj> · …" (the userbot makes the lead from that DM); else callback like:<id>
+lead_client_ack(lead)                A3: the card's buttons become "❤️ Нравится ✅" + "➡️ Следующий вариант" (no text, no message)
 slots_to_client(lead)                A4a via the operator's userbot: inline query "slots:<inline_cards.token>" -> the bot answers with notify.card (text "Район · N спальни · $price" + slot buttons ls:pick:<slot_id> + "Другое время" ls:own:<lead_id>), the userbot sends it into the client's DM; inline fails -> numbered list; no userbot -> error to the agent
-slot_confirmed_client(lead, agent)   A4b as a plain DM from the operator's account: address, agent name/phone, agent's t.me link, calendar link (/api/public/ics/<token>); the bot edits the slot card to "✅ Вы выбрали: <time>"
+slot_confirmed_client(lead, agent)   A4b as a plain DM from the operator's account: address, agent name and his t.me link (no @username: phone as +995…); the bot edits the slot card to "✅ Вы выбрали: <time>"
 contacts_to_agent(lead)              C8
 viewing_reminder(lead)               1h before: the agent (bot) and the client (card "remind:<token>" via the userbot: lv:ok|late|resched)
 post_viewing_survey(lead)            A5a to client (card "survey:<token>" via the userbot: lo:c:<id>:rented|refused|thinking) + C9a to agent (lo:a:<id>:rented|refused|thinking|reschedule)

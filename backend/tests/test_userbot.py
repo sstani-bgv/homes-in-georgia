@@ -1,5 +1,5 @@
 """Stage 9: the operator userbot (matching DMs to clients/leads, logging, numbered choices, the slot card as the bot's
-inline result) with a fake Telethon client; one bot for everyone; the DM handoff link; Georgian in clients.lang."""
+inline result) with a fake Telethon client; one bot for everyone; ❤️ as the operator DM link; Georgian in clients.lang."""
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -139,9 +139,11 @@ class FakeHttp:
         return type("R", (), {"json": lambda self: {"ok": True, "result": {"message_id": 1, "chat": {"id": chat}}}})()
 
 
-def test_one_bot_and_the_dm_handoff(db, monkeypatch):
-    """Staff cards and the client card go through the one bot (BOT_TOKEN); after ❤️ the client gets only the handoff:
-    «Написать оператору» (t.me/<operator>?text=…) + «Вернуться в бот», no «Ответить»."""
+def test_like_is_the_operator_dm_link_until_the_client_writes(db, monkeypatch):
+    """A client who never contacted the operator: ❤️ = t.me/<operator>?text=«…вариант #<obj> · …» (one tap, no bot
+    message); the userbot makes the lead from that first DM (create_from_like: B1 card through the one bot, the card
+    marked) and logs it. After that (a lead, or any DM) ❤️ is the callback like:<id>."""
+    from app.models import Property
     from app.telegram import client as tg
     monkeypatch.undo()                                                        # the real notify (the autouse `sent` stubs it)
     http = FakeHttp()
@@ -151,20 +153,35 @@ def test_one_bot_and_the_dm_handoff(db, monkeypatch):
     cl, lst = make_client(db), make_listing(db)
     cl.lang = "ka"                                                            # clients_lang_check allows ka (migration 0011)
     db.commit()
-    lead = leads.create_from_like(db, cl.id, lst.id)
-    by = {(u.rsplit("/", 2)[-2], d.get("chat_id")) for u, d in http.urls}
-    assert by >= {("bot123456:TEST-TOKEN", "-100777"), ("bot123456:TEST-TOKEN", "5550001")}
-    assert {t for t, _ in by} == {"bot123456:TEST-TOKEN"}
-    to_client = [d for u, d in http.urls if d.get("chat_id") == "5550001"]
-    hand = next(d for d in to_client if "op_nino" in (d.get("reply_markup") or ""))
-    rows = json.loads(hand["reply_markup"])["inline_keyboard"]
-    url = rows[0][0]["url"]
-    assert url.startswith("https://t.me/op_nino?text=") and len(rows) == 2 and "url" in rows[1][0]
-    assert unquote(url.split("text=", 1)[1]) == f"გამარჯობა! მაინტერესებს ობიექტი #{lead.property_id or lst.id} ვაკე, ул. Палиашвили 10 · $850 " \
-                                                f"(განაცხადი #{lead.id})"
-    assert "ოპერატორისთვის მიწერა" in hand["reply_markup"]
-    assert not [d for d in to_client if "lm:" in (d.get("reply_markup") or "") or "Ответить" in (d.get("reply_markup") or "")]
-    assert not hasattr(notify, "client_message") and not hasattr(notify, "lead_client_reply")
+    btn = notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️")
+    assert btn["url"].startswith("https://t.me/op_nino?text=") and "callback_data" not in btn
+    text = unquote(btn["url"].split("text=", 1)[1])
+    assert text == f"გამარჯობა! მომწონს ვარიანტი #{lst.id} · ვაკე, ул. Палиашвили 10 · $850"
+    from app.telegram import store
+    store.remember("card", f"{cl.id}:{lst.id}", 5550001, 1)
+    assert userbot.on_incoming(5550001, None, text) == "liked"
+    lead = db.query(Lead).filter_by(client_id=cl.id).one()
+    assert events(db, lead.id, "message_from_client") == [text]               # «Клиент написал оператору в личку»
+    assert ("bot123456:TEST-TOKEN", "-100777") in {(u.rsplit("/", 2)[-2], d.get("chat_id")) for u, d in http.urls}   # B1
+    mark = next(d for u, d in http.urls if u.endswith("/editMessageReplyMarkup"))
+    assert (mark["chat_id"], mark["message_id"]) == ("5550001", "1") and "მომწონს ✅" in mark["reply_markup"]
+    assert not [d for u, d in http.urls if u.endswith("/sendMessage") and d.get("chat_id") == "5550001"]   # no bot message
+    assert notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️") == {"text": "❤️", "callback_data": f"like:{lst.id}"}
+
+    other = make_client(db, external_id=5550002)
+    prop = Property(listing_id=lst.id, status="published", address="x")
+    db.add(prop)
+    db.commit()
+    url = notify.like_button({"id": other.id, "lang": "ru"}, lst.id, "❤️")["url"]
+    assert unquote(url.split("text=", 1)[1]) == f"Здравствуйте! Мне нравится вариант #{prop.id} · Ваке, ул. Палиашвили 10 · $850"
+    assert userbot.on_incoming(5550002, None, "Добрый день") == "no_lead"     # wrote without a ❤️: known from now on
+    assert "callback_data" in notify.like_button({"id": other.id, "lang": "ru"}, lst.id, "❤️")
+    assert userbot.on_incoming(5550002, None, "Мне нравится вариант #999999 · …") == "no_lead"   # no such object: no lead
+    assert userbot.on_incoming(5550002, None, f"Здравствуйте! Мне нравится вариант #{prop.id} · …") == "liked"   # an old link card
+    assert db.query(Lead).filter_by(client_id=other.id, listing_id=lst.id).count() == 1
+    monkeypatch.delenv("OPERATOR_TG_USERNAME")                                # (no operator with a @username either)
+    assert "callback_data" in notify.like_button({"id": make_client(db, external_id=5550003).id, "lang": "ru"}, lst.id, "❤️")   # nobody to DM
+    assert not hasattr(notify, "client_message") and not hasattr(notify, "handoff")
 
 
 def fake_userbot(monkeypatch, posts):
@@ -305,6 +322,11 @@ def test_viewing_details_go_from_the_operators_account(db, monkeypatch):
                                  {"name": "Георгий", "username": "geo", "phone": "+995 555 000 588"})
     (cid, text), = got
     assert cid == cl.id and text.startswith("✅ Просмотр: ") and "<b>" not in text
-    for want in ("📍 Ваке, ул. Палиашвили 10", "👤 Ваш агент: Георгий", "📞 +995 555 000 588", "💬 Написать агенту в Telegram: https://t.me/geo"):
+    for want in ("📍 Ваке, ул. Палиашвили 10", "👤 Ваш агент: Георгий", "💬 https://t.me/geo"):
         assert want in text
+    assert "+995" not in text and "календар" not in text and "ics" not in text   # the t.me link is the contact; no calendar link
+    got.clear()
+    notify.slot_confirmed_client({"id": lead.id, "client_id": cl.id, "listing_id": lead.listing_id, "viewing_at": at},
+                                 {"name": "Георгий", "username": None, "phone": "555 000 588"})
+    assert got[0][1].endswith("👤 Ваш агент: Георгий\n📞 +995555000588")      # no @username: the phone, tappable
     assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]
