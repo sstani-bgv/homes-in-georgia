@@ -43,7 +43,8 @@ operator_take(db, lead_id, operator: User) -> Lead             # DomainError('al
 assign_agent(db, lead_id, agent_id: int, actor: User) -> Lead   # also sets operator_id if nobody took it
 reassign(db, lead_id, agent_id, actor) -> Lead
 recommend_agents(db, lead_id) -> list[{"agent": {...}, "score", "reasons": [...], "active_leads", "recommended"?}]
-add_slots(db, lead_id, starts: list[datetime], actor: User | None) -> Lead   # naive datetimes = Asia/Tbilisi
+add_slots(db, lead_id, starts: list[datetime], actor: User | None) -> Lead   # naive datetimes = Asia/Tbilisi; new slots_token,
+    # the userbot sends the slot card; not delivered -> DomainError userbot_off (503), lead back to agent_assigned
 choose_slot(db, slot_id, client_id: int | None = None) -> Lead              # contacts shared, jobs scheduled
 client_own_time(db, lead_id, text) -> Lead      # "Другое время": back to agent_slots SLA, agent re-notified
 client_late(db, lead_id) -> Lead                # history only
@@ -52,7 +53,7 @@ set_outcome(db, lead_id, by='client'|'agent', outcome, reason=None, actor=None) 
     # client: rented|refused|thinking ; agent: rented|refused|thinking|reschedule
     # refusal reasons: price|location|condition|other (call again with reason after refusal_reason_ask)
 cancel(db, lead_id, actor, reason) -> Lead
-message_client(db, lead_id, text, actor) -> Lead    # calls notify.client_message(client, text)
+message_from_client(db, lead_id, client_id, text) -> Lead   # the client's DM to the operator (userbot), history only
 mark_viewing_done(db, lead_id) -> Lead | None       # used by the worker
 history(db, lead_id) -> list[dict]
 card(db, lead, user) / detail(db, lead, user) -> dict   # contact visibility applied

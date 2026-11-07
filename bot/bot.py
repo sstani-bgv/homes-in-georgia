@@ -12,7 +12,7 @@ from pathlib import Path
 from telegram import (BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, KeyboardButton, MenuButtonDefault,
                       MenuButtonWebApp, ReplyKeyboardMarkup, Update, WebAppInfo)
 from telegram.error import TelegramError
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, InlineQueryHandler, MessageHandler, filters
 
 import core
 import db
@@ -479,7 +479,7 @@ async def on_button(update: Update, ctx):
         await on_lang_button(update, ctx)
     elif q.data.startswith("mod:"):
         await on_staff_button(update, ctx, q.data)
-    elif await journey.on_callback(update, ctx, lambda: client_of(q.from_user, update.effective_chat.id)):
+    elif await journey.on_callback(update, ctx, lambda: client_of(q.from_user, update.effective_chat and update.effective_chat.id)):
         pass
     elif q.data.startswith(("like:", "no:")):
         await on_client_button(update, ctx, *q.data.split(":", 1))
@@ -547,19 +547,16 @@ async def on_staff_cmd(update: Update, ctx):
 
 # explicit: getUpdates otherwise keeps the previous call's list; channel_post carries the agency channel's videos and
 # listings/#Rented (inbound.py); edited_* updates re-parse listings/news
-ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "channel_post", "edited_channel_post"]
+ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "inline_query", "channel_post", "edited_channel_post"]
 
 
 COMMANDS = {"ru": (("start", "Подбор квартиры"), ("lang", "🌐 Язык")), "en": (("start", "Find a flat"), ("lang", "🌐 Language")),
             "ka": (("start", "ბინის შერჩევა"), ("lang", "🌐 ენა"))}
 
 
-def build(token, staff=False):
-    """staff=True: the STAFF_BOT_TOKEN bot (notify sends staff cards through it): the same handlers, so its buttons
-    (lg:/ls:/lo:a:) work, but no channel/work-group intake and no background loop (the client bot does those)."""
+def build(token):
+    """The one bot: clients (questionnaire, cards, ❤️), staff cards and buttons, the slot cards for the userbot (inline)."""
     async def post_init(app):
-        if staff:
-            return
         for lc, cmds in COMMANDS.items():  # the client's ☰ menu: /start and /lang in their Telegram language
             try:
                 await app.bot.set_my_commands([BotCommand(c, d) for c, d in cmds], language_code=None if lc == "en" else lc)
@@ -589,14 +586,14 @@ def build(token, staff=False):
     app.add_handler(CommandHandler("lang", on_lang, filters=private))
     app.add_handler(CommandHandler(["leads_here", "leads_private", "moderate_all", "review"], on_staff_cmd, filters=new))
     app.add_handler(CallbackQueryHandler(on_button))
-    if not staff:  # the agency channel (the bot is its admin): videos of new posts by file_id
-        app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS, on_channel_post))
+    app.add_handler(InlineQueryHandler(journey.on_inline_query))  # «slots:<token>» from the operator's userbot (BotFather /setinline)
+    # the agency channel (the bot is its admin): videos of new posts by file_id
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS, on_channel_post))
     # a staff member forwards a #Rented post to the bot → pending deal (before the client journey sees the text)
     inbound.register_private(app)
     app.add_handler(MessageHandler(private & ((filters.TEXT & ~filters.COMMAND) | filters.PHOTO | filters.Document.IMAGE
                                               | filters.LOCATION | filters.StatusUpdate.WEB_APP_DATA), on_message))
-    if not staff:  # work group topics (listings, news, Make-Foto, #Rented) and the agency channel → backend (group 1: alongside)
-        inbound.register_groups(app)
+    inbound.register_groups(app)  # work group topics (listings, news, Make-Foto, #Rented) and the agency channel → backend
     app.add_error_handler(on_error)
     return app
 
@@ -615,28 +612,7 @@ def main():
     if not db.stats()["listings"] and os.path.exists("listings.json"):  # first start on the DB: import the current base
         db.sync(full=False)
     print("bot up:", db.stats())
-    staff = ENV.get("STAFF_BOT_TOKEN", "").strip()
-    if not staff or staff == ENV["BOT_TOKEN"]:
-        build(ENV["BOT_TOKEN"]).run_polling(allowed_updates=ALLOWED_UPDATES)
-        return
-    asyncio.run(run_both(build(ENV["BOT_TOKEN"]), build(staff, staff=True)))
-
-
-async def run_both(*apps):
-    """The client bot and the staff bot in one process (run_polling handles one application only)."""
-    for app in apps:
-        await app.initialize()
-        if app.post_init:
-            await app.post_init(app)
-        await app.start()
-        await app.updater.start_polling(allowed_updates=ALLOWED_UPDATES)
-    try:
-        await asyncio.Event().wait()
-    finally:
-        for app in apps:
-            await app.updater.stop()
-            await app.stop()
-            await app.shutdown()
+    build(ENV["BOT_TOKEN"]).run_polling(allowed_updates=ALLOWED_UPDATES)
 
 
 if __name__ == "__main__":

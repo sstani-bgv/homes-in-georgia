@@ -1,7 +1,8 @@
 """Every outgoing Telegram message (docs/ARCHITECTURE.md §6). Texts follow the journey screens (docs/user-journey.txt):
-clients in their language (clients.lang: ru/en/ka), staff in Russian, through the staff bot when STAFF_BOT_TOKEN is set
-(ssend). Arguments may be ORM objects or dicts. Message refs go to
-the `messages` table (kind, ref) so cards can be edited later. No function ever raises (failures are logged)."""
+clients in their language (clients.lang: ru/en/ka), staff in Russian, all through the one bot (BOT_TOKEN). To the client
+the bot sends only listing cards (❤️ ack + the DM handoff); viewing time and the visit details come from the operator's
+own account (userbot). Arguments may be ORM objects or dicts. Message refs go to the `messages` table (kind, ref) so
+cards can be edited later. No function ever raises (failures are logged)."""
 import contextvars
 import functools
 import html
@@ -40,11 +41,6 @@ def safe(fn):
     return wrap
 
 
-def ssend(*a, **kw):
-    """A message to staff (operators chat, operator/agent DMs): the STAFF_BOT_TOKEN bot when set, else the client bot."""
-    return tg.send(*a, staff=True, **kw)
-
-
 def env_int(k, d):
     try:
         return int(float(conf(k, d)))
@@ -80,32 +76,32 @@ def is_private(chat):
 def to_operators(kind, ref, text, keyboard_for):
     """keyboard_for(private) -> markup (web_app buttons only work in private chats)."""
     for chat, topic in operators_targets():
-        m = ssend(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
+        m = tg.send(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
         if m and kind:
             store.remember(kind, ref, m["chat"]["id"], m["message_id"])
 
 
-def to_lead_staff(lead, text, keyboard_for, keys=("operator_id", "agent_id")):
-    """Private messages to the lead's operator and/or agent; the operators chat too when the operator isn't reached
-    (no operator yet, no Telegram id, or the send failed)."""
+def to_lead_staff(lead, text, keyboard_for, keys=("operator_id",)):
+    """Private messages to the lead's operator (and/or agent: keys); the operators chat too when the operator isn't
+    reached (no operator yet, no Telegram id, or the send failed)."""
     sent, op_ok = set(), False
     for k in keys:
         u = store.user(g(lead, k)) or {}
         tid = u.get("tg_id")
         if not tid or not u.get("is_active", True):
             continue
-        if str(tid) in sent or ssend(tid, text, keyboard_for(True)):
+        if str(tid) in sent or tg.send(tid, text, keyboard_for(True)):
             sent.add(str(tid))
             op_ok = op_ok or k == "operator_id"
     if not op_ok:
         for chat, topic in operators_targets():
             if str(chat) not in sent:
-                ssend(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
+                tg.send(chat, text, keyboard_for(is_private(chat)), thread_id=topic)
 
 
 def edit_refs(kind, ref, text, keyboard_for):
     for chat, mid in store.refs(kind, ref):
-        tg.edit(chat, mid, text, keyboard_for(is_private(chat)), staff=True)  # staff cards only
+        tg.edit(chat, mid, text, keyboard_for(is_private(chat)))
 
 
 # ---------- what a lead is about ----------
@@ -246,7 +242,7 @@ def lead_assigned_agent(lead):
         t += f"\n\n🕐 <b>Клиент предложил своё время:</b> {e(g(lead, 'client_note'))}"
     if urls := i.get("urls"):
         t += "\n\n🔗 " + "\n".join(f'<a href="{e(u)}">{e(u)}</a>' for u in urls[:3])
-    m = ssend(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))],
+    m = tg.send(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))],
                                      [cb("⚡ Время кнопками", f"ls:quick:{lid}"), cb("✍️ Написать время", f"ls:text:{lid}")]]))
     if m:
         store.remember("agent_lead", lid, m["chat"]["id"], m["message_id"])
@@ -343,9 +339,11 @@ def object_to_client(cl, listing_id):
     return m or tg.send(chat, text, markup)
 
 
-SLOTS = {"ru": ("Собственник готов показать квартиру 🏡\n<b>Выберите удобное время:</b>", "🕐 Предложить своё время", "Открыть объявление"),
-         "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Suggest my own time", "Open the listing"),
-         "ka": ("მესაკუთრე მზადაა ბინის საჩვენებლად 🏡\n<b>აირჩიეთ მოსახერხებელი დრო:</b>", "🕐 ჩემი დროის შეთავაზება", "განცხადების გახსნა")}
+SLOTS = {"ru": ("Собственник готов показать квартиру 🏡\n<b>Выберите удобное время:</b>", "🕐 Другое время", "Открыть объявление"),
+         "en": ("The owner is ready to show the flat 🏡\n<b>Pick a convenient time:</b>", "🕐 Another time", "Open the listing"),
+         "ka": ("მესაკუთრე მზადაა ბინის საჩვენებლად 🏡\n<b>აირჩიეთ მოსახერხებელი დრო:</b>", "🕐 სხვა დრო", "განცხადების გახსნა")}
+USERBOT_OFF = "Userbot оператора не подключён"
+USERBOT_FAILED = "Userbot оператора не смог отправить время клиенту"
 
 
 def listing_link(i):
@@ -362,57 +360,62 @@ def bot_dir():
     return str(store.ROOT / "bot")
 
 
+def plain(template, **kw):
+    """An HTML template of this module as plain text for the userbot (it sends without parse mode)."""
+    return re.sub(r"</?b>", "", template).format(**kw)
+
+
 @safe
 def slots_to_client(lead, slots):
-    """A4a: photo + «Ваке · 2 спальни · $850» + one button per slot + «Предложить своё время»."""
+    """A4a from the operator's account: the userbot sends the bot's inline result «slots:<token>» (slots_card: buttons
+    whose presses come to the bot) into the client's DM; if the inline query fails it sends numbered options itself.
+    -> None when sent, else the error text for the agent (USERBOT_OFF / USERBOT_FAILED)."""
+    if not conf("USERBOT_URL").strip():
+        return USERBOT_OFF
     cl, i, lang = ctx(lead)
-    chat = chat_of(cl)
-    if not chat:
-        return
     lid = g(lead, "id")
+    text = f"{headline(i, lang)}\n📍 {address(i, lang)}\n\n" + plain(SLOTS[lang][0])
+    ok = userbot.send_to_client(cl, text, [texts.slot_label(g(s, "starts_at"), lang) for s in slots],
+                                {"lead": lid, "slots": [g(s, "id") for s in slots]}, inline=f"slots:{g(lead, 'slots_token')}")
+    return None if ok else USERBOT_FAILED
+
+
+def slots_card(token):
+    """The inline result for «slots:<token>» -> (title, HTML text, button rows) or None (unknown token, no open slots):
+    the object, a button per slot (ls:pick:<slot>) and «Другое время» (ls:own:<lead>)."""
+    lead = store.q("SELECT * FROM leads WHERE slots_token = %s AND status = 'slots_sent'", (token,), one=True)
+    slots = lead and store.q("SELECT id, starts_at FROM lead_slots WHERE lead_id = %s AND NOT chosen ORDER BY starts_at", (lead["id"],))
+    if not slots:
+        return None
+    _, i, lang = ctx(lead)
     ask, own, open_ = SLOTS[lang]
-    if userbot.dm_active(cl):  # the client talks to the operator in DM: numbered options from the operator's account
-        plain = f"{headline(i, lang)}\n📍 {address(i, lang)}\n\n" + re.sub(r"<[^>]+>", "", ask)
-        if userbot.send_to_client(cl, plain, [texts.slot_label(g(s, "starts_at"), lang) for s in slots],
-                                  {"lead": lid, "slots": [g(s, "id") for s in slots]}):
-            return
+    rows = [[url_btn(open_, listing_link(i))]] + [[cb(texts.slot_label(s["starts_at"], lang), f"ls:pick:{s['id']}")] for s in slots]
+    rows.append([cb(own, f"ls:own:{lead['id']}")])
     text = f"<b>{e(headline(i, lang))}</b>\n📍 {e(address(i, lang))}\n\n{ask}"
-    rows = [[url_btn(open_, listing_link(i))]] + [[cb(texts.slot_label(g(s, "starts_at"), lang), f"ls:pick:{g(s, 'id')}")] for s in slots]
-    rows.append([cb(own, f"ls:own:{lid}")])
-    photo = first_photo(i)
-    m = None
-    if photo:
-        m = tg.send_photo(chat, photo if os.path.exists(photo) else os.path.join(bot_dir(), photo), text, kb(rows))
-    m = m or tg.send(chat, text, kb(rows))
-    if m:
-        store.remember("slots", lid, m["chat"]["id"], m["message_id"])
+    return headline(i, lang) or plain(ask).splitlines()[-1], text, kb(rows)["inline_keyboard"]
 
 
 CONFIRMED = {"ru": ("✅ <b>Просмотр: {when}</b>\n📍 {addr}\n\n👤 Ваш агент: <b>{agent}</b>{phone}",
-                    "💬 Написать агенту в Telegram", "📅 Добавить в календарь", "⏰ Опаздываю", "🔁 Перенести"),
+                    "💬 Написать агенту в Telegram", "📅 Добавить в календарь"),
              "en": ("✅ <b>Viewing: {when}</b>\n📍 {addr}\n\n👤 Your agent: <b>{agent}</b>{phone}",
-                    "💬 Message the agent in Telegram", "📅 Add to calendar", "⏰ Running late", "🔁 Reschedule"),
+                    "💬 Message the agent in Telegram", "📅 Add to calendar"),
              "ka": ("✅ <b>ნახვა: {when}</b>\n📍 {addr}\n\n👤 თქვენი აგენტი: <b>{agent}</b>{phone}",
-                    "💬 აგენტისთვის მიწერა Telegram-ში", "📅 კალენდარში დამატება", "⏰ მაგვიანდება", "🔁 გადატანა")}
+                    "💬 აგენტისთვის მიწერა Telegram-ში", "📅 კალენდარში დამატება")}
 
 
 @safe
 def slot_confirmed_client(lead, agent):
-    """A4b: the slot message keeps only «✓ <time>»; then address, agent name/phone, write/calendar/late/reschedule."""
+    """A4b as a plain DM from the operator's account (userbot): time, address, the agent's name/phone, his Telegram and
+    the calendar link. The bot itself only edits the slot message to «✅ Вы выбрали: …»."""
     cl, i, lang = ctx(lead)
-    chat = chat_of(cl)
     lid, at = g(lead, "id"), g(lead, "viewing_at")
-    if at:
-        for c, mid in store.refs("slots", lid):
-            tg.edit_markup(c, mid, kb([[cb("✓ " + texts.slot_label(at, lang), "noop")]]))
-    if not chat:
-        return
     ag = agent if isinstance(agent, dict) else {k: g(agent, k) for k in ("id", "name", "username", "phone", "tg_id")}
-    t, write, cal, late, resched = CONFIRMED[lang]
-    text = t.format(when=texts.when_long(at, lang) if at else "—", addr=e(address(i, lang)), agent=e(staff_name(ag)),
-                    phone=f"\n📞 {e(ag['phone'])}" if ag.get("phone") else "")
-    tg.send(chat, text, kb([[url_btn(write, links.tg_user(ag.get("username")))], [url_btn(cal, links.ics_url(lid))],
-                            [cb(late, f"lv:late:{lid}"), cb(resched, f"lv:resched:{lid}")]]))
+    t, write, cal = CONFIRMED[lang]
+    text = plain(t, when=texts.when_long(at, lang) if at else "—", addr=address(i, lang), agent=staff_name(ag),
+                 phone=f"\n📞 {ag['phone']}" if ag.get("phone") else "")
+    text += "".join(f"\n\n{label}: {url}" for label, url in ((write, links.tg_user(ag.get("username"))), (cal, links.ics_url(lid))) if url)
+    if not userbot.send_to_client(cl, text):
+        log.warning("lead %s: the viewing details were not delivered (userbot)", lid)
 
 
 @safe
@@ -428,7 +431,7 @@ def contacts_to_agent(lead):
          f"🔓 <b>Контакты клиента</b>\n\n👤 {e(cl.get('name') or '—')}" + (f"\n📞 {e(cl['phone'])}" if cl.get("phone") else "") +
          (f"\n💬 @{e(cl['username'])}" if cl.get("username") else "") +
          "\n\nНапишите клиенту до встречи. Напомню вам и клиенту за 1 час.")
-    ssend(ag["tg_id"], t, kb([[url_btn("💬 Написать", contact)], [app_btn("📍 Адрес объекта", links.map_pin(i))]]))
+    tg.send(ag["tg_id"], t, kb([[url_btn("💬 Написать", contact)], [app_btn("📍 Адрес объекта", links.map_pin(i))]]))
 
 
 VIEWING_UPDATE = {"ok": "👍 Клиент {name} подтвердил просмотр #{id}: «Буду»", "late": "⏰ Клиент {name} опаздывает на просмотр #{id}"}
@@ -440,7 +443,7 @@ def viewing_update(lead, what):
     cl, _, _ = ctx(lead)
     ag = store.user(g(lead, "agent_id")) or {}
     if ag.get("tg_id") and what in VIEWING_UPDATE:
-        ssend(ag["tg_id"], VIEWING_UPDATE[what].format(name=e(client_name(cl)), id=g(lead, "id")))
+        tg.send(ag["tg_id"], VIEWING_UPDATE[what].format(name=e(client_name(cl)), id=g(lead, "id")))
 
 
 REMIND = {"ru": ("⏰ Через час просмотр: <b>{hm}</b>, {addr}\nАгент {agent}", "👍 Буду", "⏰ Опаздываю", "🔁 Перенести"),
@@ -459,7 +462,7 @@ def viewing_reminder(lead):
         tg.send(chat, t.format(hm=hm, addr=e(address(i, lang)), agent=e(staff_name(ag))),
                 kb([[cb(ok, f"lv:ok:{lid}"), cb(late, f"lv:late:{lid}")], [cb(resched, f"lv:resched:{lid}")]]))
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"⏰ Через час просмотр #{lid}: <b>{hm}</b>, {e(address(i))}\nКлиент {e(client_name(cl))}"
+        tg.send(ag["tg_id"], f"⏰ Через час просмотр #{lid}: <b>{hm}</b>, {e(address(i))}\nКлиент {e(client_name(cl))}"
                 + (f", 📞 {e(cl['phone'])}" if cl.get("phone") else ""))
 
 
@@ -481,7 +484,7 @@ def post_viewing_survey(lead):
             store.remember("survey_client", lid, m["chat"]["id"], m["message_id"])
     ag = store.user(g(lead, "agent_id")) or {}
     if ag.get("tg_id"):
-        m = ssend(ag["tg_id"], f"Как прошёл просмотр #{lid}?\n{e(address(i))} · клиент {e(client_name(cl))}",
+        m = tg.send(ag["tg_id"], f"Как прошёл просмотр #{lid}?\n{e(address(i))} · клиент {e(client_name(cl))}",
                     kb([[cb("Сдано ✅", f"lo:a:{lid}:rented"), cb("Не подошло ❌", f"lo:a:{lid}:refused")],
                         [cb("Думает 🤔", f"lo:a:{lid}:thinking"), cb("Перенос 🔁", f"lo:a:{lid}:reschedule")]]))
         if m:
@@ -526,7 +529,7 @@ def sla_warning(lead, stage):
     if stage == "agent_slots":
         ag = store.user(g(lead, "agent_id")) or {}
         if ag.get("tg_id"):
-            ssend(ag["tg_id"], f"{head}{left_t}, чтобы предложить время просмотра.\n{info}",
+            tg.send(ag["tg_id"], f"{head}{left_t}, чтобы предложить время просмотра.\n{info}",
                     kb([[app_btn("🕐 Предложить время", links.lead_app(lid))], [cb("⚡ Время кнопками", f"ls:quick:{lid}")]]))
         return
     action = cb("✋ Взять заявку", f"lg:take:{lid}") if stage == "operator_take" else None
@@ -550,7 +553,7 @@ def sla_overdue(lead, stage):
     text = f"{head}{body}\n{info}"
     to_operators(None, lid, text, lambda private: kb([rows, [app_btn("📋 Открыть в панели", links.lead_app(lid), private)]]))
     for sa in superadmins():
-        ssend(sa, text, kb([[app_btn("📋 Открыть в панели", links.lead_app(lid))]]))
+        tg.send(sa, text, kb([[app_btn("📋 Открыть в панели", links.lead_app(lid))]]))
 
 
 def deal_lead(deal):
@@ -577,7 +580,7 @@ def deal_confirmed(deal):
             t += f"\n\n🗓 T14 напомню <b>{fmt_date(g(deal, 't14_date'))[:5] if g(deal, 't14_date') else '—'}</b>"
         if g(deal, "rent_to"):
             t += f"\n🔔 Конец договора {fmt_date(g(deal, 'rent_to'))}: напомню за 30, 7 и 1 день"
-        ssend(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(did))]]))
+        tg.send(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(did))]]))
     chat, topic = chat_and_topic("WORK_GROUP_CHAT_ID", "TOPIC_DEAL")
     if chat:
         try:
@@ -615,7 +618,7 @@ def t14_client(deal):
 def t14_agent(deal):
     ag = store.user(g(deal, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"🗓 <b>T14 по сделке #{g(deal, 'id')}</b>\n{e(g(deal, 'address') or '')}\nКлиент живёт 14 дней: оцените сделку.",
+        tg.send(ag["tg_id"], f"🗓 <b>T14 по сделке #{g(deal, 'id')}</b>\n{e(g(deal, 'address') or '')}\nКлиент живёт 14 дней: оцените сделку.",
                 kb([[app_btn("📝 T14: оценить", links.deal_app(g(deal, "id")))]]))
 
 
@@ -623,7 +626,7 @@ def t14_agent(deal):
 def contract_expiry(deal, days):
     ag = store.user(g(deal, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"🔔 Через <b>{days} дн.</b> заканчивается договор: {e(g(deal, 'address') or '')} "
+        tg.send(ag["tg_id"], f"🔔 Через <b>{days} дн.</b> заканчивается договор: {e(g(deal, 'address') or '')} "
                 f"(до {fmt_date(g(deal, 'rent_to'))}).\nКлиент: {e(g(deal, 'client_name') or '—')}",
                 kb([[app_btn("📄 Открыть сделку", links.deal_app(g(deal, "id")))]]))
 
@@ -636,7 +639,7 @@ def prop_title(prop):
 def property_call_retry(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"📞 Пора перезвонить собственнику: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
+        tg.send(ag["tg_id"], f"📞 Пора перезвонить собственнику: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
 
@@ -644,7 +647,7 @@ def property_call_retry(prop):
 def property_owner_followup(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"🤔 Собственник обещал подумать — пора перезвонить: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
+        tg.send(ag["tg_id"], f"🤔 Собственник обещал подумать — пора перезвонить: <b>{e(prop_title(prop))}</b> (объект #{g(prop, 'id')})",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
 
@@ -660,7 +663,7 @@ def property_review_request(prop):
 def property_returned(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"↩️ <b>Объект #{g(prop, 'id')} вернули на доработку</b>\n{e(prop_title(prop))}\n\n"
+        tg.send(ag["tg_id"], f"↩️ <b>Объект #{g(prop, 'id')} вернули на доработку</b>\n{e(prop_title(prop))}\n\n"
                 f"Комментарий оператора: {e(g(prop, 'review_comment') or '—')}",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
 
@@ -670,7 +673,7 @@ def exclusive_conflict(prop, source, url):
     """Stage 4: the agent's exclusive showed up on another site → a task to get the owner to take the ad down."""
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"🔴 <b>Эксклюзив #{g(prop, 'id')} висит на {e(source)}</b>\n{e(prop_title(prop))}\n\n"
+        tg.send(ag["tg_id"], f"🔴 <b>Эксклюзив #{g(prop, 'id')} висит на {e(source)}</b>\n{e(prop_title(prop))}\n\n"
                 f"Задача: попросить собственника снять объявление {e(url or '')}\n"
                 "Публикация как эксклюзив закрыта, пока оператор не отметит «Проверено: снято».",
                 kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
@@ -681,7 +684,7 @@ def property_published(prop):
     """C5: the agent gets the link to the channel post."""
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
-        ssend(ag["tg_id"], f"✅ <b>Объект #{g(prop, 'id')} опубликован в канале</b>\n{e(prop_title(prop))}",
+        tg.send(ag["tg_id"], f"✅ <b>Объект #{g(prop, 'id')} опубликован в канале</b>\n{e(prop_title(prop))}",
                 kb([[url_btn("📢 Пост в канале", g(prop, "post_url"))]]))
 
 
@@ -718,7 +721,7 @@ def change_request_decided(cr):
         return
     ok = g(cr, "status") == "approved"
     comment = g(cr, "decision_comment")
-    ssend(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
+    tg.send(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
             f"{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))}\n{cr_changes(cr)}" + (f"\n\nКомментарий оператора: {e(comment)}" if comment else ""),
             kb([[app_btn("🏠 Открыть объект", links.property_app(g(cr, "entity_id")))]]))
 
@@ -852,31 +855,8 @@ def report_posted(report):
             tg.send(chat, p["text"], thread_id=topic)
 
 
-@safe
-def client_message(client, text, lead_id):
-    """Operator -> client via the bot (CRM «Написать клиенту»)."""
-    cl = client if isinstance(client, dict) else {k: g(client, k) for k in ("chat_id", "external_id", "channel", "lang")}
-    if chat := chat_of(cl):
-        lang = texts.lang_of(cl.get("lang"))
-        head = texts.pick(lang, "💬 Сообщение от оператора:", "💬 Message from the operator:", "💬 შეტყობინება ოპერატორისგან:")
-        hint = texts.pick(lang, "Нажмите «Ответить» или ответьте на это сообщение.", "Use Reply below or reply to this message.",
-                          "დააჭირეთ „პასუხი“ ან უპასუხეთ ამ შეტყობინებას.")
-        label = texts.pick(lang, "💬 Ответить", "💬 Reply", "💬 პასუხი")
-        m = tg.send(chat, f"{head} #{lead_id}\n{e(text)}\n\n{hint}", kb([[cb(label, f"lm:reply:{lead_id}")]]))
-        if m:
-            store.remember("client_message", lead_id, m["chat"]["id"], m["message_id"])
-        return m
-
-
 def lead_btn(lid):
     return lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]])
-
-
-@safe
-def lead_client_reply(lead, text):
-    """A client reply is saved in the lead and delivered to its operator and agent (the operators chat as fallback)."""
-    lid = g(lead, "id")
-    to_lead_staff(lead, f"💬 <b>Ответ клиента по заявке #{lid}</b>\n\n{e(text)}", lead_btn(lid))
 
 
 @safe
@@ -891,7 +871,7 @@ def client_time_staff(lead, own_text=None):
         head = f"🕐 <b>Клиент предложил своё время · заявка #{lid}</b>\n«{e(own_text)}»"
     ag = store.user(g(lead, "agent_id"))
     text = head + (f"\n🏠 {e(address(i))}" if i else "") + f"\n👤 Агент: {e(staff_name(ag))}"
-    to_lead_staff(lead, text, lead_btn(lid), keys=("operator_id",))
+    to_lead_staff(lead, text, lead_btn(lid))
 
 
 @safe

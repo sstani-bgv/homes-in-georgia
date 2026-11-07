@@ -43,8 +43,9 @@ services:
     command: ["sh", "-c", "cd bot && ./refresh_loop.sh"]
     depends_on: { api: { condition: service_started } }
 
-  # Optional operator userbot (Telethon, the operator's own account; backend/app/telegram/userbot.py): set
-  # OPERATOR_USERBOT_SESSION, API_ID, API_HASH and USERBOT_URL=http://userbot:8091 in .env, then uncomment. Never publish its port.
+  # Operator userbot (Telethon, the operator's own account; backend/app/telegram/userbot.py): sends viewing slots to
+  # clients. Set OPERATOR_USERBOT_SESSION, API_ID, API_HASH and USERBOT_URL=http://userbot:8091 in .env, then uncomment
+  # (docs/DEPLOY.md «Один бот и userbot оператора»). Never publish its port.
   # userbot:
   #   <<: *app
   #   command: ["sh", "-c", "cd backend && python -m app.telegram.userbot"]

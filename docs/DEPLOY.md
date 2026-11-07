@@ -64,3 +64,28 @@ $C up -d --build                                        # api: alembic upgrade h
 `python -m app.embeddings backfill` (в каталоге backend) заполняет `properties.text_embedding` / `photo_embedding`.
 Нужны torch и transformers (`bot/requirements-embed.txt`). В образ `deploy/Dockerfile` они пока не входят, поэтому
 там команда ничего не делает; ставить их будем вместе с поиском похожих (этап 4).
+
+## Один бот и userbot оператора (этап 9)
+
+Отдельного рабочего бота больше нет: `STAFF_BOT_TOKEN` удалён, клиентам и сотрудникам пишет один бот (`BOT_TOKEN`).
+Если `STAFF_BOT_TOKEN` остался в `.env`, его можно стереть; если панель открывали из рабочего бота, Mini App теперь
+открывается только из основного (`/panel`), а основного бота нужно добавить в группу операторов, если его там нет.
+
+Клиент получает время просмотра в личке оператора: userbot (аккаунт оператора) отправляет inline-результат бота
+`slots:<token>` с кнопками, нажатия приходят боту. Нужно:
+
+1. **Inline-режим бота.** В @BotFather: `/setinline` → выбрать бота → любой placeholder (например «slots»). Без
+   этого inline-запрос не проходит, и userbot шлёт время нумерованным списком (клиент отвечает цифрой).
+2. **Сессия оператора.** `OPERATOR_USERBOT_SESSION` — Telethon StringSession аккаунта оператора, `API_ID`/`API_HASH`
+   с https://my.telegram.org того же аккаунта. Сессию создаёт сам оператор на своём компьютере (команда в начале
+   `backend/app/telegram/userbot.py`), вводит код из Telegram сам; строка = полный вход в аккаунт, кладётся только в
+   `.env` сервера, при утечке — завершить сеанс в Telegram → Настройки → Устройства. Для первого живого теста
+   оператором будет рабочий аккаунт владельца.
+3. **Сервис.** В `.env`: `USERBOT_URL=http://userbot:8091`, `BOT_USERNAME` = username бота (без @),
+   `OPERATOR_TG_USERNAME` = username аккаунта оператора (на него ведёт кнопка после ❤️). В
+   `deploy/docker-compose.yml` раскомментировать сервис `userbot`, затем `$C up -d userbot bot api worker`.
+   При старте userbot записывает свой Telegram id в `settings.userbot_tg_id`: бот отвечает на `slots:` только
+   этому аккаунту.
+
+Миграция `0013` (`leads.slots_token`) применяется как обычно при старте api. Без userbot «Отправить клиенту»
+возвращает «Userbot оператора не подключён», заявка остаётся у агента без отправленного времени.

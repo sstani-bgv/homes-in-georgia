@@ -164,31 +164,6 @@ class NotifyTest(unittest.TestCase):
     def buttons(self, call):
         return [(b["text"], b.get("callback_data") or b.get("url") or b.get("web_app", {}).get("url")) for row in self.fake.markup(call) for b in row]
 
-    def test_client_reply_recipient_fallback(self):
-        self.lead.update(operator_id=self.op, agent_id=self.ag)
-        mark = self.fake.mark()
-        notify.lead_client_reply(self.lead, "Завтра в 13:00")
-        for chat in (500, 600):  # operator AND agent, in private, with the lead button
-            msg = self.last("sendMessage", chat, mark)
-            self.assertIn(f"Ответ клиента по заявке #{self.lid}</b>", msg["text"])
-            self.assertIn("Завтра в 13:00", msg["text"])
-            self.assertEqual(self.buttons(msg), [("📋 Открыть заявку", f"https://crm.test/m/leads/{self.lid}")])
-        self.assertFalse(self.fake.calls(chat=-100777, since=mark))
-        with db.tx() as c:
-            c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.op,))
-        mark = self.fake.mark()
-        notify.lead_client_reply(self.lead, "В 14:00")
-        delivered = self.last("sendMessage", 600, mark)["text"]
-        self.assertIn("В 14:00", delivered)
-        self.assertNotIn("Анна", delivered)
-        self.assertNotIn("anna", delivered)
-        self.assertIn("В 14:00", self.last("sendMessage", -100777, mark)["text"])  # operator unreachable: operators chat
-        with db.tx() as c:
-            c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.ag,))
-        mark = self.fake.mark()
-        notify.lead_client_reply(self.lead, "Уточнение")
-        self.assertIn("Уточнение", self.last("sendMessage", -100777, mark)["text"])
-
     def test_client_time_to_operator(self):
         at = datetime.now(texts.tz()).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
         lead = {**self.lead, "operator_id": self.op, "agent_id": self.ag, "viewing_at": at}
@@ -240,20 +215,20 @@ class NotifyTest(unittest.TestCase):
         with db.tx() as c:
             c.execute("UPDATE clients SET lang = 'en' WHERE id = ?", (self.cid,))
         at = datetime.now(texts.tz()).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        with db.tx() as c:  # what add_slots stores: the slot set and its inline-query token
+            c.execute("UPDATE leads SET status = 'slots_sent', slots_token = 'tok123456' WHERE id = ?", (self.lid,))
+            ids = [c.execute("INSERT INTO lead_slots (lead_id, starts_at) VALUES (?, ?) RETURNING id", (self.lid, t)).fetchone()[0]
+                   for t in (at, at + timedelta(hours=5))]
         m = self.fake.mark()
-        notify.slots_to_client(self.lead, [{"id": 5, "starts_at": at}, {"id": 6, "starts_at": at + timedelta(hours=5)}])
-        sl = self.last("sendMessage", 42, m)
-        self.assertIn("<b>Vake · 2 bedrooms · $850</b>", sl["text"])
-        self.assertEqual(self.buttons(sl), [("Open the listing", "https://t.me/rent_tbilisi_ge/1"), ("Tomorrow 12:00", "ls:pick:5"),
-                                            ("Tomorrow 17:00", "ls:pick:6"), ("🕐 Suggest my own time", f"ls:own:{self.lid}")])
+        title, text, rows = notify.slots_card("tok123456")                # the bot's inline answer for the operator's userbot
+        self.assertEqual(title, "Vake · 2 bedrooms · $850")
+        self.assertIn("<b>Vake · 2 bedrooms · $850</b>", text)
+        self.assertEqual([(b["text"], b.get("callback_data") or b.get("url")) for r in rows for b in r],
+                         [("Open the listing", "https://t.me/rent_tbilisi_ge/1"), ("Tomorrow 12:00", f"ls:pick:{ids[0]}"),
+                          ("Tomorrow 17:00", f"ls:pick:{ids[1]}"), ("🕐 Another time", f"ls:own:{self.lid}")])
+        self.assertEqual(notify.slots_to_client(self.lead, []), notify.USERBOT_OFF)   # no USERBOT_URL: an error for the agent
+        self.assertFalse(self.fake.calls(chat=42, since=m))               # never through the bot
         lead = {**self.lead, "agent_id": self.ag, "viewing_at": at}
-        m = self.fake.mark()
-        notify.slot_confirmed_client(lead, {"name": "Георгий", "username": "geo", "phone": "+995 1"})
-        self.assertEqual(self.buttons(self.last("editMessageReplyMarkup", 42, m)), [("✓ Tomorrow 12:00", "noop")])
-        conf = self.last("sendMessage", 42, m)
-        self.assertIn("Your agent: <b>Георгий</b>", conf["text"])
-        self.assertEqual([b[1] for b in self.buttons(conf)][0], "https://t.me/geo")
-        self.assertIn(f"lv:late:{self.lid}", [b[1] for b in self.buttons(conf)])
         m = self.fake.mark()
         notify.post_viewing_survey(lead)
         self.assertEqual([b[1] for b in self.buttons(self.last("sendMessage", 42, m))],
@@ -326,7 +301,11 @@ class NotifyTest(unittest.TestCase):
         finally:
             os.environ["BOT_TOKEN"] = "1:FAKE"
         self.assertIsNone(notify.lead_new_group(None))
-        self.assertIsNone(notify.slots_to_client({"id": 999999}, [object()]))
+        os.environ["USERBOT_URL"] = "http://127.0.0.1:9"
+        try:
+            self.assertIsNone(notify.slots_to_client({"id": 999999}, [object()]))
+        finally:
+            os.environ.pop("USERBOT_URL")
         self.assertIsNone(tgc.call("sendMessage", files={"photo": "/nonexistent.jpg"}, chat_id=1))
 
 

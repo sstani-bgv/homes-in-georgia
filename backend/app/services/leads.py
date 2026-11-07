@@ -1,5 +1,6 @@
 """Funnel 2: client like → operator → agent → slots → viewing → outcome → deal (docs/ARCHITECTURE.md §4.3, §5)."""
 import logging
+import secrets
 from datetime import datetime, timedelta
 
 from sqlalchemy import Text, and_, cast, func, or_, select
@@ -12,7 +13,7 @@ from app.services import jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import extract_phones
 from app.services.errors import DomainError, forbidden
-from app.telegram import notify, texts, userbot
+from app.telegram import notify, texts
 
 log = logging.getLogger(__name__)
 
@@ -366,20 +367,6 @@ def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) ->
     return lead
 
 
-def message_client(db: Session, lead_id: int, text: str, actor: User) -> Lead:
-    """CRM «Написать клиенту»: from the operator's account (userbot) once the client wrote to the operator's DM, else
-    through the bot."""
-    lead = _lead(db, lead_id)
-    client = db.get(Client, lead.client_id)
-    dm = userbot.dm_active(client) and userbot.send_to_client(client, text)
-    if not dm and not _notify("client_message", client, text, lead.id):
-        raise DomainError("delivery_failed", "Не удалось доставить сообщение клиенту в Telegram. Попробуйте ещё раз.", status=502)
-    _event(db, lead, "message_to_client", actor, note=text, via="dm" if dm else "bot")
-    _touch(lead)
-    db.commit()
-    return lead
-
-
 def log_operator_dm(db: Session, lead_id: int, text: str, actor: User | None = None) -> Lead:
     """The operator wrote to the client from their own Telegram (seen by the userbot): history only."""
     lead = _lead(db, lead_id)
@@ -389,19 +376,17 @@ def log_operator_dm(db: Session, lead_id: int, text: str, actor: User | None = N
     return lead
 
 
-def message_from_client(db: Session, lead_id: int, client_id: int, text: str, via: str = "bot") -> Lead:
-    """via="dm": written to the operator's own account (userbot); the operator already has it, so staff aren't notified."""
+def message_from_client(db: Session, lead_id: int, client_id: int, text: str) -> Lead:
+    """The client wrote to the operator's own account (seen by the userbot): history only, the operator already has it."""
     lead = _lead(db, lead_id, lock=True)
     if lead.client_id != client_id:
         raise forbidden("not your lead")
     text = text.strip()
     if not text:
         raise DomainError("empty_message", "message is empty")
-    _event(db, lead, "message_from_client", label="client", note=text, via=via)
+    _event(db, lead, "message_from_client", label="client", note=text, via="dm")
     _touch(lead)
     db.commit()
-    if via != "dm":
-        _notify("lead_client_reply", lead, text)
     return lead
 
 
@@ -414,7 +399,9 @@ def reject_past_slots(starts: list[datetime]) -> None:
 
 
 def add_slots(db: Session, lead_id: int, starts: list[datetime], actor: User | None) -> Lead:
-    """C7: agent enters free windows → bot sends them to the client (A4a); agent SLA stops."""
+    """C7: agent enters free windows → the operator's userbot sends them to the client as the bot's inline result
+    «slots:<token>» (A4a, notify.slots_to_client); agent SLA stops. Not delivered (no userbot) → the lead is back at
+    agent_assigned without these slots, and the agent gets the reason (503)."""
     lead = _lead(db, lead_id, lock=True)
     _require_agent_or_staff(lead, actor)
     _require_status(lead, "agent_assigned", "slots_sent")
@@ -424,11 +411,20 @@ def add_slots(db: Session, lead_id: int, starts: list[datetime], actor: User | N
     db.query(LeadSlot).filter(LeadSlot.lead_id == lead.id, LeadSlot.chosen.is_(False)).delete()
     slots = [LeadSlot(lead_id=lead.id, starts_at=s, created_by=actor.id if actor else None) for s in starts]
     db.add_all(slots)
+    lead.slots_token = secrets.token_urlsafe(9)
     _touch(lead, "slots_sent")
     _set_sla(db, lead, None)
     _event(db, lead, "slots_sent", actor, slots=[s.isoformat() for s in starts])
-    db.commit()
-    _notify("slots_to_client", lead, slots)
+    db.commit()  # before the send: the bot reads the slots by the token while the userbot asks it
+    if err := _notify("slots_to_client", lead, slots):
+        lead = _lead(db, lead_id, lock=True)
+        db.query(LeadSlot).filter(LeadSlot.lead_id == lead.id, LeadSlot.chosen.is_(False)).delete()
+        lead.slots_token = None
+        _touch(lead, "agent_assigned")
+        _set_sla(db, lead, "agent_slots")
+        _event(db, lead, "slots_not_delivered", label="bot", note=err)
+        db.commit()
+        raise DomainError("userbot_off", err, 503)
     return lead
 
 

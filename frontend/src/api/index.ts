@@ -113,7 +113,6 @@ export const api = {
     reschedule: (id: number) => http.post<Lead>(`/leads/${id}/reschedule`),
     outcome: (id: number, outcome: string, reason?: string) => http.post<Lead>(`/leads/${id}/outcome`, { outcome, reason }),
     cancel: (id: number, reason: string) => http.post<Lead>(`/leads/${id}/cancel`, { reason }),
-    message: (id: number, text: string) => http.post<unknown>(`/leads/${id}/message`, { text }),
   },
 
   clients: {

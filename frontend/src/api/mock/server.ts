@@ -379,11 +379,6 @@ on('POST', '/leads/:id/cancel', (m, b) => {
   leadEvent(l, 'cancelled', `Отменено: ${b.reason || ''}`, u);
   return leadOut(l, u);
 });
-on('POST', '/leads/:id/message', (m, b) => {
-  const u = currentUser(); const l = getLead(Number(m[1]));
-  leadEvent(l, 'message', `Сообщение клиенту: ${b.text}`, u);
-  return { ok: true };
-});
 
 // ---------- deals ----------
 on('POST', '/deals/calc', (_m, b) => calc(b));

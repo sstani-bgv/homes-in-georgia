@@ -163,8 +163,8 @@ def reset(cl, lang_hint=None):
     """New conversation (/start): forget the request; likes and leads stay.
     lang_hint (Telegram language_code): the greeting follows the app language until the client writes something."""
     def fn(st, r):
-        # card texts (A3 edits), T14 answers, the language picked by the client and the operator DM mark outlive a /start
-        keep = {k: st[k] for k in ("cards", "t14", "lang_set", "operator_dm", "dm_choice") if k in st}
+        # card texts (A3 edits), T14 answers, the language picked by the client and the DM slot choice outlive a /start
+        keep = {k: st[k] for k in ("cards", "t14", "lang_set", "dm_choice") if k in st}
         st.clear(), st.update(json.loads(json.dumps(NEW_STATE)), **keep)
         if lang_hint and not st.get("lang_set"):
             r["lang"] = detect_lang(None, hint=lang_hint)

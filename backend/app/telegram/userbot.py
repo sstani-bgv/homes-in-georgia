@@ -1,18 +1,23 @@
-"""Operator userbot: the operator's own Telegram account (Telethon), so after ❤️ the dialogue lives in the operator's DMs
-(notify.handoff gives the client a t.me/<operator>?text=… button; the client sends the first message) and stays visible
-in the CRM. Enabled only when OPERATOR_USERBOT_SESSION (a Telethon StringSession) + API_ID + API_HASH are set.
+"""Operator userbot: the operator's own Telegram account (Telethon). After ❤️ the dialogue lives in the operator's DMs
+(notify.handoff gives the client a t.me/<operator>?text=… button; the client sends the first message); the operator
+talks to clients there, and the CRM keeps the history. Enabled only when OPERATOR_USERBOT_SESSION (a Telethon
+StringSession) + API_ID + API_HASH are set.
 
 Run: `cd backend && python -m app.telegram.userbot` (compose: the commented `userbot` service). One process owns the
 session (two clients on one session get it revoked), so the CRM/bot reach it over HTTP: USERBOT_URL (e.g.
-http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id, text, options?, choice?}.
+http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id, text, options?, choice?, inline?}.
 
 - incoming private message -> the client (clients.external_id = sender id, else the @username) and its latest open lead
-  -> lead event message_from_client (label client_dm); clients.state["operator_dm"] marks that the client wrote, from
-  then on leads.message_client and notify.slots_to_client go through the userbot (else the bot, as before);
-- the operator's own messages to a client typed in Telegram -> message_to_client (label operator_dm);
-- choices: a user account can't send inline buttons, so options go as a numbered list («1. Завтра 12:00») and
-  clients.state["dm_choice"] keeps what the numbers mean; a reply «1»/«2.»/«#3» picks the slot (leads.choose_slot),
-  any other reply while slots wait is the client's own time (leads.client_own_time). Bot buttons keep working as well.
+  -> lead event message_from_client (via dm);
+- the operator's own messages to a client typed in Telegram -> message_to_client (via dm);
+- viewing slots (notify.slots_to_client): a user account can't attach buttons, but it can send an inline-bot result
+  («via @bot») that carries the bot's keyboard: inline_query(BOT_USERNAME, "slots:<token>") -> results[0].click(client).
+  The presses go to the bot (journey.on_client_journey, inline_message_id). On start the userbot saves its Telegram id
+  (settings.userbot_tg_id): the bot answers «slots:» queries from that account only. If the inline query fails
+  (inline mode off, bot down) the options go as a numbered list («1. Завтра 12:00»);
+- clients.state["dm_choice"] keeps what the numbers mean; a reply «1»/«2.»/«#3» picks the slot (leads.choose_slot),
+  a reply that reads as a time (or any reply after «Другое время», dm_choice.own) is the client's own time
+  (leads.client_own_time).
 
 Creating the StringSession (the operator logs in THEMSELVES, on their own computer; nobody else sees the code):
     pip install telethon
@@ -47,17 +52,6 @@ def enabled():
     return all(conf(k).strip() for k in ("OPERATOR_USERBOT_SESSION", "API_ID", "API_HASH"))
 
 
-def state(cl):
-    """clients.state of a row dict (decoded or not) or an ORM Client."""
-    st = cl.get("state") if isinstance(cl, dict) else getattr(cl, "state", None)
-    return st if isinstance(st, dict) else store.jload(st, {})
-
-
-def dm_active(cl):
-    """The client has written to the operator's DM and the userbot is reachable: talk there instead of the bot."""
-    return bool(conf("USERBOT_URL").strip() and state(cl).get("operator_dm"))
-
-
 def set_state(client_id, **kv):
     """Merge keys into clients.state in one statement (no read-modify-write)."""
     store.q("UPDATE clients SET state = (COALESCE(NULLIF(state, ''), '{}')::jsonb || %s::jsonb)::text WHERE id = %s",
@@ -66,19 +60,20 @@ def set_state(client_id, **kv):
 
 # ---------- the CRM / bot side ----------
 
-def send_to_client(cl, text, options=None, choice=None):
-    """Send through the userbot (USERBOT_URL) -> {"message_id": …} or None (not configured / failed: use the bot)."""
+def send_to_client(cl, text, options=None, choice=None, inline=None):
+    """Send through the userbot (USERBOT_URL) -> {"message_id": …} or None (not configured / failed). inline: the bot's
+    inline query to send as the message (options are then the numbered fallback)."""
     url = conf("USERBOT_URL").strip().rstrip("/")
     cid = cl.get("id") if isinstance(cl, dict) else getattr(cl, "id", None)
     if not url or not cid:
         return None
     try:
         import httpx
-        r = httpx.post(f"{url}/send", json={"client_id": cid, "text": text, "options": options, "choice": choice},
+        r = httpx.post(f"{url}/send", json={"client_id": cid, "text": text, "options": options, "choice": choice, "inline": inline},
                        headers={"X-Userbot-Token": conf("SECRET_KEY")}, timeout=30)
         body = r.json()
         return body if r.status_code == 200 and body.get("ok") else None
-    except Exception as e:  # noqa: BLE001 — the bot is the fallback
+    except Exception as e:  # noqa: BLE001 — the caller reports it
         log.warning("userbot send to client %s failed: %r", cid, e)
         return None
 
@@ -128,17 +123,15 @@ def on_incoming(tg_id, username, text):
     cl = match_client(tg_id, username)
     if not cl or not (text or "").strip():
         return "unknown"
-    if not cl["state"].get("operator_dm"):
-        set_state(cl["id"], operator_dm=True)
     choice = cl["state"].get("dm_choice") or {}
-    if choice.get("slots"):
-        n = parse_choice(text, len(choice["slots"]))
+    if choice.get("slots") or choice.get("own"):
+        n = not choice.get("own") and parse_choice(text, len(choice["slots"]))
         if n:
             _, err = _svc(leads.choose_slot, choice["slots"][n - 1], cl["id"])
             if not err:
                 set_state(cl["id"], dm_choice=None)
                 return "slot"
-        elif TIME_HINT.search(text):
+        elif choice.get("own") or TIME_HINT.search(text):
             _, err = _svc(leads.client_own_time, choice["lead"], text)
             if not err:
                 set_state(cl["id"], dm_choice=None)
@@ -146,7 +139,7 @@ def on_incoming(tg_id, username, text):
     lead = open_lead(cl["id"])
     if not lead:
         return "no_lead"
-    _, err = _svc(leads.message_from_client, lead["id"], cl["id"], text, via="dm")
+    _, err = _svc(leads.message_from_client, lead["id"], cl["id"], text)
     return "logged" if not err else err
 
 
@@ -168,9 +161,10 @@ def on_outgoing(peer_id, text, me_id=None):
     return "logged" if not err else err
 
 
-async def send(client, client_id, text, options=None, choice=None):
+async def send(client, client_id, text, options=None, choice=None, inline=None):
     """Telethon send to a client -> message id. StringSession keeps no access hashes across restarts: a user not in the
-    cache is found by @username (or after get_dialogs at start)."""
+    cache is found by @username (or after get_dialogs at start). inline: the bot's inline query whose first result is
+    sent (its buttons come with it); any failure there -> `text` + numbered `options`."""
     cl = match_client_by_id(client_id)
     if not cl:
         raise LookupError("no such client")
@@ -181,6 +175,15 @@ async def send(client, client_id, text, options=None, choice=None):
         if not cl.get("username"):
             raise
         entity = cl["username"]
+    if inline:
+        try:
+            res = await client.inline_query(conf("BOT_USERNAME").strip().lstrip("@"), inline)
+            m = await res[0].click(entity)
+            if choice:
+                set_state(client_id, dm_choice=choice)
+            return m.id
+        except Exception as e:  # noqa: BLE001 — inline mode off, bot down, no result: the numbered text
+            log.warning("userbot inline %r to client %s failed: %r", inline, client_id, e)
     body = options_text(text, options, cl.get("lang")) if options else text
     if len(SENT) > 1000:  # ponytail: own sends may never come back as events; a full reset is enough to bound it
         SENT.clear()
@@ -215,8 +218,8 @@ def serve_http(client, loop, port):
                 return reply(403, {"ok": False})
             try:
                 p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-                mid = asyncio.run_coroutine_threadsafe(send(client, int(p["client_id"]), p["text"], p.get("options"), p.get("choice")),
-                                                       loop).result(30)
+                mid = asyncio.run_coroutine_threadsafe(send(client, int(p["client_id"]), p["text"], p.get("options"), p.get("choice"),
+                                                            p.get("inline")), loop).result(30)
                 reply(200, {"ok": True, "message_id": mid})
             except Exception as e:  # noqa: BLE001
                 log.warning("userbot /send failed: %r", e)
@@ -234,6 +237,8 @@ async def run():
     if not await client.is_user_authorized():  # never an interactive login on the server
         raise SystemExit("userbot: OPERATOR_USERBOT_SESSION is not a valid login; the operator must create a new one")
     me = await client.get_me()
+    store.q("INSERT INTO settings (key, value) VALUES ('userbot_tg_id', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (str(me.id),))  # the bot answers «slots:» inline queries from this account only
     await client.get_dialogs(limit=300)  # fills the entity cache (access hashes) for clients who already wrote
 
     @client.on(events.NewMessage(incoming=True, func=lambda ev: ev.is_private))
@@ -244,7 +249,7 @@ async def run():
         res = await asyncio.to_thread(on_incoming, ev.sender_id, getattr(sender, "username", None), ev.raw_text)
         log.info("DM from %s: %s", ev.sender_id, res)
 
-    @client.on(events.NewMessage(outgoing=True, func=lambda ev: ev.is_private))
+    @client.on(events.NewMessage(outgoing=True, func=lambda ev: ev.is_private and not ev.message.via_bot_id))  # not the slot cards
     async def outgoing(ev):
         await asyncio.to_thread(on_outgoing, ev.chat_id, ev.raw_text, me.id)
 

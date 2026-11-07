@@ -1,7 +1,10 @@
 """End-to-end client journey (docs/user-journey.txt, funnel 2) through the real bot application and the real backend
 services against the fake Bot API (test/e2e/fake_tg.py) and the test Postgres schema; LLM and geocoding are stubbed:
-/start → questionnaire (A1a-A2a) → search → ❤️ (A3) → operators group take + assign (B1/B3) → agent quick slots (C6/C7)
-→ client picks a slot (A4) → contacts to the agent (C8) → late → survey (A5a/C9a) → deal confirmed (C9c) → T14 (A6)."""
+/start → questionnaire (A1a-A2a) → search → ❤️ (A3 + DM handoff) → operators group take + assign (B1/B3) → agent quick
+slots (C6/C7) → the operator's userbot sends the bot's inline slot card into the client's DM (A4a) → the client presses a
+slot on that inline message (A4b, edited «✅ Вы выбрали») → contacts to the agent (C8), details as the operator's DM →
+late → survey (A5a/C9a) → deal confirmed (C9c) → T14 (A6). The userbot is the real app.telegram.userbot HTTP endpoint
+over a fake Telethon client (FakeUserbot) that asks the bot through the fake Bot API."""
 import asyncio
 import os
 import sys
@@ -17,6 +20,41 @@ import db
 
 sys.path.insert(0, str(Path(__file__).parent / "e2e"))
 from fake_tg import FakeTelegram  # noqa: E402
+
+class Msg:
+    def __init__(self, mid):
+        self.id = mid
+
+
+class FakeUserbot:
+    """Telethon's TelegramClient as userbot.send uses it, for the operator's account `me`: inline_query pushes an
+    inline_query update to the bot and waits for its answerInlineQuery; results[i].click(chat) puts the result into
+    the fake log as a «via @bot» message (fake.inline_message); send_message logs a plain DM (fake.userbot_text)."""
+    def __init__(self, fake, me):
+        self.fake, self.me = fake, me
+
+    async def get_input_entity(self, peer):
+        return peer
+
+    async def send_message(self, entity, text, parse_mode=None):
+        self.fake.userbot_text(int(entity), text)
+        return Msg(1)
+
+    async def inline_query(self, bot, query):
+        fake, mark = self.fake, self.fake.mark()
+        iq = fake.inline_query(self.me, query)
+        ans = await asyncio.to_thread(fake.wait, lambda calls: next((c for c in calls if c["method"] == "answerInlineQuery"
+                                                                     and c["inline_query_id"] == iq), None), 20, mark, "inline answer")
+
+        class Result:
+            def __init__(self, r):
+                self.r = r
+
+            async def click(self, entity):
+                fake.inline_message(int(entity), self.r)
+                return Msg(2)
+        return [Result(r) for r in ans["results"]]
+
 
 CLIENT = {"id": 1001, "name": "Анна", "username": "anna_e2e", "lang": "ru"}
 OPERATOR = {"id": 5001, "name": "Нино", "username": "nino_e2e"}
@@ -38,8 +76,13 @@ class JourneyE2E(unittest.TestCase):
         cls.tmp = Path(__file__).parent / "_e2e_tmp"
         cls.fake = FakeTelegram(str(cls.tmp))
         port = cls.fake.serve()
+        from app.telegram import userbot
+        cls.ub_loop = asyncio.new_event_loop()                      # the operator's userbot: its own loop, as in its process
+        threading.Thread(target=cls.ub_loop.run_forever, daemon=True).start()
+        cls.ub = userbot.serve_http(FakeUserbot(cls.fake, OPERATOR), cls.ub_loop, 0)
         cls.env = {"TG_API_BASE": f"http://127.0.0.1:{port}", "BOT_TOKEN": "123456:E2E-FAKE", "PUBLIC_URL": "https://crm.e2e.test",
-                   "OPERATORS_CHAT_ID": str(GROUP["id"]), "AGENT_CODE": "e2e-code", "WORK_GROUP_CHAT_ID": "", "SUPERADMIN_TG_IDS": ""}
+                   "OPERATORS_CHAT_ID": str(GROUP["id"]), "AGENT_CODE": "e2e-code", "WORK_GROUP_CHAT_ID": "", "SUPERADMIN_TG_IDS": "",
+                   "USERBOT_URL": f"http://127.0.0.1:{cls.ub.server_address[1]}", "BOT_USERNAME": "homes_in_georgia_test_bot"}
         cls.saved = {k: os.environ.get(k) for k in cls.env}
         os.environ.update(cls.env)
         pg.reset()
@@ -53,6 +96,7 @@ class JourneyE2E(unittest.TestCase):
             c.execute("INSERT INTO users (tg_id, name, username, role) VALUES (?, 'Тамара', 'tamara_e2e', 'operator')", (OPERATOR2["id"],))
             c.execute("INSERT INTO users (tg_id, name, username, role, phone, districts) VALUES (?, 'Георгий', 'georgiy_e2e', 'agent', "
                       "'+995 555 000 588', '[\"Ваке\"]')", (AGENT["id"],))
+        db.set_setting("userbot_tg_id", OPERATOR["id"])               # what the userbot saves on start: its account = Нино
         cls.prompts = []
         core.ask = cls.fake_ask
         core.geocode = lambda q: None
@@ -80,6 +124,8 @@ class JourneyE2E(unittest.TestCase):
         cls.stop.set()
         cls.thread.join(15)
         cls.fake.server.shutdown()
+        cls.ub.shutdown()
+        cls.ub_loop.call_soon_threadsafe(cls.ub_loop.stop)
         for k, v in cls.saved.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
         import shutil
@@ -123,6 +169,20 @@ class JourneyE2E(unittest.TestCase):
         self.fake.press(user, out, text, group=group)
         self.fake.wait(lambda calls: any(c["method"] == "answerCallbackQuery" for c in calls), since=mark, what=f"answer to {text!r}")
         return mark
+
+    def inline_card(self, chat, since, what="slot card via the bot"):
+        return self.find(chat, lambda c: c["method"] == "viaBot", since, what)
+
+    def press_inline(self, user, card, text):
+        """-> (the answerCallbackQuery, the edit of that inline message or None)."""
+        mark = self.fake.mark()
+        self.fake.press_inline(user, card, text)
+        ans = self.fake.wait(lambda calls: next((c for c in calls if c["method"] == "answerCallbackQuery"), None), since=mark,
+                             what=f"answer to {text!r}")
+        time.sleep(0.3)
+        ed = next((c for c in self.fake.calls(since=mark) if c["method"] == "editMessageText"
+                   and c.get("inline_message_id") == card["inline_message_id"]), None)
+        return ans, ed
 
     def say(self, user, text):
         mark = self.fake.mark()
@@ -246,22 +306,50 @@ class JourneyE2E(unittest.TestCase):
         m = self.press(AGENT, AGENT["id"], times[1], since=m)
         m = self.press(AGENT, AGENT["id"], "📤 Отправить клиенту · 2", since=m)
         self.with_text(AGENT["id"], "✅ Отправил клиенту", m)
-        slots = self.with_text(cid, "Выберите удобное время", m)                   # A4a
+        slots = self.inline_card(cid, m)                                         # A4a: in the operator's DM, «via @bot»
+        iq = next(c for c in f.calls(since=m) if c["method"] == "answerInlineQuery")
+        self.assertEqual((iq["cache_time"], iq["is_personal"]), ("0", "true"))
+        self.assertIn("Выберите удобное время", slots["text"])
         labels = [b["text"] for row in f.markup(slots) for b in row]
-        self.assertEqual(labels[-1], "🕐 Предложить своё время")
+        self.assertEqual(labels[-1], "🕐 Другое время")
         self.assertIn(times[0], labels)
+        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing from the bot itself
+        with db.tx() as c:
+            token = c.execute("SELECT slots_token FROM leads WHERE id = 1").fetchone()[0]
+        for who in (CLIENT, AGENT):                                              # only the operator's account resolves the token
+            mark = f.mark()
+            qid = f.inline_query(who, f"slots:{token}")
+            ans = f.wait(lambda calls: next((c for c in calls if c["method"] == "answerInlineQuery" and c["inline_query_id"] == qid), None),
+                         since=mark, what="rejected inline query")
+            self.assertEqual(ans["results"], [])
 
-        m = self.press(CLIENT, cid, times[0], since=m)                           # A4b
-        conf = self.with_text(cid, "✅ <b>Просмотр:", m)
-        self.assertIn("Ваш агент: <b>Георгий</b>", conf["text"])
-        self.assertIn("+995 555 000 588", conf["text"])
-        self.assertEqual(f.markup(conf)[0][0]["url"], "https://t.me/georgiy_e2e")
+        ans, ed = self.press_inline(OPERATOR, slots, times[0])                   # someone else presses the client's card
+        self.assertEqual((ans["text"], ans["show_alert"], ed), ("Это не ваша заявка", "true", None))
+        with db.tx() as c:
+            self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "slots_sent")
+
+        m = f.mark()
+        ans, ed = self.press_inline(CLIENT, slots, times[0])                     # A4b
+        self.assertEqual(ans.get("text"), "✅")
+        self.assertEqual(ed["text"], f"✅ Вы выбрали: {times[0]}")
+        self.assertNotIn("reply_markup", ed)                                     # the slot buttons are gone
+        with db.tx() as c:
+            self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "time_chosen")
+        conf = self.find(cid, lambda c: c["method"] == "userbotText" and "✅ Просмотр:" in c["text"], m, "details from the operator")
+        for want in ("Ваш агент: Георгий", "+995 555 000 588", "https://t.me/georgiy_e2e", "ул. Каштановая, 12"):
+            self.assertIn(want, conf["text"])
         contacts = self.with_text(AGENT["id"], "🔓 <b>Контакты клиента</b>", m)   # C8
         self.assertIn("@anna_e2e", contacts["text"])
         picked = self.with_text(OPERATOR["id"], "Клиент выбрал время просмотра · заявка #1", m)   # the operator too
         self.assertIn("Агент: Георгий", picked["text"])
-        self.find(cid, lambda c: c["method"] == "editMessageReplyMarkup" and f.markup(c)[0][0]["text"] == "✓ " + times[0], m, "✓ slot")
+        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])
+        with db.tx() as c:
+            hist = [r[0] for r in c.execute("SELECT kind FROM lead_events WHERE lead_id = 1 ORDER BY id")]
+        self.assertIn("time_chosen", hist)                                       # the CRM history shows the client's choice
 
+        from app.telegram import notify, store
+        m = f.mark()
+        notify.viewing_reminder(store.lead(1))                                   # the worker's job an hour before
         m = self.press(CLIENT, cid, "⏰ Опаздываю", since=m)
         self.with_text(AGENT["id"], "опаздывает на просмотр #1", m)
 
@@ -288,7 +376,6 @@ class JourneyE2E(unittest.TestCase):
         self.svc(lambda s: deals.confirm(s, deal.id, self.user(s, OPERATOR["id"])))
         self.with_text(AGENT["id"], "Сделка подтверждена", m)                    # C9c
 
-        from app.telegram import notify
         m = f.mark()
         notify.t14_client(deal)                                                  # the worker's t14_client job
         self.with_text(cid, "вы живёте в новой квартире 14 дней", m)             # A6
@@ -306,7 +393,9 @@ class JourneyE2E(unittest.TestCase):
             self.assertEqual([tuple(r) for r in evs], [("client", 3, 2, 1, False, None), ("client", None, None, None, True, "Не работает бойлер")])
             self.assertEqual(c.execute("SELECT status FROM leads WHERE id = 1").fetchone()[0], "rented")
             kinds = {r[0] for r in c.execute("SELECT DISTINCT kind FROM messages")}
-        self.assertTrue({"card", "group_lead", "agent_lead", "slots", "survey_client", "survey_agent"} <= kinds, kinds)
+        self.assertTrue({"card", "group_lead", "agent_lead", "survey_client", "survey_agent"} <= kinds, kinds)
+        self.assertFalse([b for c in f.calls(chat=cid) for row in f.markup(c) for b in row         # no «Ответить» to the client
+                          if b["text"] == "💬 Ответить" or (b.get("callback_data") or "").startswith("lm:")])
 
         m = self.say(CLIENT, "/start")                                           # never re-asked
         self.with_text(cid, "С возвращением", m)
@@ -363,13 +452,15 @@ class JourneyE2E(unittest.TestCase):
         self.with_text(AGENT["id"], "Напишите свободное время", m)
         m = self.say(AGENT, "завтра 12:00, завтра 17:30")
         self.with_text(AGENT["id"], "✅ Отправил клиенту: Завтра 12:00, Завтра 17:30", m)
-        slots = self.with_text(u["id"], "Pick a convenient time", m)
+        slots = self.inline_card(u["id"], m)
+        self.assertIn("Pick a convenient time", slots["text"])
         self.assertEqual([b["text"] for row in f.markup(slots) for b in row],
-                         ["Open the listing", "Tomorrow 12:00", "Tomorrow 17:30", "🕐 Suggest my own time"])
-        m = self.press(u, u["id"], "🕐 Suggest my own time", since=m)
-        self.with_text(u["id"], "Write a time that suits you", m)
-        m = self.say(u, "Saturday after 3 pm")
-        self.with_text(u["id"], "Your time was saved", m)
+                         ["Open the listing", "Tomorrow 12:00", "Tomorrow 17:30", "🕐 Another time"])
+        _, ed = self.press_inline(u, slots, "🕐 Another time")
+        self.assertIn("Reply with a time that suits you", ed["text"])
+        from app.telegram import userbot
+        m = f.mark()
+        self.assertEqual(userbot.on_incoming(u["id"], "john_e2e", "Saturday after 3 pm"), "own_time")   # typed in the operator's DM
         again = self.with_text(AGENT["id"], "Клиент предложил своё время:</b> Saturday after 3 pm", m)
         self.with_text(OPERATOR["id"], f"Клиент предложил своё время · заявка #{lead.id}</b>\n«Saturday after 3 pm»", m)
         self.assertIn(f"ls:quick:{lead.id}", [b.get("callback_data") for row in f.markup(again) for b in row])
@@ -377,21 +468,14 @@ class JourneyE2E(unittest.TestCase):
             self.assertEqual(c.execute("SELECT status, client_note FROM leads WHERE id = ?", (lead.id,)).fetchone()[:],
                              ("slots_sent", "Saturday after 3 pm"))
 
-    def test_operator_message_replies(self):
-        """Explicit reply and Telegram reply-to stay on the correct lead; ordinary text stays a search."""
+    def test_client_text_refines_the_request(self):
+        """Operators talk to clients in their own DMs: the bot has no «Ответить» flow; a client's message is always a
+        search request, and an old «💬 Ответить» button (lm:) does nothing."""
         from app.services import leads
-        from app.telegram import notify
         f, u = self.fake, {"id": 1010, "name": "Лера", "username": "lera_e2e", "lang": "ru"}
         cl = core.client("tg", u["id"], chat_id=u["id"], name=u["name"], lang_hint="ru")
         first = self.svc(leads.create_from_like, cl["id"], "tg1")
-        second = self.svc(leads.create_from_like, cl["id"], "tg2")
-        for lead in (first, second):
-            self.svc(lambda s: leads.operator_take(s, lead.id, self.user(s, OPERATOR["id"])))
-        m = f.mark()
-        self.svc(lambda s: leads.message_client(s, first.id, "Когда удобно?", self.user(s, OPERATOR["id"])))
-        original = self.with_text(u["id"], "Когда удобно?", m)
-        self.svc(lambda s: leads.message_client(s, second.id, "Другой объект", self.user(s, OPERATOR["id"])))
-        # A normal message must not silently attach to the latest of two leads; it refines the request, and
+        self.svc(lambda s: leads.operator_take(s, first.id, self.user(s, OPERATOR["id"])))
         # (auto_push_variants=0) new variants come only by «Ещё»: no search until the button.
         before = len(self.prompts)
         mark = self.say(u, "Ищу квартиру до 900")
@@ -411,24 +495,15 @@ class JourneyE2E(unittest.TestCase):
             self.assertGreater(len(self.prompts), before)
         finally:
             db.set_setting("auto_push_variants", "0")
-        # The explicit callback chooses the original lead, not the most recent message.
+        old = {"chat": u["id"], "message_id": 999, "reply_markup": {"inline_keyboard": [[{"text": "💬 Ответить",
+                                                                                          "callback_data": f"lm:reply:{first.id}"}]]}}
         mark = f.mark()
-        f.press(u, original, "💬 Ответить")
-        self.with_text(u["id"], f"Напишите ответ по заявке #{first.id}", mark)
-        mark = self.say(u, "Завтра в 13:00")
-        self.with_text(OPERATOR["id"], f"Ответ клиента по заявке #{first.id}</b>\n\nЗавтра в 13:00", mark)
-        self.with_text(u["id"], "Ответ сохранён", mark)
-        # Native Telegram reply-to also resolves the exact originating request.
-        mark = f.mark()
-        mid, incoming = f.message(u, text="Можно в 14:00?")
-        incoming["reply_to_message"] = {"message_id": original["message_id"], "date": int(time.time()),
-                                       "chat": incoming["chat"], "text": "Когда удобно?"}
-        f.push("text", {"message": incoming}, {"chat": u["id"], "message_id": mid})
-        self.with_text(OPERATOR["id"], "Можно в 14:00?", mark)
+        f.press(u, old, "💬 Ответить")
+        f.wait(lambda calls: any(c["method"] == "answerCallbackQuery" for c in calls), since=mark, what="answer")
+        time.sleep(0.5)
+        self.assertFalse([c for c in f.calls(chat=u["id"], since=mark) if c["method"].startswith("send")])
         with db.tx() as c:
-            rows = c.execute("SELECT lead_id, note FROM lead_events WHERE kind = 'message_from_client' AND lead_id IN (?, ?) ORDER BY id",
-                             (first.id, second.id)).fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(first.id, "Завтра в 13:00"), (first.id, "Можно в 14:00?")])
+            self.assertEqual(c.execute("SELECT count(*) FROM lead_events WHERE kind = 'message_from_client'").fetchone()[0], 0)
 
     def test_z_staff_robustness(self):
         """An operator added in the CRM by @username takes a lead from the group; «📤 Отправить» tapped twice sends the
@@ -459,7 +534,7 @@ class JourneyE2E(unittest.TestCase):
         f.press(AGENT, send, "📤 Отправить клиенту · 1")
         f.press(AGENT, send, "📤 Отправить клиенту · 1")
         f.wait(lambda calls: len([c for c in calls if c["method"] == "answerCallbackQuery"]) >= 2, since=m, what="two answers")
-        self.with_text(u["id"], "Выберите удобное время", m)
+        self.inline_card(u["id"], m)
         time.sleep(1)
         self.assertEqual(len([c for c in f.calls(chat=u["id"], since=m) if "Выберите удобное время" in (c.get("text") or c.get("caption") or "")]), 1)
 

@@ -1,8 +1,8 @@
 """A minimal fake Telegram Bot API server for end-to-end tests.
 
 The real bot.py talks to it via TG_API_BASE (python-telegram-bot base_url / base_file_url). The test driver injects
-updates (messages, photos, web_app_data, callback queries) and reads every outgoing call the bot made.
-Nothing here touches the real Telegram API."""
+updates (messages, photos, web_app_data, callback queries, inline queries and presses on inline messages) and reads
+every outgoing call the bot made. Nothing here touches the real Telegram API."""
 import email
 import itertools
 import json
@@ -12,7 +12,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-JSON_KEYS = {"reply_markup", "media", "allowed_updates", "commands", "entities", "caption_entities", "link_preview_options", "menu_button"}
+JSON_KEYS = {"reply_markup", "media", "allowed_updates", "commands", "entities", "caption_entities", "link_preview_options", "menu_button",
+             "results", "button"}
 BOT_USER = {"id": 7000000001, "is_bot": True, "first_name": "Homes in Georgia AI", "username": "homes_in_georgia_test_bot"}
 
 
@@ -112,6 +113,35 @@ class FakeTelegram:
         self.push("press", {"callback_query": cq}, {"chat": chat, "from": u["name"], "button": button_text, "ref": out["message_id"],
                                                     "cq": cq["id"]})
 
+    def inline_query(self, u, query):
+        """A user types «@bot <query>» (the operator's userbot does it for the slot card): an inline_query update."""
+        iq = {"id": str(next(self.seq) * 1000), "from": self.user(u), "query": query, "offset": "", "chat_type": "private"}
+        self.push("inline_query", {"inline_query": iq}, {"from": u["name"], "text": query, "iq": iq["id"]})
+        return iq["id"]
+
+    def inline_message(self, chat, result, via=BOT_USER):
+        """The chosen inline result sent into `chat` by a user account («via @bot»): logged as an outgoing message with
+        the result's text/keyboard and a fresh inline_message_id (that's all Telegram gives the bot about it)."""
+        imid = f"im{next(self.seq)}"
+        content = result.get("input_message_content") or {}
+        with self.lock:
+            self.log.append({"seq": next(self.seq), "dir": "out", "method": "viaBot", "chat": chat, "t": time.time(), "via": via["username"],
+                             "inline_message_id": imid, "text": content.get("message_text", ""),
+                             **({"reply_markup": result["reply_markup"]} if result.get("reply_markup") else {})})
+        return imid
+
+    def press_inline(self, u, out, button_text):
+        """Press a button of an inline message (a viaBot log entry): the callback has inline_message_id and no message."""
+        data = next(b["callback_data"] for row in self.markup(out) for b in row if b["text"] == button_text)
+        cq = {"id": str(next(self.seq) * 1000), "from": self.user(u), "inline_message_id": out["inline_message_id"],
+              "chat_instance": "dm", "data": data}
+        self.push("press", {"callback_query": cq}, {"chat": out["chat"], "from": u["name"], "button": button_text, "cq": cq["id"]})
+
+    def userbot_text(self, chat, text):
+        """A plain message the operator's account (userbot) sent into `chat`."""
+        with self.lock:
+            self.log.append({"seq": next(self.seq), "dir": "out", "method": "userbotText", "chat": chat, "text": text, "t": time.time()})
+
     @staticmethod
     def markup(out):
         rm = out.get("reply_markup") or {}
@@ -158,7 +188,8 @@ class FakeTelegram:
             path = self.files[p["file_id"]]
             return {"file_id": p["file_id"], "file_unique_id": "u" + p["file_id"], "file_size": os.path.getsize(path),
                     "file_path": f"photos/{p['file_id']}.jpg"}
-        if method in ("deleteWebhook", "setMyCommands", "sendChatAction", "answerCallbackQuery", "deleteMessage", "close", "logOut"):
+        if method in ("deleteWebhook", "setMyCommands", "sendChatAction", "answerCallbackQuery", "answerInlineQuery", "deleteMessage",
+                      "close", "logOut"):
             self.record(method, p, files)
             return True
         if str(p.get("chat_id", "")).startswith("@"):  # a public channel by @username: a stable fake numeric id
@@ -180,6 +211,9 @@ class FakeTelegram:
             self.record(method, p, files, message_id=mid)
             return {"message_id": mid, "date": int(time.time()), "chat": {"id": chat, "type": "private", **named}, "from": BOT_USER,
                     **({"text": p["text"]} if "text" in p else {})}
+        if method.startswith("edit") and p.get("inline_message_id"):  # an inline message: Telegram answers True
+            self.record(method, p, files)
+            return True
         if method.startswith("edit"):
             self.record(method, p, files, message_id=int(p.get("message_id") or 0))
             return {"message_id": int(p.get("message_id") or 0), "date": int(time.time()), "chat": {"id": chat, "type": "private"},

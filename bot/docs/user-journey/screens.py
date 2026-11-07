@@ -332,7 +332,7 @@ LEAD = (
     '<p style="font-size:13px;color:#4A5A75;margin:6px 0 0">Бот передал их Георгию сам в 10:33, сразу после выбора времени: имя, телефон, Telegram клиента '
     'и напоминание за 1 час до просмотра. Оператору ничего нажимать не нужно.</p></div>'
     '<hr style="border:0;border-top:1px solid #E1E6EF;margin:16px 0"><div class="btns"><span class="btn ghost sm">🔁 Перенести</span>'
-    '<span class="btn ghost sm">👤 Сменить агента</span><span class="btn ghost sm">💬 Написать клиенту</span></div></div>'
+    '<span class="btn ghost sm">👤 Сменить агента</span></div></div>'
     '</div>')
 
 step("B5", "B", "Просмотр подтверждён: контакты у агента", "desk", desk("Заявки", LEAD, url="crm.homesingeorgia.ge/leads/124"),

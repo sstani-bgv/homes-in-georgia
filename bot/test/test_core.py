@@ -209,7 +209,8 @@ class BotWiringTest(unittest.TestCase):
         app = bot.build("123456:TEST")
         callbacks = {h.callback.__name__ for hs in app.handlers.values() for h in hs}
         self.assertEqual(callbacks, {"on_start", "on_agent", "on_panel", "on_cancel", "on_lang", "on_staff_cmd", "on_button", "on_message",
-                                     "on_channel_post", "on_forwarded_deal", "on_group_or_channel"})
+                                     "on_channel_post", "on_forwarded_deal", "on_group_or_channel", "on_inline_query"})
+        self.assertIn("inline_query", bot.ALLOWED_UPDATES)  # the slot card for the operator's userbot
         names = [h.callback.__name__ for h in app.handlers[0]]  # the forward handler is checked before the client journey
         self.assertLess(names.index("on_forwarded_deal"), names.index("on_message"))
         self.assertEqual([h.callback.__name__ for h in app.handlers[1]], ["on_group_or_channel"])

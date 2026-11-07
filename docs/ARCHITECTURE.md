@@ -280,8 +280,8 @@ lead_new_group(lead)                 B1 card in operators group, button "✋ В�
 lead_taken_group(lead, operator)     edits the group card(s): "✋ Взяла <name>", button "Назначить агента" (lg:assign:<id>) visible
 lead_assigned_agent(lead)            C6 to agent: object + client profile without contacts, button "🕒 Ввести время" (Mini App link /m/leads/<id>)
 lead_client_ack(lead)                A3: edits the client's card text: "✅ Передано оператору · ответим в течение N минут", button "❤️ В избранном"
-slots_to_client(lead, slots)         A4a: photo + "Район · N спальни · $price" + slot buttons (ls:pick:<slot_id>) + "Другое время" (ls:own:<lead_id>)
-slot_confirmed_client(lead, agent)   A4b: address, agent name/phone, "💬 Написать агенту" url, "📅 Добавить в календарь" (url to /api/public/ics/<token>), "Опаздываю" (lv:late:<id>), "Перенести" (lv:resched:<id>)
+slots_to_client(lead, slots)         A4a via the operator's userbot: inline query "slots:<leads.slots_token>" -> the bot answers with slots_card (text "Район · N спальни · $price" + slot buttons ls:pick:<slot_id> + "Другое время" ls:own:<lead_id>), the userbot sends it into the client's DM; inline fails -> numbered list; no userbot -> error to the agent
+slot_confirmed_client(lead, agent)   A4b as a plain DM from the operator's account: address, agent name/phone, agent's t.me link, calendar link (/api/public/ics/<token>); the bot edits the slot card to "✅ Вы выбрали: <time>"
 contacts_to_agent(lead)              C8
 viewing_reminder(lead)               1h before, to client and agent
 post_viewing_survey(lead)            A5a to client (lo:c:<id>:rented|refused|thinking) + C9a to agent (lo:a:<id>:rented|refused|thinking|reschedule)

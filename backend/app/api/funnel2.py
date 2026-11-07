@@ -32,10 +32,6 @@ class ReasonIn(BaseModel):
     reason: str | None = None
 
 
-class TextIn(BaseModel):
-    text: str
-
-
 def _visible(db: Session, lead_id: int, user: User) -> Lead:
     lead = get_or_404(db, Lead, lead_id, "lead")
     if not L.can_view(lead, user):
@@ -105,9 +101,3 @@ def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db, s
 def leads_cancel(lead_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
                  user: User = Depends(require_roles(*STAFF_ROLES))):
     return L.detail(db, L.cancel(db, lead_id, user, body.reason), user)
-
-
-@router.post("/leads/{lead_id}/message")
-def leads_message(lead_id: int, body: TextIn, db: Session = Depends(get_db, scope="function"),
-                  user: User = Depends(require_roles(*STAFF_ROLES))):
-    return L.detail(db, L.message_client(db, lead_id, body.text, user), user)

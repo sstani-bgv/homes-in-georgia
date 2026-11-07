@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Hand, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
@@ -85,12 +85,12 @@ export function SlotsEntry({ lead }: { lead: Lead }) {
   const add = (v: string) => { if (v && !slots.includes(v)) setSlots((s) => [...s, v].sort()); };
   const send = useMutation({
     mutationFn: () => api.leads.slots(lead.id, slots.map(localToIso)),
-    onSuccess: (l) => { done(l, 'Бот отправил варианты клиенту'); setSlots([]); },
+    onSuccess: (l) => { done(l, 'Варианты отправлены клиенту с аккаунта оператора'); setSlots([]); },
     onError: (e) => toast(errText(e), true),
   });
   return (
     <div className="col">
-      <div className="muted" style={{ fontSize: 13 }}>Узнайте у собственника свободное время и добавьте несколько окон. Бот сам отправит их клиенту.</div>
+      <div className="muted" style={{ fontSize: 13 }}>Узнайте у собственника свободное время и добавьте несколько окон. Клиенту придёт сообщение с кнопками от аккаунта оператора.</div>
       <Seg value={day} onChange={setDay} options={[0, 1, 2, 3].map((o) => ({ value: dayStr(o), label: o === 0 ? 'Сегодня' : o === 1 ? 'Завтра' : fmtDate(dayStr(o)).slice(0, 5) }))} />
       <div className="row row-wrap gap-sm">
         {QUICK_TIMES.map((t) => {
@@ -181,13 +181,10 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const { done, toast } = useLeadMut();
   const [assignOpen, setAssignOpen] = useState(false);
   const [listingOpen, setListingOpen] = useState(false);
-  const [msgOpen, setMsgOpen] = useState(false);
-  const [msg, setMsg] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
   const take = useMutation({ mutationFn: () => api.leads.take(id), onSuccess: (l) => done(l, 'Заявка ваша'), onError: (e) => toast(errText(e), true) });
   const resched = useMutation({ mutationFn: () => api.leads.reschedule(id), onSuccess: (l) => done(l, 'Агент снова введёт время') , onError: (e) => toast(errText(e), true) });
-  const send = useMutation({ mutationFn: () => api.leads.message(id, msg), onSuccess: () => { toast('Бот отправил сообщение клиенту'); setMsgOpen(false); setMsg(''); }, onError: (e) => toast(errText(e), true) });
   const cancel = useMutation({ mutationFn: () => api.leads.cancel(id, reason), onSuccess: (l) => { done(l, 'Заявка отменена'); setCancelOpen(false); }, onError: (e) => toast(errText(e), true) });
 
   if (isLoading) return <Loading />;
@@ -252,7 +249,6 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
           {showOutcome && <Card label="Шаг B6" title="Итог: агент и клиент"><OutcomeCompare lead={lead} compact={compact} /></Card>}
           {isStaff && !closed && (
             <div className="row row-wrap">
-              <Button variant="secondary" onClick={() => setMsgOpen(true)}><MessageSquare size={16} />Написать клиенту</Button>
               {['slots_sent', 'time_chosen'].includes(lead.status) && <Button variant="secondary" loading={resched.isPending} onClick={() => resched.mutate()}><RotateCcw size={16} />Перенести</Button>}
               <Button variant="danger" onClick={() => setCancelOpen(true)}><XCircle size={16} />Отменить</Button>
             </div>
@@ -293,10 +289,6 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
 
       {listingOpen && l && <ListingModal id={l.id} onClose={() => setListingOpen(false)} />}
       <AssignModal lead={lead} open={assignOpen} onClose={() => setAssignOpen(false)} />
-      <Modal open={msgOpen} onClose={() => setMsgOpen(false)} title="Сообщение клиенту">
-        <Field label="Текст · бот отправит от имени агентства"><Textarea value={msg} onChange={(e) => setMsg(e.target.value)} /></Field>
-        <Button className="mt" disabled={!msg.trim()} loading={send.isPending} onClick={() => send.mutate()}><Send size={16} />Отправить</Button>
-      </Modal>
       <Modal open={cancelOpen} onClose={() => setCancelOpen(false)} title="Отменить заявку">
         <Field label="Причина"><Textarea value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
         <Button className="mt" variant="danger" disabled={!reason.trim()} loading={cancel.isPending} onClick={() => cancel.mutate()}>Отменить заявку</Button>

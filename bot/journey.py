@@ -1,7 +1,9 @@
 """The client journey in the bot (docs/user-journey.txt): questionnaire A1a-A2a (q:), ❤️ → lead (A3), the operators
-group (B1, lg:), the agent's quick slots (C7, ls:quick/t/send/text), the client's slot pick and viewing buttons (A4, ls:pick/own,
-lv:), outcomes (A5/C9a, lo:, lr:) and T14 (A6, t14:). Business rules live in the backend services (app.services.*);
-outgoing cards in app.telegram.notify. Client transient state: clients.state["await"]; staff: ctx.user_data."""
+group (B1, lg:), the agent's quick slots (C7, ls:quick/t/send/text), the slot card in the client's DM with the operator
+(A4a: the inline query «slots:<token>» from the operator's userbot, its buttons ls:pick/own come back here with
+inline_message_id), viewing buttons (lv:), outcomes (A5/C9a, lo:, lr:) and T14 (A6, t14:). Business rules live in the
+backend services (app.services.*); outgoing cards in app.telegram.notify. Client transient state: clients.state["await"];
+staff: ctx.user_data."""
 import asyncio
 import html
 import logging
@@ -10,13 +12,13 @@ import time
 from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 
-from telegram import Update
+from telegram import InlineQueryResultArticle, InputTextMessageContent, LinkPreviewOptions, Update
 from telegram.error import BadRequest, TelegramError
 
 import core
 import db
 from app.telegram import client as tgc
-from app.telegram import links, notify, texts
+from app.telegram import links, notify, store, texts, userbot
 from app.telegram.client import cb, kb
 
 log = logging.getLogger(__name__)
@@ -698,7 +700,8 @@ async def send_slots(update, ctx, me_tg, lead_id, starts):
             return True, "✅ Уже отправлено клиенту: " + label
         _, err = await svc(_with_user(lambda s, u: leads.add_slots(s, lead_id, starts, u)), me_tg)
     if err:
-        return False, {"bad_status": "Заявка уже на другом шаге", "forbidden": "Это не ваша заявка"}.get(err, f"Ошибка: {err}")
+        return False, {"bad_status": "Заявка уже на другом шаге", "forbidden": "Это не ваша заявка",
+                       "userbot_off": "⚠️ Userbot оператора не подключён: время клиенту не отправлено. Сообщите оператору."}.get(err, f"Ошибка: {err}")
     return True, "✅ Отправил клиенту: " + label
 
 
@@ -820,35 +823,55 @@ def pressed_label(query):
     return next((b.text for row in rows for b in row if b.callback_data == query.data), "")
 
 
-async def on_client_journey(update: Update, ctx, cl):
-    """ls:pick / ls:own / lv:* / lo:c:* / lr:* / t14:* pressed by a client."""
+CHOSEN = ("✅ Вы выбрали: {when}", "✅ You chose: {when}", "✅ თქვენ აირჩიეთ: {when}")
+
+
+def _pick(s, slot_id, client_id, lang):
+    """leads.choose_slot (only the lead's client) -> the chosen time's label."""
     from app.services import leads
-    query, bot, chat = update.callback_query, ctx.bot, update.effective_chat.id
+    return texts.slot_label(leads.choose_slot(s, slot_id, client_id).viewing_at, lang)
+
+
+async def edit_quietly(query, text):
+    """The pressed message (in a chat, or an inline one sent via the bot) shows `text`, buttons gone; a photo card
+    or a gone message stays as it is."""
+    try:
+        await edit_text(query, text)
+    except TelegramError as ex:
+        log.info("edit %s: %s", query.inline_message_id or (query.message and query.message.message_id), ex)
+
+
+async def on_client_journey(update: Update, ctx, cl):
+    """ls:pick / ls:own (the slot card from the operator's account: an inline message, no chat) / lv:* / lo:c:* / lr:* /
+    t14:* pressed by a client."""
+    from app.services import leads
+    query, bot = update.callback_query, ctx.bot
+    chat = update.effective_chat and update.effective_chat.id
     parts = query.data.split(":")
     kind = parts[0]
-    if kind == "ls" and parts[1] == "pick":
-        _, err = await svc(leads.choose_slot, int(parts[2]), cl["id"])  # notify: A4b to the client, C8 contacts to the agent
-        await answer(query, "✅" if not err else tr(cl, "Это время уже недоступно", "This time is no longer available", "ეს დრო უკვე აღარ არის ხელმისაწვდომი"), show_alert=bool(err))
+    if kind == "ls" and parts[1] == "pick":  # notify: A4b details to the client (userbot), C8 contacts to the agent, the operator
+        when, err = await svc(_pick, int(parts[2]), cl["id"], L(cl))
+        if err:
+            await answer(query, tr(cl, "Это не ваша заявка", "This is not your request", "ეს თქვენი განაცხადი არ არის") if err == "forbidden"
+                         else tr(cl, "Это время уже недоступно", "This time is no longer available", "ეს დრო უკვე აღარ არის ხელმისაწვდომი"),
+                         show_alert=True)
+            return
+        await answer(query, "✅")
+        await edit_quietly(query, texts.pick(L(cl), *CHOSEN).format(when=when))
         return
     if kind == "t14":
         return await on_t14(update, ctx, cl, parts)
-    lead_id = int(parts[2] if kind in ("ls", "lv", "lo", "lm") else parts[1])
+    lead_id = int(parts[2] if kind in ("ls", "lv", "lo") else parts[1])
     ld = await th(my_lead, cl, lead_id)
     if not ld:
         await answer(query, core.t(cl["lang"], "gone"))
         return
-    if kind == "lm":
-        await th(set_await, cl, "lead_message", lead_id)
+    if kind == "ls":  # «Другое время»: the client writes it to the operator's DM, the userbot saves it (dm_choice.own)
+        await th(userbot.set_state, cl["id"], dm_choice={"lead": lead_id, "own": True})
         await answer(query)
-        await bot.send_message(chat, tr(cl, f"Напишите ответ по заявке #{lead_id}. /cancel — отменить.",
-                                        f"Write your reply for request #{lead_id}. /cancel to cancel.",
-                                        f"დაწერეთ პასუხი განაცხადზე #{lead_id}. /cancel — გაუქმება."))
-    elif kind == "ls":  # own time
-        await th(set_await, cl, "own_time", lead_id)
-        await answer(query)
-        await bot.send_message(chat, tr(cl, "Напишите удобное время, например «завтра после 18:00». Передам агенту.",
-                                        "Write a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent.",
-                                        "დაწერეთ თქვენთვის მოსახერხებელი დრო, მაგალითად „ხვალ 18:00-ის შემდეგ“. აგენტს გადავცემ."))
+        await edit_quietly(query, tr(cl, "Напишите удобное время ответным сообщением, например «завтра после 18:00». Передам агенту.",
+                                     "Reply with a time that suits you, e.g. «tomorrow after 6 pm». I'll pass it to the agent.",
+                                     "უპასუხეთ თქვენთვის მოსახერხებელი დროით, მაგალითად „ხვალ 18:00-ის შემდეგ“. აგენტს გადავცემ."))
     elif kind == "lv":
         act = parts[1]
         if act == "ok":
@@ -946,48 +969,15 @@ async def on_t14(update, ctx, cl, parts):
 
 
 async def on_client_text(update: Update, ctx, cl):
-    """Free text the client's state is waiting for (budget, own time, T14 problem). -> True if handled."""
-    from app.services import evaluations, leads
+    """Free text the client's state is waiting for (budget, T14 problem). -> True if handled."""
+    from app.services import evaluations
     kind, ref = awaiting(cl)
     text = update.effective_message and update.effective_message.text
-    if not text:
+    if not text or not kind:
         return False
     bot, chat = ctx.bot, update.effective_chat.id
-    reply = update.effective_message.reply_to_message
-    if reply:
-        from app.telegram import store
-        row = await th(store.q, "SELECT ref FROM messages WHERE kind = %s AND chat_id = %s AND message_id = %s",
-                       ("client_message", chat, reply.message_id), one=True)
-        if row:
-            kind, ref = "lead_message", row["ref"]
-    if kind == "lead_message":
-        _, err = await svc(leads.message_from_client, int(ref), cl["id"], text)
-        if not err:
-            if awaiting(cl)[0] == "lead_message" and str(awaiting(cl)[1]) == str(ref):
-                await th(set_await, cl)
-            await bot.send_message(chat, tr(cl, "Ответ сохранён. Оператор увидит его в заявке 👌",
-                                            "Your reply was saved. The operator can see it in the request 👌",
-                                            "პასუხი შენახულია. ოპერატორი მას განაცხადში ნახავს 👌"))
-        else:
-            await bot.send_message(chat, tr(cl, "Не удалось сохранить ответ. Откройте сообщение оператора и попробуйте снова.",
-                                            "Couldn't save your reply. Open the operator's message and try again.",
-                                            "პასუხის შენახვა ვერ მოხერხდა. გახსენით ოპერატორის შეტყობინება და სცადეთ თავიდან."))
-        return True
-    if not kind:
-        return False
     if kind == "budget":
         await on_budget_text(bot, cl, text)
-    elif kind == "own_time":
-        _, err = await svc(leads.client_own_time, int(ref), text)
-        if err:
-            await bot.send_message(chat, tr(cl, "Не удалось сохранить время: заявка уже на другом шаге. Напишите оператору.",
-                                            "Couldn't save the time: this request has moved to another stage. Contact the operator.",
-                                            "დროის შენახვა ვერ მოხერხდა: განაცხადი უკვე სხვა ეტაპზეა. მიწერეთ ოპერატორს."))
-            return True
-        await th(set_await, cl)
-        await bot.send_message(chat, tr(cl, "Время сохранено в заявке. Агент согласует его с собственником 👌",
-                                        "Your time was saved in the request. The agent will agree it with the owner 👌",
-                                        "დრო განაცხადში შენახულია. აგენტი მას მესაკუთრესთან შეათანხმებს 👌"))
     elif kind == "problem":
         await th(set_await, cl)
         await svc(evaluations.create, {"deal_id": int(ref), "kind": "t14", "author": "client", "complaints": True,
@@ -1025,6 +1015,31 @@ async def on_agent_outcome(update: Update, ctx, parts):
         await ctx.bot.send_message(chat, "Хорошо, напомним клиенту завтра.")
 
 
+# ---------- A4a: the slot card for the operator's userbot (inline mode) ----------
+
+async def on_inline_query(update: Update, ctx):
+    """«slots:<token>» from the operator's userbot (settings.userbot_tg_id) -> one personal article: the object, the
+    slots and their buttons (notify.slots_card); the userbot sends it into the client's DM. Anyone else / an unknown
+    token: no results."""
+    iq = update.inline_query
+    m = re.fullmatch(r"slots:([\w-]{6,32})", (iq.query or "").strip())
+    card = None
+    if m and str(iq.from_user.id) == (await th(store.setting, "userbot_tg_id") or ""):
+        card = await th(notify.slots_card, m[1])
+    results = []
+    if card:
+        title, text, rows = card
+        results = [InlineQueryResultArticle(m[1], title, InputTextMessageContent(text, parse_mode="HTML",
+                                                                                 link_preview_options=LinkPreviewOptions(is_disabled=True)),
+                                            reply_markup=markup(rows))]
+    else:
+        log.info("inline query %r from %s: no result", iq.query, iq.from_user.id)
+    try:
+        await iq.answer(results, cache_time=0, is_personal=True)
+    except TelegramError as ex:
+        log.warning("answerInlineQuery %r: %s", iq.query, ex)
+
+
 # ---------- dispatch ----------
 
 async def on_callback(update: Update, ctx, cl_of):
@@ -1039,7 +1054,7 @@ async def on_callback(update: Update, ctx, cl_of):
         await on_agent_outcome(update, ctx, parts)
     elif data.startswith("q:"):
         await on_q(update, ctx, await th(cl_of))
-    elif data.startswith(("ls:", "lv:", "lo:c:", "lr:", "t14:", "lm:")):
+    elif data.startswith(("ls:", "lv:", "lo:c:", "lr:", "t14:")):
         await on_client_journey(update, ctx, await th(cl_of))
     else:
         return False

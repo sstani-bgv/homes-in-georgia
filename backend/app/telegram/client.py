@@ -1,6 +1,6 @@
 """Sync Bot API client (httpx). BOT_TOKEN and TG_API_BASE come from the environment at call time (tests point
-TG_API_BASE at a fake Bot API). staff=True: STAFF_BOT_TOKEN when set (staff cards through a separate work bot), else
-BOT_TOKEN. Never raises: returns the Bot API `result`, or None on any failure (logged)."""
+TG_API_BASE at a fake Bot API); the same bot for clients and staff. Never raises: returns the Bot API `result`, or
+None on any failure (logged)."""
 import html as _html
 import json
 import logging
@@ -33,16 +33,16 @@ def _client():
     return _http
 
 
-def base(staff=False):
-    token = (staff and conf("STAFF_BOT_TOKEN").strip()) or conf("BOT_TOKEN").strip()
+def base():
+    token = conf("BOT_TOKEN").strip()
     api = conf("TG_API_BASE", "https://api.telegram.org").rstrip("/")
     return token and f"{api}/bot{token}"
 
 
-def call(method, files=None, staff=False, **params):
+def call(method, files=None, **params):
     """POST <api>/bot<token>/<method>. params: None values dropped, dict/list ones JSON-encoded (form fields, which the
     Bot API accepts for every method); files: {field: path or (name, bytes)} -> multipart."""
-    url = base(staff)
+    url = base()
     if not url:
         log.warning("telegram %s skipped: BOT_TOKEN is not set", method)
         return None
@@ -138,8 +138,8 @@ def app_btn(text, url, private=True):
     return {"text": text, "url": url}
 
 
-def send(chat_id, text, keyboard=None, html=True, thread_id=None, staff=False, **kw):
-    return call("sendMessage", staff=staff, chat_id=chat_id, text=clip(text, 4096, html), parse_mode="HTML" if html else None,
+def send(chat_id, text, keyboard=None, html=True, thread_id=None, **kw):
+    return call("sendMessage", chat_id=chat_id, text=clip(text, 4096, html), parse_mode="HTML" if html else None,
                 reply_markup=keyboard, message_thread_id=thread_id, link_preview_options={"is_disabled": True}, **kw)
 
 
@@ -152,8 +152,8 @@ def send_photo(chat_id, photo, caption, keyboard=None, html=True, thread_id=None
     return call("sendPhoto", photo=photo, **p)
 
 
-def edit(chat_id, message_id, text, keyboard=None, html=True, staff=False):
-    return call("editMessageText", staff=staff, chat_id=chat_id, message_id=message_id, text=clip(text, 4096, html),
+def edit(chat_id, message_id, text, keyboard=None, html=True):
+    return call("editMessageText", chat_id=chat_id, message_id=message_id, text=clip(text, 4096, html),
                 parse_mode="HTML" if html else None, reply_markup=keyboard, link_preview_options={"is_disabled": True})
 
 
