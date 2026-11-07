@@ -65,11 +65,13 @@ export function MLeads() {
 export function MLead() { const { id } = useParams(); return <LeadDetail id={Number(id)} compact />; }
 export function MProperties() {
   const { isStaff } = useAuth();
-  const [view, setView] = useState<'mine' | 'all' | 'archive'>('mine');
+  const [view, setView] = useState<'new' | 'mine' | 'all' | 'archive'>(isStaff ? 'mine' : 'new');
   return (
     <div className="col">
-      <Seg value={view} onChange={setView} options={[{ value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' }]} />
-      {view === 'mine' && !isStaff ? <MyProperties base="/m" /> : <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />}
+      <Seg value={view} onChange={setView} options={[{ value: 'new', label: 'Новые объявления' }, { value: 'mine', label: 'Мои объекты' },
+        { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' }]} />
+      {view === 'new' ? <NewListings base="/m" />
+        : view === 'mine' && !isStaff ? <MyProperties base="/m" /> : <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />}
     </div>
   );
 }
