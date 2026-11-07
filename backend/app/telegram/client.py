@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 
 import httpx
 
@@ -39,9 +41,34 @@ def base():
     return token and f"{api}/bot{token}"
 
 
+# Telegram allows a bot ~30 messages/s overall: every call of this process waits its turn (pushes to clients, digests)
+MIN_GAP = 0.04  # ponytail: one global pace per process (~25/s); per-chat (1/s) and per-group (20/min) pacing if bursts grow
+_pace_lock, _last_call = threading.Lock(), [0.0]
+
+
+def _pace():
+    with _pace_lock:
+        wait = _last_call[0] + MIN_GAP - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[0] = time.monotonic()
+
+
 def call(method, files=None, **params):
-    """POST <api>/bot<token>/<method>. params: None values dropped, dict/list ones JSON-encoded (form fields, which the
-    Bot API accepts for every method); files: {field: path or (name, bytes)} -> multipart."""
+    """POST <api>/bot<token>/<method>, paced (MIN_GAP); a 429 «Too Many Requests» waits retry_after and tries once more.
+    params: None values dropped, dict/list ones JSON-encoded (form fields, which the Bot API accepts for every method);
+    files: {field: path or (name, bytes)} -> multipart."""
+    for attempt in (0, 1):
+        res = _call(method, files, **params)
+        if not (isinstance(res, tuple) and res[0] == 429):
+            return res
+        if attempt == 0:
+            time.sleep(min(res[1], 30))
+    log.warning("telegram %s: still rate limited", method)
+    return None
+
+
+def _call(method, files=None, **params):
     url = base()
     if not url:
         log.warning("telegram %s skipped: BOT_TOKEN is not set", method)
@@ -60,8 +87,11 @@ def call(method, files=None, **params):
                     up[k] = (os.path.basename(str(f)), fh)
                 else:
                     up[k] = f
+        _pace()
         r = _client().post(f"{url}/{method}", data=data, files=up)
         body = r.json()
+        if body.get("error_code") == 429:
+            return 429, int((body.get("parameters") or {}).get("retry_after") or 1)
         if not body.get("ok"):
             log.warning("telegram %s failed: %s", method, body.get("description"))
             return None

@@ -377,26 +377,30 @@ def operator_intro(lead):
     return None
 
 
-PUSH = {"ru": ("🏡 Новый вариант под ваш запрос, его ещё нет в канале:", "❤️ Нравится", "👎 Не то"),
-        "en": ("🏡 A new option for your request, not in the channel yet:", "❤️ Like", "👎 Not it"),
-        "ka": ("🏡 ახალი ვარიანტი თქვენი მოთხოვნით, არხში ჯერ არ არის:", "❤️ მომწონს", "👎 არ მომწონს")}
+def _bot_core():
+    """The client bot's card builders (bot/core.py), so a pushed object looks exactly like a search result."""
+    import sys
+    if bot_dir() not in sys.path:
+        sys.path.append(bot_dir())
+    import core
+    return core
 
 
 @safe
 def object_to_client(cl, listing_id):
-    """Stage 10, owner-first: an object the agent fast-tracked, as a client card (photo from the ad + ❤️/👎 with the
-    bot's callbacks like:<id> / no:<id>, so the usual like → lead flow follows). Facts only: no ad text, links or phones."""
+    """Stage 10, owner-first: an object the agent fast-tracked, sent like any search result — the album, then the
+    channel-style card with ❤️ / 👎 / 📍 (callbacks like:<id> / no:<id>, so the usual like → lead flow follows)."""
     i = store.listing(listing_id)
     chat = chat_of(cl or {})
     if not i or not chat:
         return None
     lang = texts.lang_of(cl.get("lang"))
-    intro, like, no = PUSH[lang]
-    text = "\n".join(x for x in (intro, f"<b>{e(headline(i, lang))}</b>", f"📍 {e(address(i, lang))}", e(flat_line(i, lang))) if x)
-    markup = kb([[like_button(cl, i["id"], like), cb(no, f"no:{i['id']}")]])
-    photo = first_photo(i)
-    m = photo and tg.send_photo(chat, photo if os.path.exists(photo) else os.path.join(bot_dir(), photo), text, markup)
-    return m or tg.send(chat, text, markup)
+    core = _bot_core()
+    photos = [x for x in (p if os.path.isabs(p) else os.path.join(bot_dir(), p) for p in i.get("photos") or []) if os.path.exists(x)]
+    if photos:
+        send_group(chat, None, [("photo", x) for x in photos[:core.ALBUM_PHOTOS]])
+    markup = core.card_keyboard(i, lang, like=like_button(cl, i["id"], core.t(lang, "like")))
+    return tg.send(chat, core.card(i, None, lang=lang), markup, html=False)
 
 
 SLOTS = {"ru": ("Собственник готов показать квартиру 🏡\n<b>Выберите удобное время:</b>", "🕐 Другое время", "Открыть объявление"),

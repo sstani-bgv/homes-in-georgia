@@ -385,3 +385,33 @@ def test_viewing_details_go_from_the_operators_account(db, monkeypatch):
                                  {"name": "Георгий", "username": None, "phone": "555 000 588"})
     assert got[0][1].endswith("👤 Ваш агент: Георгий\n📞 +995555000588")      # no @username: the phone, tappable
     assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]
+
+
+def test_pushed_object_looks_like_a_search_result(db, monkeypatch, tmp_path):
+    """Stage 10 push: the album, then the regular channel-style card with ❤️ / 👎 — no «not in the channel yet» intro."""
+    from app.telegram import client as tg
+    monkeypatch.undo()
+    http = FakeHttp()
+    monkeypatch.setattr(tg, "_client", lambda: http)
+    monkeypatch.setattr(tg, "MIN_GAP", 0)
+    photos = []
+    for n in range(2):
+        f = tmp_path / f"p{n}.jpg"
+        f.write_bytes(b"\xff\xd8\xff")
+        photos.append(str(f))
+    lst = make_listing(db, "ss7001", photos=json.dumps(photos))
+    notify.object_to_client({"id": 1, "chat_id": "5550041", "channel": "tg", "external_id": "5550041", "lang": "ru"}, lst.id)
+    methods = [u.rsplit("/", 1)[1] for u, _ in http.urls]
+    assert methods == ["sendMediaGroup", "sendMessage"]
+    card = http.urls[1][1]
+    assert "нет в канале" not in card["text"] and "+995" not in card["text"]
+    assert f'"callback_data": "like:{lst.id}"' in card["reply_markup"] and f'"callback_data": "no:{lst.id}"' in card["reply_markup"]
+
+
+def test_bot_api_calls_are_paced_and_retry_after_429(monkeypatch):
+    from app.telegram import client as tg
+    monkeypatch.setenv("BOT_TOKEN", "1:x")
+    replies = [{"ok": False, "error_code": 429, "parameters": {"retry_after": 0}}, {"ok": True, "result": {"message_id": 7}}]
+    monkeypatch.setattr(tg, "_client", lambda: type("C", (), {"post": lambda self, url, data=None, files=None:
+                                                              type("R", (), {"json": lambda s: replies.pop(0)})()})())
+    assert tg.call("sendMessage", chat_id=1, text="x") == {"message_id": 7}
