@@ -86,6 +86,12 @@ def calc(price=None, commission_pct=None, commission_total=None, platform_amount
             "recruit_pct": _r(rpct), "recruit_amount": _r(rec), "client_src_amount": _r(src), "agent_amount": _r(agent)}
 
 
+def default_commission_pct(deal_type: str | None, sub_type: str | None) -> int:
+    """The fixed commission of an agent's deal, % of the price (a month's rent): sale 3, commercial 100, else 50 (the deal
+    form's defaults). Only staff set another percent or a manual amount."""
+    return 3 if deal_type == "sale" else 100 if sub_type == "commercial" else 50
+
+
 def _month(d: date | None) -> str:
     d = d or now().astimezone(TZ).date()
     return f"{d.month}/{d.year}"
@@ -135,6 +141,8 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     if actor is not None and actor.role not in STAFF:  # payout inputs an agent must not set for themselves
         data.pop("agent_level", None)
         data.pop("platform_amount", None)
+        data.pop("commission_total", None)
+        data["commission_pct"] = default_commission_pct(data.get("deal_type"), data.get("sub_type"))
     level = int(data.get("agent_level") or users.effective_level(agent))
     nums = calc(price=data.get("price"), commission_pct=data.get("commission_pct"),
                 commission_total=data.get("commission_total"), platform_amount=data.get("platform_amount"),

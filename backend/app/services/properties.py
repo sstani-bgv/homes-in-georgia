@@ -1261,9 +1261,17 @@ def card(db: Session, p: Property, user: User) -> dict:
             "listings": ads, "deals": deals}
 
 
+# «База объектов»: published (shot + operator approved), or rented after that; published_at keeps out an object that got
+# «rented»/«published» through a deal without ever being published (mark_rented / unmark_rented)
+BASE_STATUSES = ("published", "rented")
+
+
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,
-          mine: bool = False, everyone: bool = False):
+          mine: bool = False, everyone: bool = False, base: bool = False):
     stmt = select(Property)
+    if base:
+        stmt = stmt.where(Property.status.in_(BASE_STATUSES), Property.published_at.isnot(None))
+        everyone = True
     if mine or (user.role not in STAFF and agent_id is None and not status and not everyone):
         stmt = stmt.where(Property.agent_id == user.id)
     elif agent_id:

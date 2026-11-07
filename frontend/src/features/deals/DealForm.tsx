@@ -161,8 +161,9 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
                 <Field label="Уровень агента" hint="Меняет администратор или оператор"><Input value={`${f.agent_level}%`} disabled /></Field>
               )}
               <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Цена аренды, $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
-              <Field label="Комиссия, % от цены"><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} /></Field>
-              <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>
+              {/* the commission is fixed for agents (backend deals.default_commission_pct ignores theirs); staff may change it */}
+              <Field label="Комиссия, % от цены" hint={isStaff ? undefined : 'Фиксированная, меняет оператор'}><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} disabled={!isStaff} /></Field>
+              {isStaff && <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>}
               <Field label="Источник клиента" hint="10% от комиссии"><Select value={f.client_src} onChange={(e) => upd('client_src', e.target.value)} options={SRC.slice(1).map((s) => ({ value: s, label: s }))} placeholder="Свой клиент" /></Field>
               <Field label="Рекрут"><Select value={f.recruit_id} onChange={(e) => upd('recruit_id', e.target.value)} placeholder="Без рекрута" options={itemsOf(recruits.data).map((u) => ({ value: u.id, label: u.name }))} /></Field>
               {f.recruit_id ? <Field label="Доля рекрута, %"><Input type="number" value={f.recruit_pct} onChange={(e) => upd('recruit_pct', e.target.value)} /></Field> : <div />}

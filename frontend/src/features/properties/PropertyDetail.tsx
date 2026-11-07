@@ -848,10 +848,9 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           <Card label="Собственник" title={<>{p.owner?.name || '—'} {p.owner?.is_agent ? <Badge tone="warn">агент</Badge> : null}</>}>
             <KV items={[
               ['Телефон', <OwnerPhone p={p} />],
-              ['Агент собственника', agentLabel(p.owner?.agent)],
-              ['Агент объекта', agentLabel(p.agent)],
+              // one agent line: the owner's agent (stage 6.5 binding, backend deal_block); no owner binding yet → the object's agent
+              ['Агент собственника', agentLabel(p.owner?.agent || p.agent)],
             ]} />
-            {p.owner?.agent && p.agent && p.owner.agent.id !== p.agent.id && <div className="alert alert-warn mt" style={{ fontSize: 13 }}>Собственник закреплён за другим агентом: {agentLabel(p.owner.agent)}</div>}
             {!ownerVisible && p.owner && <div className="muted mt" style={{ fontSize: 12 }}>Контакты видны оператору и агенту объекта</div>}
             {p.owner && !p.owner.is_agent && (isStaff ? <OwnerTransfer p={p} /> : (mine || p.owner.agent?.id === user?.id) && <OwnerTransfer p={p} request />)}
           </Card>

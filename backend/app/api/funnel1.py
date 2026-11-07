@@ -136,8 +136,10 @@ class DupIn(BaseModel):
 
 @router.get("/properties")
 def properties_list(status: str | None = None, agent_id: int | None = None, q: str | None = None, mine: int = 0,
-                    limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    stmt = P.query(db, user, status, agent_id, q, bool(mine))
+                    base: int = 0, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+                    user: User = Depends(current_user)):
+    """base=1: «База объектов» — only objects shot and verified by the operator (P.BASE_STATUSES, published at least once)."""
+    stmt = P.query(db, user, status, agent_id, q, bool(mine), base=bool(base))
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))
     return {"items": P.outs(db, rows, user), "total": total}

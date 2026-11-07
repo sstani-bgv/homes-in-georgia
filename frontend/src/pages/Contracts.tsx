@@ -2,11 +2,12 @@
 // Output is a printable A4 document (window.print + print CSS) and a .doc file for Word; no external services.
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw, Send } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Deal, LeadContract } from '../api/types';
+import { insideTelegram } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
@@ -229,6 +230,13 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
+  // Telegram's webview ignores blob / <a download>: the bot sends the same file to the agent's chat instead
+  const tg = insideTelegram();
+  const sendTg = useMutation({
+    mutationFn: () => api.contracts.send(`${fileBase}.doc`, docHtml(doc!)),
+    onSuccess: () => toast('Договор отправлен вам в Telegram'),
+    onError: (e) => toast(errText(e), true),
+  });
 
   // ---- field helper
   const F = ({ k, label, type: t = 'text', placeholder }: { k: keyof CxData; label: string; type?: string; placeholder?: string }) => (
@@ -372,7 +380,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         <>
           <div className="row row-wrap no-print">
             <Button onClick={print}><Printer size={16} />Печать или PDF</Button>
-            <Button variant="secondary" onClick={download}><Download size={16} />Скачать .doc</Button>
+            {tg ? <Button variant="secondary" loading={sendTg.isPending} onClick={() => sendTg.mutate()}><Send size={16} />Отправить в Telegram</Button>
+              : <Button variant="secondary" onClick={download}><Download size={16} />Скачать .doc</Button>}
             <Button variant="ghost" onClick={() => setStep(3)}>Изменить данные</Button>
             <span className="muted grow" style={{ fontSize: 12, minWidth: 200 }}>В окне печати выберите «Сохранить как PDF», чтобы скачать файл</span>
           </div>

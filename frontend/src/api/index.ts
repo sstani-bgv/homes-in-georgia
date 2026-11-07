@@ -48,7 +48,7 @@ export const api = {
   },
 
   properties: {
-    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number }) => then(http.get<L<Property>>('/properties', { ...q, limit: LIMIT }), (d) => normPage(d, normProperty)),
+    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number; base?: number }) => then(http.get<L<Property>>('/properties', { ...q, limit: LIMIT }), (d) => normPage(d, normProperty)),
     board: () => then(http.get<Record<string, Property[]>>('/properties/board'), (d) => normBoard(d, normProperty)),
     take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),
     create: (b: Partial<Property>) => http.post<Property>('/properties', b),
@@ -121,6 +121,8 @@ export const api = {
     get: (id: number) => then(http.get<Client>(`/clients/${id}`), normClient),
   },
 
+  /** Mini App: the generated contract file sent to the user's Telegram chat by the bot (webviews block downloads) */
+  contracts: { send: (filename: string, html: string) => http.post<{ ok: boolean }>('/contracts/send', { filename, html }) },
   deals: {
     calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),
     list: (q?: { month?: string; agent_id?: number; status?: string }) => http.get<L<Deal>>('/deals', { ...q, limit: LIMIT }),

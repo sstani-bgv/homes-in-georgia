@@ -138,6 +138,8 @@ export interface Property {
   photos?: string[];
   /** list rows: the first own photo, else the origin ad's */
   photo?: string | null;
+  /** list rows: own photos + videos */
+  media_count?: number;
   listing?: (Listing & { urls?: string[] }) | null;
   /** full card only: our posts of the object (channel: 'tg' for now) */
   publications?: Publication[];

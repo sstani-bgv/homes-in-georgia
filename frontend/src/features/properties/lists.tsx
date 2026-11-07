@@ -2,10 +2,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Search, Users } from 'lucide-react';
+import { ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
-import type { Listing, Property } from '../../api/types';
+import type { Listing, Property, PropertyStatus } from '../../api/types';
+import { dragBoardProps } from '../leads/LeadBoard';
 import { useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
@@ -172,7 +173,7 @@ export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id
     <CompareSide label={`Объект #${p.id} в базе`} photos={own.length ? own : p.photos || []} address={p.address} rows={[
       ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
       ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
-      ['Агент', p.agent?.name || '—'],
+      ['Агент собственника', (p.owner?.agent || p.agent)?.name || '—'],
       ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a> <CopyPhone phone={phone} /></>}</>] as [string, React.ReactNode]] : []),
     ]}>
       <div className="row row-wrap gap-sm">
@@ -225,12 +226,12 @@ function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
   );
 }
 
-export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
+export function PropertyMiniCard({ p, to, onMove }: { p: Property; to: string; onMove?: () => void }) {
   const ph = p.photo || p.media?.find((m) => m.kind === 'photo')?.path || p.photos?.[0];
   return (
-    <Link to={to} className="kcard">
+    <Link to={to} className="kcard" draggable onDragStart={(e) => e.dataTransfer.setData('text/property', String(p.id))}>
       <div className="row" style={{ alignItems: 'flex-start' }}>
-        {ph && <img src={thumbUrl(ph)} alt="" loading="lazy" style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
+        {ph && <img src={thumbUrl(ph)} alt="" loading="lazy" draggable={false} style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
         <div className="grow">
           <div className="kcard-title ellipsis">{p.address || `Объект #${p.id}`}</div>
           <div className="kcard-meta">{[p.district, bedroomsLabel(p.bedrooms), money(p.price, p.currency || 'USD')].filter(Boolean).join(' · ')}</div>
@@ -243,29 +244,96 @@ export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
           : p.shoot_at && p.status === 'shoot_scheduled' ? <span className="badge">съёмка {fmtDateTime(p.shoot_at)}</span>
           : <span className="faint" style={{ fontSize: 11 }}>{ago(p.updated_at || p.created_at)}</span>}
       </div>
+      {onMove && (
+        <button type="button" className="btn btn-secondary btn-sm mt" style={{ marginTop: 8 }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMove(); }}><ArrowRightLeft size={14} />Перенести</button>
+      )}
     </Link>
   );
 }
 
-/** «В работе» (staff: every object, agent: his own); base="/m" hides empty columns like the Mini App lead board. */
+const CALL: PropertyStatus[] = ['taken', 'call_failed'];
+const WHO: PropertyStatus[] = ['owner_confirmed', 'agent_marked'];
+
+/** «В работе» (staff: every object, agent: his own); base="/m" hides empty columns like the Mini App lead board.
+ * Drag a card to a column = the backend step for that move (services/properties.py); steps that need input (contact,
+ * shoot date, photos, operator's review) open the object card; any other move is refused with a toast.
+ * Agents: «Опубликован» is collapsed until «Показать» (it only grows and clutters the working columns). */
 export function PropertyBoard({ base = '' }: { base?: string }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['properties', 'board'], queryFn: api.properties.board, refetchInterval: 30_000 });
+  const { isStaff } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [over, setOver] = useState<PropertyStatus | null>(null);
+  const [moving, setMoving] = useState<Property | null>(null);
+  const [showPublished, setShowPublished] = useState(isStaff);
+  const act = useMutation({
+    mutationFn: async ({ p, to }: { p: Property; to: PropertyStatus }) => {
+      if (to === 'call_failed') return api.properties.call(p.id, false);
+      if (to === 'review') return api.properties.submit(p.id);
+      if (CALL.includes(p.status)) await api.properties.call(p.id, true); // «Дозвонился», as CallStep does
+      if (to === 'taken') return;
+      return api.properties.owner(p.id, { is_owner: to === 'owner_confirmed', owner_name: p.owner?.name || undefined, owner_phone: p.owner?.phone || undefined });
+    },
+    onSuccess: (_, { to }) => { qc.invalidateQueries({ queryKey: ['properties'] }); qc.invalidateQueries({ queryKey: ['property'] }); toast(`Объект перенесён: ${PROPERTY_STATUS[to]}`); },
+    onError: (e) => { toast(errText(e), true); qc.invalidateQueries({ queryKey: ['properties'] }); },
+  });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
+  const all = Object.values(data || {}).flat();
+  const drop = (to: PropertyStatus, id: number) => {
+    setOver(null);
+    const p = all.find((x) => x.id === id);
+    if (!p || p.status === to) return;
+    const from = p.status;
+    const open = (msg: string) => { toast(msg); navigate(propLink(base, p.id)); };
+    const contact = !!(p.owner?.name || p.owner?.phone);
+    if (CALL.includes(from) && CALL.includes(to)) act.mutate({ p, to });
+    else if (WHO.includes(to) && [...CALL, ...WHO].includes(from)) {
+      if (contact) act.mutate({ p, to });
+      else open('Укажите, кто ответил, и его контакт');
+    } else if (to === 'shoot_scheduled' && from === 'owner_confirmed') open('Выберите дату съёмки');
+    else if (to === 'media_uploaded' && ['owner_confirmed', 'shoot_scheduled', 'returned'].includes(from)) open('Загрузите фото и видео');
+    else if (to === 'review' && ['shoot_scheduled', 'media_uploaded', 'returned'].includes(from)) {
+      if (p.media_count) act.mutate({ p, to });
+      else open('Сначала загрузите фото и видео');
+    } else if (from === 'review' && (to === 'returned' || to === 'published')) {
+      if (isStaff) open(to === 'published' ? 'Проверьте пост и опубликуйте' : 'Напишите агенту, что поправить');
+      else toast('Объект на проверке: решение за оператором', true);
+    } else if (to === 'rented') toast('«Сдан» ставится подтверждённой сделкой', true);
+    else toast(`Из «${PROPERTY_STATUS[from]}» в «${PROPERTY_STATUS[to]}» перенести нельзя`, true);
+  };
   return (
-    <div className="kanban">
-      {PROPERTY_BOARD.filter((s) => !base || (data?.[s] || []).length).map((s) => {
-        const items = data?.[s] || [];
-        return (
-          <div className="kanban-col" key={s}>
-            <div className="kanban-col-head"><span className="label">{PROPERTY_STATUS[s]}</span><span className="tab-count">{items.length}</span></div>
-            <div className="kanban-col-body">
-              {items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div> : items.map((p) => <PropertyMiniCard key={p.id} p={p} to={propLink(base, p.id)} />)}
+    <>
+      <div className="kanban" {...dragBoardProps}>
+        {PROPERTY_BOARD.filter((s) => !base || (data?.[s] || []).length).map((s) => {
+          const items = data?.[s] || [];
+          const collapsed = s === 'published' && !showPublished && items.length > 0;
+          return (
+            <div className={`kanban-col ${over === s ? 'drop-over' : ''}`} key={s}
+              onDragOver={(e) => { e.preventDefault(); setOver(s); }} onDragLeave={() => setOver(null)}
+              onDrop={(e) => { e.preventDefault(); drop(s, Number(e.dataTransfer.getData('text/property'))); }}>
+              <div className="kanban-col-head"><span className="label">{PROPERTY_STATUS[s]}</span><span className="tab-count">{items.length}</span></div>
+              <div className="kanban-col-body">
+                {collapsed ? <Button size="sm" variant="secondary" block onClick={() => setShowPublished(true)}>Показать</Button>
+                  : items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div>
+                  : items.map((p) => <PropertyMiniCard key={p.id} p={p} to={propLink(base, p.id)} onMove={base ? () => setMoving(p) : undefined} />)}
+                {s === 'published' && showPublished && !isStaff && items.length > 0 && <Button size="sm" variant="ghost" block onClick={() => setShowPublished(false)}>Свернуть</Button>}
+              </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+      {/* touch (Mini App) has no HTML drag & drop: the same moves from a menu, like the lead board */}
+      <Modal open={!!moving} onClose={() => setMoving(null)} title={`Перенести объект #${moving?.id}`}>
+        <div className="col">
+          {PROPERTY_BOARD.filter((st) => st !== moving?.status).map((st) => (
+            <Button key={st} variant="secondary" block onClick={() => { const p = moving!; setMoving(null); drop(st, p.id); }}>{PROPERTY_STATUS[st]}</Button>
+          ))}
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -280,17 +348,19 @@ export function MyProperties({ base = '' }: { base?: string }) {
   );
 }
 
-const LIVE = (Object.keys(PROPERTY_STATUS) as (keyof typeof PROPERTY_STATUS)[]).filter((s) => s !== 'archived');
+type PS = keyof typeof PROPERTY_STATUS;
+/** «База объектов»: shot and verified by the operator (backend properties.BASE_STATUSES + published_at, ?base=1) */
+const BASE: PS[] = ['published', 'rented'];
 
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
- * otherwise «База объектов» — every live object, for everyone (owner contacts stay hidden by the API for other agents' objects). */
+ * otherwise «База объектов» — published / rented objects, for everyone (owner contacts stay hidden by the API for other agents' objects). */
 export function PropertyList({ mine, archived, status: only, base = '' }: { mine?: boolean; archived?: boolean; status?: string; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
   const { data, isLoading, error } = useQuery({
     queryKey: ['properties', 'list', scope, q, status],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : LIVE.join(',')) }),
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')) }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const items = itemsOf(data);
@@ -307,7 +377,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
         {!archived && !only && (
           <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Все статусы</option>
-            {(mine ? Object.keys(PROPERTY_STATUS) as typeof LIVE : LIVE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
+            {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
       </div>
