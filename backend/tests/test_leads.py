@@ -200,3 +200,39 @@ def test_client_own_time_reaches_the_operator(db, sent):
     leads.client_own_time(db, lead.id, "суббота после 15")
     assert sent.of("client_time_staff")[-1][1] == "суббота после 15"
     assert sent.of("lead_assigned_agent")
+
+
+def test_like_auto_assigns_the_objects_agent(db, client, sent):
+    """A lead on an object with a known agent goes to him at once (object's agent, else the owner's); the operator
+    still sees it and can reassign. No agent → the usual operator flow."""
+    from app.models import Owner, Property
+    nino = make_user(db, "operator", "Нино")
+    georgiy, levan = make_user(db, "agent", "Георгий", is_active=True), make_user(db, "agent", "Леван", is_active=True)
+    anna = make_client(db)
+    fast = datetime.now(timezone.utc)
+    own = make_listing(db, "ss-own", source="ss")
+    db.add(Property(listing_id=own.id, status="taken", agent_id=georgiy.id, fast_track_at=fast))
+    bound = make_listing(db, "ss-bound", source="ss")
+    owner = Owner(name="Нана", phone="599000001", phone_norm="599000001", agent_id=levan.id)
+    db.add(owner)
+    db.flush()
+    db.add(Property(listing_id=bound.id, status="taken", owner_id=owner.id, fast_track_at=fast))
+    db.commit()
+
+    lead = leads.create_from_like(db, anna.id, own.id)
+    assert lead.status == "agent_assigned" and lead.agent_id == georgiy.id and lead.operator_id is None
+    assert lead.sla_stage == "agent_slots"
+    assert "lead_new_group" in sent.names() and sent.of("lead_assigned_agent")
+    ev = [e for e in leads.history(db, lead.id) if e["action"] == "agent_assigned"]
+    assert ev and ev[0]["actor"] == "bot" and ev[0]["data"]["agent_id"] == georgiy.id
+    # the operator sees it and can reassign
+    assert client.get(f"/api/leads/{lead.id}", headers=auth(nino)).status_code == 200
+    r = client.post(f"/api/leads/{lead.id}/assign", json={"agent_id": levan.id}, headers=auth(nino))
+    assert r.status_code == 200 and r.json()["agent"]["id"] == levan.id
+
+    # no object agent → the owner's agent
+    assert leads.create_from_like(db, anna.id, bound.id).agent_id == levan.id
+
+    # agency listing without an object → operator assigns as before
+    plain = leads.create_from_like(db, anna.id, make_listing(db).id)
+    assert plain.status == "new" and plain.agent_id is None

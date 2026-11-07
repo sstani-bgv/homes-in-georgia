@@ -203,6 +203,8 @@ p { margin: 0; }
 .badge-warn { background: var(--warn-soft); color: var(--warn); }
 .badge-grey { background: var(--brand-tint); color: var(--muted); }
 .badge-blue { background: var(--brand); color: #fff; }
+.badge-btn { border: 0; cursor: pointer; font-family: inherit; }
+.badge-btn:hover { filter: brightness(.95); }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--pill);
   border: 1px solid var(--line-2); background: var(--surface); font-weight: 600; font-size: 13px; cursor: pointer; color: var(--ink-2);

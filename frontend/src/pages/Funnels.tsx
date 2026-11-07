@@ -44,7 +44,9 @@ function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void 
 export function ObjectsPage() {
   const { isStaff } = useAuth();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as ObjTab) || (isStaff ? 'board' : 'new');
+  const asked = params.get('tab') as ObjTab | null;
+  // «На публикацию» / «Запросы» are the operators' queues: an agent's ?tab=requests falls back to his default tab
+  const tab = asked && (isStaff || !['review', 'requests'].includes(asked)) ? asked : isStaff ? 'board' : 'new';
   const setTab = (t: ObjTab) => setParams({ tab: t }, { replace: true });
   const [manual, setManual] = useState(params.get('new') === '1');
   // «На публикацию»: objects the agents sent («Готово — отправить оператору»); same query as the dashboard's tasks

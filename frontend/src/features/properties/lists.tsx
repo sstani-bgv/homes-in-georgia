@@ -7,9 +7,9 @@ import { api, type ListingFilter } from '../../api';
 import { itemsOf, mediaUrl } from '../../api/client';
 import type { Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
+import { ChipButton, ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
+import { Badge, Button, Empty, ErrorBox, Field, KV, Loading, Modal, Select, Seg } from '../../components/ui';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
@@ -26,11 +26,11 @@ export function NewListings({ base = '' }: { base?: string }) {
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
   const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); set('bedrooms')([...beds].sort().join(',')); };
-  const { user, isStaff } = useAuth();
+  const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
-  const objLink = (id: number) => (base === '/m' ? `/m/properties/${id}` : `/objects/${id}`);
+  const [peek, setPeek] = useState<{ id: number; match?: { listing: string; reasons: string[] } } | null>(null);
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, limit], queryFn: () => api.listings.new(f, limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
@@ -62,15 +62,11 @@ export function NewListings({ base = '' }: { base?: string }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['listings'] }); toast('Убрано из ленты как неактуальное'); },
     onError: (e) => toast(errText(e), true),
   });
-  const decide = useMutation({
-    mutationFn: (v: { id: string; pid: number; same: boolean }) => api.listings.decideMatch(v.id, v.pid, v.same),
-    onSuccess: (_, v) => { qc.invalidateQueries({ queryKey: ['listings'] }); toast(v.same ? `Объявление привязано к объекту #${v.pid}` : 'Отмечено: другой объект'); },
-    onError: (e) => toast(errText(e), true),
-  });
   const items = itemsOf(data);
 
   return (
     <>
+      {peek && <PropertyModal id={peek.id} match={peek.match} base={base} onClose={() => setPeek(null)} />}
       <Modal open={!!agentFor} onClose={() => setAgentFor(null)} title="Это агент">
         <form className="col gap-lg" onSubmit={(e) => { e.preventDefault(); markAgent.mutate(); }}>
           <Field label="Имя"><input className="input" value={agentC.owner_name} onChange={(e) => setAgentC((c) => ({ ...c, owner_name: e.target.value }))} autoFocus /></Field>
@@ -100,41 +96,34 @@ export function NewListings({ base = '' }: { base?: string }) {
         </div>
         {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить</Button>}
         {(!!data?.known_total || f.known) && (
-          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')}
-            title="Объявления, которые система уже привязала к объектам базы">
-            Показать уже известные ({data?.known_total ?? 0})
+          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
+            Уже в базе ({data?.known_total ?? 0})
           </Button>
         )}
       </div>
+      {f.known && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{KNOWN_HINT}</div>}
       {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {items.map((l) => {
             const lockedByOther = !!l.taken_by && l.taken_by.id !== user?.id;
+            const chips = (l.known_object || !!l.matches?.length) && (
+              <>
+                {l.known_object && (
+                  <ChipButton tone="ok" title={`Система узнала объявление как объект #${l.known_object.id}${l.known_object.address ? ` · ${l.known_object.address}` : ''}: оно прикреплено к нему автоматически`}
+                    onClick={() => setPeek({ id: l.known_object!.id })}>Уже в базе · #{l.known_object.id}</ChipButton>
+                )}
+                {(l.matches || []).map((m) => (
+                  <ChipButton key={m.property_id} tone="redsoft" title={`Похож на объект #${m.property_id}${m.address ? ` · ${m.address}` : ''}: ${m.reasons.join(', ')}`}
+                    onClick={() => setPeek({ id: m.property_id, match: { listing: l.id, reasons: m.reasons } })}>Похож на #{m.property_id}</ChipButton>
+                ))}
+              </>
+            );
             return (
-              <ListingCard key={l.id} listing={l} locked={lockedByOther ? `Взял ${l.taken_by?.name}` : undefined}
+              <ListingCard key={l.id} listing={l} locked={lockedByOther ? `Взял ${l.taken_by?.name}` : undefined} chips={chips || undefined}
                 footer={
                   <div className="col gap-sm">
                     {!!l.demand && <div className="alert alert-info row gap-sm" style={{ fontSize: 12, fontWeight: 700 }}><Users size={14} />{demandLabel(l.demand)}</div>}
-                    {l.known_object && (
-                      <Link className="alert alert-ok" to={objLink(l.known_object.id)} style={{ fontSize: 12, fontWeight: 700 }}>
-                        Уже есть в базе · объект #{l.known_object.id}
-                      </Link>
-                    )}
-                    {(l.matches || []).map((m) => (
-                      <div key={m.property_id} className="alert alert-warn col gap-sm" style={{ fontSize: 12 }}>
-                        <span>Похож на <Link to={objLink(m.property_id)} style={{ fontWeight: 700 }}>объект #{m.property_id}</Link>{m.address ? ` · ${m.address}` : ''}</span>
-                        <span className="muted">{m.reasons.join(' · ')}</span>
-                        {isStaff && (
-                          <div className="row">
-                            <Button size="sm" block loading={decide.isPending && decide.variables?.pid === m.property_id && decide.variables?.same}
-                              onClick={() => decide.mutate({ id: l.id, pid: m.property_id, same: true })}>Тот же объект</Button>
-                            <Button size="sm" variant="secondary" block loading={decide.isPending && decide.variables?.pid === m.property_id && !decide.variables?.same}
-                              onClick={() => decide.mutate({ id: l.id, pid: m.property_id, same: false })}>Другой</Button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
                     <div className="row">
                       <Button block disabled={lockedByOther} loading={take.isPending && take.variables === l.id} onClick={() => take.mutate(l.id)}>Беру в работу</Button>
                       {l.url && <a className="btn btn-secondary icon-btn" href={l.url} target="_blank" rel="noreferrer" title="Открыть источник"><ExternalLink size={16} /></a>}
@@ -159,8 +148,84 @@ export function NewListings({ base = '' }: { base?: string }) {
   );
 }
 
+const KNOWN_HINT = 'Объявления, которые система узнала как уже существующий объект: они прикреплены к нему автоматически';
+const propLink = (base: string, id: number) => (base === '/m' ? `/m/properties/${id}` : `/objects/${id}`);
+
+/** The object in a modal (no page change): photos, parameters, owner if visible, «Открыть полностью».
+ * match: opened from a «Похож на #N» chip — the operator decides «Тот же объект» / «Другой» right here. */
+export function PropertyModal({ id, match, base = '', onClose }: { id: number; match?: { listing: string; reasons: string[] }; base?: string; onClose: () => void }) {
+  const { isStaff } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id) });
+  const decide = useMutation({
+    mutationFn: (same: boolean) => api.listings.decideMatch(match!.listing, id, same),
+    onSuccess: (_, same) => { qc.invalidateQueries({ queryKey: ['listings'] }); toast(same ? `Объявление привязано к объекту #${id}` : 'Отмечено: другой объект'); onClose(); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const own = (p?.media || []).filter((m) => m.kind === 'photo').map((m) => m.url || m.path);
+  const shots = own.length ? own : p?.photos || [];
+  const phone = p?.owner?.phone;
+  return (
+    <Modal open onClose={onClose} title={p?.address || `Объект #${id}`}>
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : p && (
+        <div className="col gap-lg">
+          {!!shots.length && (
+            <div className="row" style={{ overflowX: 'auto', gap: 8 }}>
+              {shots.map((src) => <img key={src} src={mediaUrl(src)} alt="" loading="lazy" style={{ height: 160, borderRadius: 10, flex: 'none' }} />)}
+            </div>
+          )}
+          <div className="row row-wrap gap-sm">
+            <Badge tone="grey">#{p.id}</Badge><PropertyStatusBadge status={p.status} />
+            {p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} />
+          </div>
+          <KV items={[
+            ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
+            ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
+            ['Агент', p.agent?.name || '—'],
+            ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a></>}</>] as [string, React.ReactNode]] : []),
+          ]} />
+          {match && (
+            <div className="alert alert-warn col gap-sm" style={{ fontSize: 13 }}>
+              <span>Похож на объявление: {match.reasons.join(', ') || 'параметры совпадают'}</span>
+              {isStaff && (
+                <div className="row">
+                  <Button size="sm" block loading={decide.isPending && decide.variables} onClick={() => decide.mutate(true)}>Тот же объект</Button>
+                  <Button size="sm" variant="secondary" block loading={decide.isPending && !decide.variables} onClick={() => decide.mutate(false)}>Другой</Button>
+                </div>
+              )}
+            </div>
+          )}
+          <Link to={propLink(base, id)} className="btn btn-secondary">Открыть полностью</Link>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** «База объектов»: the same card as «Новые объявления»; click opens PropertyModal. */
+function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
+  return (
+    <article className="card lcard" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} style={{ cursor: 'pointer' }}>
+      <div className="lcard-photo">
+        {p.photo ? <img src={mediaUrl(p.photo)} alt="" loading="lazy" /> : null}
+        <div className="badges"><PropertyStatusBadge status={p.status} />{p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} /></div>
+        {p.address && <span className="plaque">{p.address}</span>}
+      </div>
+      <div className="lcard-body">
+        <span className="label">{[p.district, bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ') || '—'}</span>
+        <div className="price">{money(p.price, p.currency || 'USD')}<span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>/мес</span></div>
+        <div className="row row-between gap-sm faint" style={{ fontSize: 12, marginTop: 'auto' }}>
+          <span className="ellipsis">#{p.id} · {p.agent?.name || 'без агента'}</span>
+          <span style={{ flex: 'none' }}>{ago(p.updated_at || p.created_at)}</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
-  const ph = p.media?.find((m) => m.kind === 'photo')?.path || p.photos?.[0];
+  const ph = p.photo || p.media?.find((m) => m.kind === 'photo')?.path || p.photos?.[0];
   return (
     <Link to={to} className="kcard">
       <div className="row" style={{ alignItems: 'flex-start' }}>
@@ -217,7 +282,8 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
   });
   const items = itemsOf(data);
   const navigate = useNavigate();
-  const link = (id: number) => (base === '/m' ? `/m/properties/${id}` : `/objects/${id}`);
+  const link = (id: number) => propLink(base, id);
+  const [peek, setPeek] = useState<number | null>(null);
   return (
     <>
       <div className="row row-wrap" style={{ marginBottom: 14 }}>
@@ -232,7 +298,12 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
           </select>
         )}
       </div>
-      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : (
+      {peek !== null && <PropertyModal id={peek} base={base} onClose={() => setPeek(null)} />}
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : scope === 'all' ? (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {items.map((p) => <PropertyCard key={p.id} p={p} onOpen={() => setPeek(p.id)} />)}
+        </div>
+      ) : (
         <>
           <div className="card hide-mobile">
             <div className="table-wrap">

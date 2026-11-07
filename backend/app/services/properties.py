@@ -1146,6 +1146,22 @@ def prefetch(db: Session, rows: list[Property], cache: dict) -> None:
                                  .group_by(PropertyMedia.property_id)).all())
         for pid in pids:
             cache[("media_count", pid)] = counts.get(pid, 0)
+    _covers(db, [p for p in rows if ("cover", p.id) not in cache], cache)
+
+
+def _covers(db: Session, rows: list[Property], cache: dict) -> None:
+    """List cards' photo: the object's first own photo, else the origin ad's first photo."""
+    if not rows:
+        return
+    own = {}
+    for pid, path in db.execute(select(PropertyMedia.property_id, PropertyMedia.path)
+                                .where(PropertyMedia.property_id.in_([p.id for p in rows]), PropertyMedia.kind == "photo")
+                                .order_by(PropertyMedia.position, PropertyMedia.id)):
+        own.setdefault(pid, f"/api/media/{path}")
+    lids = {p.listing_id for p in rows if p.listing_id and p.id not in own}
+    with_ad = {lid for lid, ph in db.execute(select(Listing.id, Listing.photos).where(Listing.id.in_(lids))) if jload(ph, [])} if lids else set()
+    for p in rows:
+        cache[("cover", p.id)] = own.get(p.id) or (f"/api/listing-photos/{p.listing_id}/0" if p.listing_id in with_ad else None)
 
 
 def outs(db: Session, rows, user: User) -> list[dict]:
@@ -1209,6 +1225,9 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         if k not in cache:
             cache[k] = db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id))
         d["media_count"] = cache[k]
+        if ("cover", p.id) not in cache:
+            _covers(db, [p], cache)
+        d["photo"] = cache[("cover", p.id)]
     return d
 
 

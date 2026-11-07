@@ -131,6 +131,19 @@ def create_from_like(db: Session, client_id: int, listing_id: str, request: str 
     db.commit()
     _notify("lead_new_group", lead)
     _notify("lead_client_ack", lead)
+    return _auto_assign(db, lead)
+
+
+def _auto_assign(db: Session, lead: Lead) -> Lead:
+    """A new lead on an object with a known agent goes straight to him: the object's agent, else the owner's
+    (owners.agent_id). No agent, or he can't take it (inactive) → the operator assigns as before."""
+    prop = db.get(Property, lead.property_id) if lead.property_id else None
+    owner = db.get(Owner, prop.owner_id) if prop and prop.owner_id else None
+    for aid in dict.fromkeys(a for a in (prop and prop.agent_id, owner and owner.agent_id) if a):
+        try:
+            return assign_agent(db, lead.id, aid, None)
+        except DomainError:
+            db.rollback()
     return lead
 
 
@@ -158,7 +171,7 @@ def _reopen(db: Session, lead_id: int, request: str | None = None) -> Lead:
     db.commit()
     _notify("lead_new_group", lead)
     _notify("lead_client_ack", lead)
-    return lead
+    return _auto_assign(db, lead)
 
 
 def choose_slot(db: Session, slot_id: int, client_id: int | None = None) -> Lead:
@@ -263,25 +276,27 @@ def operator_take(db: Session, lead_id: int, operator: User) -> Lead:
     return lead
 
 
-def assign_agent(db: Session, lead_id: int, agent_id: int, actor: User) -> Lead:
-    """B3 → C6: agent gets the object + client profile without contacts; SLA agent_slots."""
+def assign_agent(db: Session, lead_id: int, agent_id: int, actor: User | None) -> Lead:
+    """B3 → C6: agent gets the object + client profile without contacts; SLA agent_slots.
+    actor None: the system auto-assign of a new lead to the object's agent (no operator is set, he can reassign)."""
     lead = _lead(db, lead_id, lock=True)
     _require_status(lead, "new", "operator_taken", "agent_assigned")
-    if actor.role not in STAFF:
+    if actor is not None and actor.role not in STAFF:
         raise forbidden("only operators assign agents")
-    if lead.operator_id and lead.operator_id != actor.id and actor.role not in ("admin", "superadmin"):
+    if actor is not None and lead.operator_id and lead.operator_id != actor.id and actor.role not in ("admin", "superadmin"):
         raise DomainError("already_taken", "lead is led by another operator")
     agent = get_or_404(db, User, int(agent_id), "agent")
     if agent.role not in FIELD + ("admin", "superadmin") or not agent.is_active:
         raise DomainError("bad_agent", "user is not an active agent")
-    took = lead.operator_id is None
+    took = actor is not None and lead.operator_id is None
     if took:
         lead.operator_id = actor.id
     prev = lead.agent_id
     lead.agent_id = agent.id
     _touch(lead, "agent_assigned")
     _set_sla(db, lead, "agent_slots")
-    _event(db, lead, "agent_assigned", actor, agent_id=agent.id, previous_agent_id=prev)
+    _event(db, lead, "agent_assigned", actor, label=None if actor else "bot",
+           note=None if actor else "автоматически · агент объекта", agent_id=agent.id, previous_agent_id=prev)
     db.commit()
     if took:
         _notify("lead_taken_group", lead, actor)

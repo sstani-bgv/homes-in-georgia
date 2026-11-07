@@ -52,10 +52,9 @@ def test_after_verification_locked_fields_become_a_request_others_apply(db, clie
     assert [x["id"] for x in client.get(f"/api/properties/{pid}", headers=auth(georgiy)).json()["change_requests"]] == [cr["id"]]
     assert sent.of("change_request_new")
 
-    # the queue: staff see it, agent sees only his own; agents can't decide
+    # the queue «Запросы» is staff only: agents can't load it (their own requests are on the object card) nor decide
     assert [x["id"] for x in client.get("/api/change-requests", headers=auth(nino)).json()["items"]] == [cr["id"]]
-    other = make_user(db, "agent", "Леван")
-    assert client.get("/api/change-requests", headers=auth(other)).json()["items"] == []
+    assert client.get("/api/change-requests", headers=auth(georgiy)).status_code == 403
     assert client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": True}, headers=auth(georgiy)).status_code == 403
 
     d = client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": True}, headers=auth(nino)).json()

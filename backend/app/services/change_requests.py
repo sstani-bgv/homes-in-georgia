@@ -127,10 +127,8 @@ def outs(db: Session, rows: list[ChangeRequest]) -> list[dict]:
 
 
 def query(db: Session, user: User, status: str | None = "pending"):
-    """Staff: the whole queue; an agent: his own requests."""
+    """The operators' queue «Запросы» (staff only: agents see their requests on the object card)."""
     stmt = select(ChangeRequest)
     if status:
         stmt = stmt.where(ChangeRequest.status.in_(status.split(",")))
-    if user.role not in STAFF:
-        stmt = stmt.where(ChangeRequest.requested_by == user.id)
     return stmt.order_by(ChangeRequest.id.desc() if status != "pending" else ChangeRequest.id)

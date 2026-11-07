@@ -339,7 +339,7 @@ class DecideIn(BaseModel):
 
 @router.get("/change-requests")
 def change_requests_list(status: str | None = "pending", limit: int = 100, offset: int = 0,
-                         db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+                         db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
     stmt = CR.query(db, user, status)
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = list(db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset))))

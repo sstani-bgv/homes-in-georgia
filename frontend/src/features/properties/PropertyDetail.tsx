@@ -12,7 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, pluralForm, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 
@@ -380,7 +380,7 @@ function NeedsCheck({ p }: { p: Property }) {
   );
 }
 
-/** Stage 10: active clients this object fits; owner first: after the call «Собственник согласен показать клиентам»
+/** Stage 10: active clients this object fits; owner first: after the call «Показать объект клиентам»
  * opens it to clients with the ad's photos and sends it to them (at most 10, never twice to one client). */
 function Demand({ p }: { p: Property }) {
   const { isStaff } = useAuth();
@@ -403,23 +403,30 @@ function Demand({ p }: { p: Property }) {
         <div className="alert alert-ok mt">Собственник согласен · объект показан клиентам {fmtDateTime(d.fast_track_at)} · отправлено: {d.pushed}</div>
       ) : d.can_fast_track && (
         <div className="col gap-sm mt">
-          <div style={{ fontSize: 13 }}>Скажите собственнику: «У нас {d.count} {['клиент готов', 'клиента готовы', 'клиентов готовы'][pluralForm(d.count)]} смотреть». Если он согласен, объект сразу уйдёт этим клиентам в бот с фото из объявления (до 10 человек), дальше обычный путь: лайк, оператор, просмотр.</div>
           <Button variant="ok" loading={m.isPending} onClick={() => { if (window.confirm('Собственник согласен показать квартиру клиентам? Объект уйдёт подходящим клиентам в бот.')) m.mutate(); }}>
-            <Send size={16} />Собственник согласен показать клиентам
+            <Send size={16} />Показать объект клиентам ({d.count})
           </Button>
+          <div className="muted" style={{ fontSize: 12 }}>Нажимайте, когда собственник согласился на показы: объект уйдёт в бот подходящим клиентам с фото из объявления</div>
         </div>
       )}
       {d.clients.length > 0 && (
         <div className="mt">
-          {d.clients.map((c, i) => (
-            <div className="list-row" key={c.id ?? i}>
-              <div className="grow">
-                <div style={{ fontWeight: 600 }}>{isStaff && c.id ? <Link to={`/clients/${c.id}`}>{c.name || (c.username ? `@${c.username}` : `Клиент #${c.id}`)}</Link> : `Клиент ${i + 1}`}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{c.profile || 'анкета без условий'}</div>
-              </div>
-              {c.sent && <Badge tone="ok">отправлено</Badge>}
-            </div>
-          ))}
+          {d.clients.map((c, i) => {
+            const name = isStaff && c.id ? c.name || (c.username ? `@${c.username}` : `Клиент #${c.id}`) : `Клиент ${i + 1}`;
+            const body = (
+              <>
+                <div className="grow">
+                  <div style={{ fontWeight: 600 }}>{name}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{c.profile || 'анкета без условий'}</div>
+                </div>
+                {c.sent && <Badge tone="ok">отправлено</Badge>}
+              </>
+            );
+            // client cards are staff only (/clients/:id); agents see anonymous rows
+            return isStaff && c.id
+              ? <Link className="list-row" key={c.id} to={`/clients/${c.id}`} style={{ color: 'inherit' }}>{body}</Link>
+              : <div className="list-row" key={c.id ?? i}>{body}</div>;
+          })}
         </div>
       )}
     </Card>
@@ -562,7 +569,7 @@ function Republish({ p }: { p: Property }) {
 
 const agentLabel = (a?: { name: string; agent_tag?: string | null } | null) => (a ? `${a.name}${a.agent_tag ? ` · #${a.agent_tag}` : ''}` : '—');
 
-/** «Передать собственника агенту…» (staff): the owner and his live objects move to another agent, with a history event. */
+/** «Сменить агента собственника…» (staff): the owner and his live objects move to another agent, with a history event. */
 function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
   const { toast, qc } = useProp(p.id);
   const [open, setOpen] = useState(false);
@@ -577,8 +584,8 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
   const options = itemsOf(agents.data).filter((u) => u.id !== p.owner?.agent?.id).map((u) => ({ value: u.id, label: agentLabel(u) }));
   return (
     <>
-      <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />{request ? 'Запрос: передать собственника…' : 'Передать собственника агенту…'}</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Передать собственника агенту">
+      <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />{request ? 'Запрос: сменить агента…' : 'Сменить агента собственника…'}</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Сменить агента собственника">
         <div className="col gap-lg">
           <div className="muted" style={{ fontSize: 13 }}>Сейчас: {agentLabel(p.owner?.agent)}. Вместе с собственником перейдут его объекты в работе у прежнего агента. Передача запишется в историю.</div>
           {request && <div className="alert alert-info" style={{ fontSize: 13 }}>Передачу проверит оператор: запрос уйдёт в «Запросы».</div>}

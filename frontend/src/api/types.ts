@@ -136,6 +136,8 @@ export interface Property {
   post_url?: string | null;
   media?: Media[];
   photos?: string[];
+  /** list rows: the first own photo, else the origin ad's */
+  photo?: string | null;
   listing?: (Listing & { urls?: string[] }) | null;
   /** full card only: our posts of the object (channel: 'tg' for now) */
   publications?: Publication[];

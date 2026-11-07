@@ -215,8 +215,13 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
               {lead.viewing_at && <Badge tone="solid"><CalendarClock size={12} />просмотр {fmtSlot(lead.viewing_at)}</Badge>}
             </div>
           </div>
-          <div className="row row-wrap">
-            {ownerPhone && <a className="btn btn-lg" href={`tel:${ownerPhone.replace(/[^+\d]/g, '')}`}><Phone size={18} />{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</a>}
+          <div className="row row-wrap" style={{ minWidth: 0, maxWidth: '100%' }}>
+            {ownerPhone && (
+              <a className="btn btn-lg" href={`tel:${ownerPhone.replace(/[^+\d]/g, '')}`} style={{ minWidth: 0, maxWidth: '100%' }}>
+                <Phone size={18} style={{ flex: 'none' }} />
+                <span className="ellipsis">{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</span>
+              </a>
+            )}
             {isStaff && lead.status === 'new' && <Button size="lg" loading={take.isPending} onClick={() => take.mutate()}><Hand size={18} />Взять</Button>}
             {isStaff && !closed && <Button size={lead.status === 'operator_taken' ? 'lg' : undefined} variant={lead.status === 'operator_taken' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}><UserPlus size={16} />{lead.agent ? 'Сменить агента' : 'Назначить агента'}</Button>}
           </div>
@@ -252,7 +257,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
               <Button variant="danger" onClick={() => setCancelOpen(true)}><XCircle size={16} />Отменить</Button>
             </div>
           )}
-          {!compact && <Card label="История" title="Лог заявки"><Timeline events={lead.history || []} /></Card>}
+          {!compact && <Card label="Заявка" title="История"><Timeline events={lead.history || []} /></Card>}
         </div>
         <div className="col gap-lg">
           {l && (
@@ -282,7 +287,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
             )}
             {c?.profile ? <ProfileView profile={c.profile} /> : <span className="muted">Анкета не заполнена</span>}
           </Card>
-          {compact && <Card label="История" title="Лог заявки"><Timeline events={lead.history || []} /></Card>}
+          {compact && <Card label="Заявка" title="История"><Timeline events={lead.history || []} /></Card>}
         </div>
       </div>
 

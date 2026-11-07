@@ -6,7 +6,7 @@ import { Bot, Clock, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide
 import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
 import { mediaUrl } from '../api/client';
-import { Badge, ErrorBox, KV, Loading, Modal, useNow } from './ui';
+import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
 
 const SLA_DEFAULT: Record<string, number> = { operator_take: 5, agent_slots: 30, slots_to_client: 60 };
@@ -159,7 +159,13 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
   );
 }
 
-export function ListingCard({ listing, locked, footer, onOpen }: { listing: Listing; locked?: ReactNode; footer?: ReactNode; onOpen?: () => void }) {
+/** A clickable badge: «Похож на #12», «Уже в базе · #1»; the reason is in the tooltip. */
+export function ChipButton({ tone, title, onClick, children }: { tone: 'ok' | 'redsoft' | 'warn' | 'grey'; title?: string; onClick: () => void; children: ReactNode }) {
+  return <button type="button" className={`badge badge-${tone} badge-btn`} title={title} onClick={onClick}>{children}</button>;
+}
+
+/** chips: one wrapping row of badges under the price (matches, known object); flag reasons live in the badges' tooltips. */
+export function ListingCard({ listing, locked, footer, chips, onOpen }: { listing: Listing; locked?: ReactNode; footer?: ReactNode; chips?: ReactNode; onOpen?: () => void }) {
   const ph = listing.photos?.[0];
   const [open, setOpen] = useState(false);
   const show = onOpen || (() => setOpen(true));
@@ -180,16 +186,18 @@ export function ListingCard({ listing, locked, footer, onOpen }: { listing: List
           {listing.source && <Badge tone="grey">{SOURCE_LABEL[listing.source] || listing.source}</Badge>}
           {listing.created_at && <span className="faint" style={{ fontSize: 12 }}>{fmtDateTime(listing.created_at)}</span>}
         </div>
-        {listing.ai_flags?.reasons?.length ? <div className="muted" style={{ fontSize: 12 }}>{listing.ai_flags.reasons.join(' · ')}</div> : null}
+        {(chips || (!listing.ai_flags?.duplicate && !!listing.similar?.length)) && (
+          <div className="row row-wrap gap-sm">
+            {!listing.ai_flags?.duplicate && !!listing.similar?.length && (
+              <ChipButton tone="redsoft" title="Похожая квартира уже есть в канале агентства: сравните фото и параметры" onClick={show}>Похож в канале</ChipButton>
+            )}
+            {chips}
+          </div>
+        )}
         {listing.refused && (
           <div className="alert alert-info" style={{ fontSize: 12 }}>
             Звонил {listing.refused.by || 'агент'} {fmtDateTime(listing.refused.at)}: собственник не хочет работать{listing.refused.comment ? ` («${listing.refused.comment}»)` : ''}. Попробуйте вы.
           </div>
-        )}
-        {!listing.ai_flags?.duplicate && !!listing.similar?.length && (
-          <button type="button" className="alert alert-warn" onClick={show} style={{ fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
-            Похожая квартира есть в канале — сравните
-          </button>
         )}
         {locked && <div className="row gap-sm muted" style={{ fontSize: 12, fontWeight: 600 }}><Lock size={14} />{locked}</div>}
         <div style={{ marginTop: 'auto' }}>{footer}</div>
@@ -198,12 +206,15 @@ export function ListingCard({ listing, locked, footer, onOpen }: { listing: List
   );
 }
 
-export function Timeline({ events }: { events: EventItem[] }) {
+/** Latest first; long histories show the latest `limit` and «Показать ещё». */
+export function Timeline({ events, limit = 5 }: { events: EventItem[]; limit?: number }) {
+  const [all, setAll] = useState(false);
   if (!events.length) return <div className="muted">Событий пока нет</div>;
   const sorted = [...events].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  const shown = all ? sorted : sorted.slice(0, limit);
   return (
     <div className="timeline">
-      {sorted.map((e) => {
+      {shown.map((e) => {
         const isBot = e.actor_label === 'bot';
         const who = e.actor_name || (e.actor_label === 'bot' ? 'Бот' : e.actor_label === 'client' ? 'Клиент' : e.actor_label) || '';
         return (
@@ -220,6 +231,7 @@ export function Timeline({ events }: { events: EventItem[] }) {
           </div>
         );
       })}
+      {sorted.length > shown.length && <Button size="sm" variant="secondary" style={{ alignSelf: 'flex-start', marginTop: 8 }} onClick={() => setAll(true)}>Показать ещё ({sorted.length - shown.length})</Button>}
     </div>
   );
 }
