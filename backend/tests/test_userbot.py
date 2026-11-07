@@ -184,6 +184,26 @@ def test_like_is_the_operator_dm_link_until_the_client_writes(db, monkeypatch):
     assert not hasattr(notify, "client_message") and not hasattr(notify, "handoff")
 
 
+def test_like_sends_the_channel_post_link(db, monkeypatch):
+    """An object published in our channel: ❤️ prefills a link to its post (the operator sees which flat at once), and the
+    userbot finds the object by that link."""
+    from app.models import Property
+    from app.telegram import client as tg
+    monkeypatch.undo()                                                        # the real notify (the autouse `sent` stubs it)
+    monkeypatch.setattr(tg, "_client", lambda: FakeHttp())
+    monkeypatch.setenv("OPERATOR_TG_USERNAME", "op_nino")
+    cl, lst = make_client(db, external_id=5550011), make_listing(db)
+    prop = Property(listing_id=lst.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/548723",
+                    post_message_id="548723")
+    db.add(prop)
+    db.commit()
+    text = unquote(notify.like_button({"id": cl.id, "lang": "ru"}, lst.id, "❤️")["url"].split("text=", 1)[1])
+    assert text == "Здравствуйте! Мне нравится этот вариант: https://t.me/rent_tbilisi_ge/548723"
+    assert userbot.on_incoming(5550011, None, text) == "liked"
+    assert db.query(Lead).filter_by(client_id=cl.id, listing_id=lst.id).count() == 1
+    other = make_client(db, external_id=5550012)
+    assert userbot.on_incoming(5550012, None, "Мне нравится https://t.me/rent_tbilisi_ge/1") == "no_lead"   # unknown post
+
 def fake_userbot(monkeypatch, posts):
     import httpx
     monkeypatch.setenv("USERBOT_URL", "http://userbot:8091/")

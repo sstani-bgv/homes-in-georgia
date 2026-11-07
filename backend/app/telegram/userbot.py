@@ -52,6 +52,7 @@ SENT = set()  # (peer id, text) sent by send(): the outgoing-message handler mus
 # a reply that reads as a time («завтра после 18», «15:30», «tomorrow 6 pm») while slots wait = the client's own time
 # the object code in notify.LIKE_DM («вариант #12 · …»): a property id, else a listing id
 LIKE_CODE = re.compile(r"(?:вариант|option|ვარიანტი) #([\w-]+)", re.I)
+LIKE_POST = re.compile(r"t\.me/([A-Za-z]\w{3,})/(\d+)")  # notify.LIKE_DM_POST: a link to the object's post in our channel
 TIME_HINT = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*(?:ч|h|am|pm)\b|после|after|завтра|сегодня|tomorrow|today|ხვალ|დღეს|შემდეგ", re.I)
 
 
@@ -167,12 +168,20 @@ def like_dm(cl, text):
     """The ❤️ link's first message («…вариант #<obj> · …») -> the lead id (create_from_like: the same B1 card, auto-assign
     and card mark as a ❤️ press), or None (no code / no such object / not available to clients)."""
     from app.services import leads
-    m = LIKE_CODE.search(text)
-    if not m:
+    if p := LIKE_POST.search(text):
+        url = f"https://t.me/{p[1]}/{p[2]}"
+        r = (store.q("SELECT listing_id FROM properties WHERE post_url = %s AND listing_id IS NOT NULL ORDER BY id LIMIT 1", (url,), one=True)
+             or store.q("SELECT id AS listing_id FROM listings WHERE urls LIKE %s ORDER BY id LIMIT 1", (f'%"{url}"%',), one=True))
+        if not r:
+            return None
+        lid = r["listing_id"]
+    elif m := LIKE_CODE.search(text):
+        code = m[1]
+        prop = code.isdigit() and store.q("SELECT listing_id FROM properties WHERE id = %s AND listing_id IS NOT NULL", (int(code),), one=True)
+        lid = prop["listing_id"] if prop else code
+    else:
         return None
-    code = m[1]
-    prop = code.isdigit() and store.q("SELECT listing_id FROM properties WHERE id = %s AND listing_id IS NOT NULL", (int(code),), one=True)
-    lead_id, _ = _svc(lambda s: leads.create_from_like(s, cl["id"], prop["listing_id"] if prop else code).id)
+    lead_id, _ = _svc(lambda s: leads.create_from_like(s, cl["id"], lid).id)
     return lead_id
 
 

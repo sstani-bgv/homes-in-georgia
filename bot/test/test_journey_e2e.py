@@ -5,6 +5,7 @@ slots (C6/C7) → the operator's userbot sends the bot's inline slot card into t
 slot on that inline message (A4b, edited «✅ Вы выбрали») → contacts to the agent (C8), details as the operator's DM →
 late → survey (A5a/C9a) → deal confirmed (C9c) → T14 (A6). The userbot is the real app.telegram.userbot HTTP endpoint
 over a fake Telethon client (FakeUserbot) that asks the bot through the fake Bot API."""
+import json
 import asyncio
 import os
 import sys
@@ -269,11 +270,10 @@ class JourneyE2E(unittest.TestCase):
         like = next(b for row in f.markup(card) for b in row if b["text"] == "❤️ Нравится")
         lid = next(b["callback_data"][3:] for row in f.markup(card) for b in row if (b.get("callback_data") or "").startswith("no:"))
         self.assertNotIn("callback_data", like)
-        with db.tx() as c:
-            obj, district, price = c.execute("SELECT COALESCE((SELECT p.id::text FROM properties p WHERE p.listing_id = s.id ORDER BY p.id "
-                                             "LIMIT 1), s.id), s.district, s.price_usd FROM listings s WHERE s.id = ?", (lid,)).fetchone()[:]
+        with db.tx() as c:  # an agency listing: the link to its post in our channel
+            post = next(u for u in json.loads(c.execute("SELECT urls FROM listings WHERE id = ?", (lid,)).fetchone()[0]) if "t.me/" in u)
         from urllib.parse import quote, unquote
-        first_dm = f"Здравствуйте! Мне нравится вариант #{obj} · {district}, ул. Каштановая, 12 · ${price:g}"
+        first_dm = f"Здравствуйте! Мне нравится этот вариант: {post}"
         self.assertEqual(like["url"], "https://t.me/nino_e2e?text=" + quote(first_dm))
         from app.telegram import userbot
         m = self.fake.mark()

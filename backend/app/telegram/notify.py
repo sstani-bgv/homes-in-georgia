@@ -271,6 +271,21 @@ def lead_client_ack(lead):
 # the first message of a client who never wrote to the operator; userbot.LIKE_CODE reads the object code back from it
 LIKE_DM = {"ru": "Здравствуйте! Мне нравится вариант #{obj} · {what}", "en": "Hello! I like option #{obj} · {what}",
            "ka": "გამარჯობა! მომწონს ვარიანტი #{obj} · {what}"}
+# the same with the object's post in our channel: the operator opens the post, userbot.LIKE_POST finds the object by it
+LIKE_DM_POST = {"ru": "Здравствуйте! Мне нравится этот вариант: {url}", "en": "Hello! I like this option: {url}",
+                "ka": "გამარჯობა! მომწონს ეს ვარიანტი: {url}"}
+
+
+def channel_post_of(listing_id):
+    """Our channel post of this listing's object (properties.post_url, else an agency listing's own t.me url) or None."""
+    r = store.q("SELECT post_url FROM properties WHERE listing_id = %s AND NULLIF(BTRIM(post_url), '') IS NOT NULL "
+                "ORDER BY id LIMIT 1", (listing_id,), one=True)
+    if r:
+        return r["post_url"]
+    i = store.listing(listing_id) or {}
+    urls = i.get("urls") or []
+    urls = json.loads(urls) if isinstance(urls, str) else urls
+    return next((u for u in urls if "t.me/" in u), None) if i.get("source") == "agency" else None
 
 
 def operator_username():
@@ -299,6 +314,8 @@ def like_button(cl, listing_id, label):
         return cb(label, f"like:{listing_id}")
     lang = texts.lang_of(cl.get("lang"))
     prop = store.q("SELECT id FROM properties WHERE listing_id = %s ORDER BY id LIMIT 1", (listing_id,), one=True)
+    if link := channel_post_of(listing_id):
+        return url_btn(label, f"https://t.me/{u}?text=" + quote(LIKE_DM_POST[lang].format(url=link)))
     what = " · ".join(x for x in (address(i, lang), i.get("price_usd") and texts.money(i["price_usd"])) if x)
     return url_btn(label, f"https://t.me/{u}?text=" + quote(LIKE_DM[lang].format(obj=prop["id"] if prop else listing_id, what=what)))
 
