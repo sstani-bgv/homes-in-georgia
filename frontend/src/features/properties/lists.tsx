@@ -4,12 +4,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
-import { itemsOf, mediaUrl } from '../../api/client';
-import type { Property } from '../../api/types';
+import { itemsOf, thumbUrl } from '../../api/client';
+import type { Listing, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ChipButton, ExclusiveConflictBadge, ListingCard, PropertyStatusBadge, Place } from '../../components/domain';
+import { ChipButton, CompareSide, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Empty, ErrorBox, Field, KV, Loading, Modal, Select, Seg } from '../../components/ui';
+import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
@@ -30,7 +30,7 @@ export function NewListings({ base = '' }: { base?: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
-  const [peek, setPeek] = useState<{ id: number; match?: { listing: string; reasons: string[] } } | null>(null);
+  const [peek, setPeek] = useState<{ id: number; listing: Listing; reasons?: string[] } | null>(null);
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, limit], queryFn: () => api.listings.new(f, limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
@@ -66,7 +66,7 @@ export function NewListings({ base = '' }: { base?: string }) {
 
   return (
     <>
-      {peek && <PropertyModal id={peek.id} match={peek.match} base={base} onClose={() => setPeek(null)} />}
+      {peek && <PropertyModal id={peek.id} listing={peek.listing} reasons={peek.reasons} base={base} onClose={() => setPeek(null)} />}
       <Modal open={!!agentFor} onClose={() => setAgentFor(null)} title="Это агент">
         <form className="col gap-lg" onSubmit={(e) => { e.preventDefault(); markAgent.mutate(); }}>
           <Field label="Имя"><input className="input" value={agentC.owner_name} onChange={(e) => setAgentC((c) => ({ ...c, owner_name: e.target.value }))} autoFocus /></Field>
@@ -110,12 +110,14 @@ export function NewListings({ base = '' }: { base?: string }) {
             const chips = (l.known_object || !!l.matches?.length) && (
               <>
                 {l.known_object && (
-                  <ChipButton tone="ok" title={`Система узнала объявление как объект #${l.known_object.id}${l.known_object.address ? ` · ${l.known_object.address}` : ''}: оно прикреплено к нему автоматически`}
-                    onClick={() => setPeek({ id: l.known_object!.id })}>Уже в базе · #{l.known_object.id}</ChipButton>
+                  <ChipButton tone="ok" onClick={() => setPeek({ id: l.known_object!.id, listing: l })}>
+                    Уже в базе · #{l.known_object.id}{l.known_object.address ? ` · ${l.known_object.address}` : ''}
+                  </ChipButton>
                 )}
                 {(l.matches || []).map((m) => (
-                  <ChipButton key={m.property_id} tone="redsoft" title={`Похож на объект #${m.property_id}${m.address ? ` · ${m.address}` : ''}: ${m.reasons.join(', ')}`}
-                    onClick={() => setPeek({ id: m.property_id, match: { listing: l.id, reasons: m.reasons } })}>Похож на #{m.property_id}</ChipButton>
+                  <ChipButton key={m.property_id} tone="redsoft" onClick={() => setPeek({ id: m.property_id, listing: l, reasons: m.reasons })}>
+                    Похож на #{m.property_id}{m.address ? ` · ${m.address}` : ''}
+                  </ChipButton>
                 ))}
               </>
             );
@@ -151,52 +153,51 @@ export function NewListings({ base = '' }: { base?: string }) {
 const KNOWN_HINT = 'Объявления, которые система узнала как уже существующий объект: они прикреплены к нему автоматически';
 const propLink = (base: string, id: number) => (base === '/m' ? `/m/properties/${id}` : `/objects/${id}`);
 
-/** The object in a modal (no page change): photos, parameters, owner if visible, «Открыть полностью».
- * match: opened from a «Похож на #N» chip — the operator decides «Тот же объект» / «Другой» right here. */
-export function PropertyModal({ id, match, base = '', onClose }: { id: number; match?: { listing: string; reasons: string[] }; base?: string; onClose: () => void }) {
+/** The object in a modal (no page change): photos, parameters, owner if visible, «Открыть объект полностью».
+ * listing: opened from a chip of «Новые объявления» — the ad and the object side by side (stacked on a phone);
+ * reasons: a «Похож на #N» match, decided right here («Тот же объект» / «Другой»); without reasons: «Уже в базе». */
+export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id: number; listing?: Listing; reasons?: string[]; base?: string; onClose: () => void }) {
   const { isStaff } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id) });
   const decide = useMutation({
-    mutationFn: (same: boolean) => api.listings.decideMatch(match!.listing, id, same),
+    mutationFn: (same: boolean) => api.listings.decideMatch(listing!.id, id, same),
     onSuccess: (_, same) => { qc.invalidateQueries({ queryKey: ['listings'] }); toast(same ? `Объявление привязано к объекту #${id}` : 'Отмечено: другой объект'); onClose(); },
     onError: (e) => toast(errText(e), true),
   });
   const own = (p?.media || []).filter((m) => m.kind === 'photo').map((m) => m.url || m.path);
-  const shots = own.length ? own : p?.photos || [];
   const phone = p?.owner?.phone;
+  const side = p && (
+    <CompareSide label={`Объект #${p.id} в базе`} photos={own.length ? own : p.photos || []} address={p.address} rows={[
+      ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
+      ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
+      ['Агент', p.agent?.name || '—'],
+      ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a></>}</>] as [string, React.ReactNode]] : []),
+    ]}>
+      <div className="row row-wrap gap-sm">
+        <PropertyStatusBadge status={p.status} />
+        {p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} />
+      </div>
+    </CompareSide>
+  );
   return (
-    <Modal open onClose={onClose} title={p?.address || `Объект #${id}`}>
+    <Modal open wide={!!listing} onClose={onClose} title={listing ? (reasons ? `Похож на объект #${id}?` : `Уже в базе · объект #${id}`) : p?.address || `Объект #${id}`}>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : p && (
         <div className="col gap-lg">
-          {!!shots.length && (
-            <div className="row" style={{ overflowX: 'auto', gap: 8 }}>
-              {shots.map((src) => <img key={src} src={mediaUrl(src)} alt="" loading="lazy" style={{ height: 160, borderRadius: 10, flex: 'none' }} />)}
+          {listing && (
+            <div className={`alert ${reasons ? 'alert-warn' : 'alert-ok'}`} style={{ fontSize: 13 }}>
+              {reasons ? `Почему похож: ${reasons.join('; ') || 'параметры совпадают'}. Это та же квартира?` : 'Система узнала это объявление как объект из базы: оно прикреплено к нему автоматически.'}
             </div>
           )}
-          <div className="row row-wrap gap-sm">
-            <Badge tone="grey">#{p.id}</Badge><PropertyStatusBadge status={p.status} />
-            {p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} />
-          </div>
-          <KV items={[
-            ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
-            ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
-            ['Агент', p.agent?.name || '—'],
-            ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a></>}</>] as [string, React.ReactNode]] : []),
-          ]} />
-          {match && (
-            <div className="alert alert-warn col gap-sm" style={{ fontSize: 13 }}>
-              <span>Похож на объявление: {match.reasons.join(', ') || 'параметры совпадают'}</span>
-              {isStaff && (
-                <div className="row">
-                  <Button size="sm" block loading={decide.isPending && decide.variables} onClick={() => decide.mutate(true)}>Тот же объект</Button>
-                  <Button size="sm" variant="secondary" block loading={decide.isPending && !decide.variables} onClick={() => decide.mutate(false)}>Другой</Button>
-                </div>
-              )}
+          {listing ? <div className="cmp"><ListingSide l={listing} />{side}</div> : side}
+          {listing && reasons && isStaff && (
+            <div className="row">
+              <Button block loading={decide.isPending && decide.variables} onClick={() => decide.mutate(true)}>Тот же объект</Button>
+              <Button variant="secondary" block loading={decide.isPending && !decide.variables} onClick={() => decide.mutate(false)}>Другой</Button>
             </div>
           )}
-          <Link to={propLink(base, id)} className="btn btn-secondary">Открыть полностью</Link>
+          <Link to={propLink(base, id)} className="btn btn-secondary">Открыть объект полностью</Link>
         </div>
       )}
     </Modal>
@@ -208,7 +209,7 @@ function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
   return (
     <article className="card lcard" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} style={{ cursor: 'pointer' }}>
       <div className="lcard-photo">
-        {p.photo ? <img src={mediaUrl(p.photo)} alt="" loading="lazy" /> : null}
+        {p.photo ? <img src={thumbUrl(p.photo)} alt="" loading="lazy" /> : null}
         <div className="badges"><PropertyStatusBadge status={p.status} />{p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} /></div>
         {p.address && <span className="plaque">{p.address}</span>}
       </div>
@@ -229,7 +230,7 @@ export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
   return (
     <Link to={to} className="kcard">
       <div className="row" style={{ alignItems: 'flex-start' }}>
-        {ph && <img src={mediaUrl(ph)} alt="" style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
+        {ph && <img src={thumbUrl(ph)} alt="" loading="lazy" style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
         <div className="grow">
           <div className="kcard-title ellipsis">{p.address || `Объект #${p.id}`}</div>
           <div className="kcard-meta">{[p.district, bedroomsLabel(p.bedrooms), money(p.price, p.currency || 'USD')].filter(Boolean).join(' · ')}</div>

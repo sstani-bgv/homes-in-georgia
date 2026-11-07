@@ -1,5 +1,6 @@
 """Media storage (app/storage.py) and property embeddings (app/embeddings.py).
 The S3 test runs only with TEST_S3_ENDPOINT/TEST_S3_BUCKET/TEST_S3_ACCESS_KEY/TEST_S3_SECRET_KEY (e.g. a local MinIO)."""
+import io
 import os
 import uuid
 
@@ -29,6 +30,41 @@ def test_local_backend(db, client):
     assert storage.fetch(m.path, "/nonexistent") == str(storage.local_path(m.path))
     properties.delete_media(db, p.id, m.id, ag)
     assert not storage.local_path(m.path).exists() and storage.fetch(m.path, "/x") is None
+
+
+def _jpeg(w=2000, h=1500):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 30, 30)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_previews_and_fallback(db, client, tmp_path):
+    from PIL import Image
+    ag, p, (m, bad) = _property_with_media(db, [("a.jpg", _jpeg()), ("b.jpg", b"\xff\xd8broken")])
+    pv = storage.local_path(storage.preview_key(m.path))
+    assert Image.open(pv).format == "WEBP" and max(Image.open(pv).size) == storage.PREVIEW_PX
+    r = client.get(f"/api/media/{m.path}?p=1", headers=auth(ag))
+    assert r.headers["content-type"] == "image/webp" and r.content == pv.read_bytes()
+    assert client.get(f"/api/media/{m.path}", headers=auth(ag)).headers["content-type"] == "image/jpeg"
+    # no preview possible -> the original
+    assert client.get(f"/api/media/{bad.path}?p=1", headers=auth(ag)).content == b"\xff\xd8broken"
+    card = client.get(f"/api/properties/{p.id}", headers=auth(ag)).json()
+    assert card["media"][0]["preview"] == f"/api/media/{m.path}?p=1"
+
+    # backfill re-makes a missing preview; deleting the photo deletes its preview
+    pv.unlink()
+    assert storage.previews(out=lambda *_: None)[0] >= 1 and pv.is_file()
+    properties.delete_media(db, p.id, m.id, ag)
+    assert not pv.exists()
+
+    # listing photos: preview on the first ?p=1 request, the original without it
+    f = tmp_path / "ss5_0.jpg"
+    f.write_bytes(_jpeg(900, 600))
+    make_listing(db, "ss5", photos=f'["{f}"]')
+    assert client.get("/api/listing-photos/ss5/0").headers["content-type"] == "image/jpeg"
+    r = client.get("/api/listing-photos/ss5/0?p=1")
+    assert r.headers["content-type"] == "image/webp" and Image.open(io.BytesIO(r.content)).size == (640, 427)
 
 
 def test_embed_property_stores_vectors(db):

@@ -170,14 +170,14 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
   );
 }
 
-export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
+export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; wide?: boolean }) {
   useEsc(onClose);
   useLockScroll(open);
   if (!open) return null;
   return createPortal(
     <>
       <div className="overlay" onClick={onClose} />
-      <div className="modal" role="dialog" aria-modal="true">
+      <div className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true">
         <div className="modal-head"><h2>{title}</h2><Button variant="ghost" className="icon-btn" onClick={onClose} aria-label="Закрыть"><X size={18} /></Button></div>
         <div className="modal-body">{children}</div>
       </div>

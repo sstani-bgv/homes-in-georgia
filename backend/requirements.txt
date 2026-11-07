@@ -10,6 +10,7 @@ bcrypt==5.0.0
 httpx==0.28.1
 python-multipart==0.0.33
 boto3==1.43.125   # app/storage.py: MEDIA_STORAGE=s3 (R2 / Hetzner / MinIO)
+pillow==13.0.0   # app/storage.py: photo previews (same as bot/requirements.txt)
 telethon==1.36.0   # app/telegram/userbot.py (operator userbot); imported only there
 tzdata
 # tests

@@ -144,6 +144,13 @@ export function itemsOf<T>(d: { items: T[] } | T[] | undefined | null): T[] {
   return Array.isArray(d) ? d : d.items || [];
 }
 
+/** The ~640px preview for cards, lists and thumbnails (the API serves the original while there is none);
+ * mediaUrl() stays for the full-screen lightbox. */
+export function thumbUrl(path?: string | null): string {
+  const u = mediaUrl(path);
+  return /^\/api\/(media|listing-photos)\//.test(u) ? `${u}${u.includes('?') ? '&' : '?'}p=1` : u;
+}
+
 export function mediaUrl(path?: string | null): string {
   if (!path) return '';
   if (path.startsWith('/api/')) {

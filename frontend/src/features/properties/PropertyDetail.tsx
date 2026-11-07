@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArrowRightLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
-import { itemsOf, mediaUrl } from '../../api/client';
+import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
@@ -270,7 +270,7 @@ function MediaGrid({ p, items, onDelete }: { p?: Property; items?: Shot[]; onDel
       {open !== null && <Lightbox items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
       {media.map((m, i) => (
         <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
-          {m.kind === 'video' ? <video src={mediaUrl(m.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={mediaUrl(m.src)} alt={m.room || ''} loading="lazy" />}
+          {m.kind === 'video' ? <video src={mediaUrl(m.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={thumbUrl(m.src)} alt={m.room || ''} loading="lazy" />}
           {m.room && <span className="room badge badge-blue">{m.room}</span>}
           {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
         </div>
@@ -513,7 +513,7 @@ function PostComposer({ p }: { p: Property }) {
                 <div className="ph" key={id} onClick={() => (n >= 0 || picked.length < ALBUM_MAX) && toggle(id)}
                   style={{ cursor: 'pointer', opacity: n >= 0 ? 1 : 0.35, outline: n === 0 ? '3px solid var(--brand)' : undefined }}
                   role="checkbox" aria-checked={n >= 0} aria-label={`Файл ${i + 1}${m.room ? `, ${m.room}` : ''}`}>
-                  {m.kind === 'video' ? <video src={mediaUrl(m.url || m.path)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={mediaUrl(m.url || m.path)} alt={m.room || ''} loading="lazy" />}
+                  {m.kind === 'video' ? <video src={mediaUrl(m.url || m.path)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={thumbUrl(m.url || m.path)} alt={m.room || ''} loading="lazy" />}
                   <span className="room badge badge-blue">{n >= 0 ? (n === 0 ? '1 · обложка' : n + 1) : 'не в посте'}</span>
                   <span className="row" style={{ position: 'absolute', right: 4, top: 4, gap: 4 }} onClick={(e) => e.stopPropagation()}>
                     {i > 0 && <button type="button" className="btn btn-secondary icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={() => move(i, -1)} aria-label="Раньше"><ChevronLeft size={14} /></button>}

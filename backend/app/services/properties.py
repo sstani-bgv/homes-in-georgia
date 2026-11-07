@@ -751,6 +751,7 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
             raise DomainError("too_large", f"file is too large: {name}")
         key = f"properties/{p.id}/{uuid.uuid4().hex}{ext}"
         storage.put(key, content)
+        storage.put_preview(key, content)
         pos += 1
         m = PropertyMedia(property_id=p.id, kind="video" if ext in VIDEO_EXT else "photo",
                           path=key, room=room, position=pos, uploaded_by=actor.id)
@@ -1212,7 +1213,8 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     visible = can_see_owner(p, user)  # ad links lead to the owner's phone
     d["exclusive_conflict"] = [{**a, "url": a["url"] if visible else None} for a in cache.get(k, [])] if p.is_exclusive else []
     if full:
-        d["media"] = [{"id": m.id, "kind": m.kind, "room": m.room, "position": m.position, "url": f"/api/media/{m.path}"}
+        d["media"] = [{"id": m.id, "kind": m.kind, "room": m.room, "position": m.position, "url": f"/api/media/{m.path}",
+                       "preview": f"/api/media/{m.path}?p=1"}
                       for m in media(db, p.id)]
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None

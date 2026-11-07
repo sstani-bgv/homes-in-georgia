@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Bot, Clock, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide-react';
 import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
-import { mediaUrl } from '../api/client';
+import { thumbUrl } from '../api/client';
 import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
 
@@ -76,7 +76,7 @@ export function SimilarInChannel({ listing, similar }: { listing: Listing & { fl
       {similar.map((s) => (
         <div key={s.id} className="card col gap-sm" style={{ padding: 12 }}>
           <div className="row gap-sm" style={{ alignItems: 'flex-start' }}>
-            {s.photo && <img src={mediaUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
+            {s.photo && <img src={thumbUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
             <div className="col" style={{ minWidth: 0 }}>
               <strong className="ellipsis">{s.address || 'Пост в канале'}</strong>
               <span className="faint" style={{ fontSize: 12 }}>в {s.distance_m} м от этого адреса</span>
@@ -111,7 +111,7 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
         <div className="col gap-lg">
           {!!l.photos?.length && (
             <div className="row" style={{ overflowX: 'auto', gap: 8 }}>
-              {l.photos.map((p) => <img key={p} src={mediaUrl(p)} alt="" loading="lazy" style={{ height: 180, borderRadius: 10, flex: 'none' }} />)}
+              {l.photos.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" style={{ height: 180, borderRadius: 10, flex: 'none' }} />)}
             </div>
           )}
           <div className="row row-wrap gap-sm"><AiFlagBadges flags={l.ai_flags} /></div>
@@ -159,21 +159,80 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
   );
 }
 
-/** A clickable badge: «Похож на #12», «Уже в базе · #1»; the reason is in the tooltip. */
-export function ChipButton({ tone, title, onClick, children }: { tone: 'ok' | 'redsoft' | 'warn' | 'grey'; title?: string; onClick: () => void; children: ReactNode }) {
-  return <button type="button" className={`badge badge-${tone} badge-btn`} title={title} onClick={onClick}>{children}</button>;
+/** A clickable badge that says what it is about: «Похож на #12 · Абашидзе 17» (ellipsized); tap opens the comparison. */
+export function ChipButton({ tone, onClick, children }: { tone: 'ok' | 'redsoft' | 'warn' | 'grey'; onClick: () => void; children: ReactNode }) {
+  return <button type="button" className={`badge badge-${tone} badge-btn`} onClick={onClick}><span className="ellipsis">{children}</span></button>;
+}
+
+/** One column of a comparison: photos (previews), address, params, a link. */
+export function CompareSide({ label, photos, address, rows, link, children }: {
+  label: string; photos: (string | null | undefined)[]; address?: string | null; rows: [string, ReactNode][];
+  link?: { href?: string | null; text: string }; children?: ReactNode;
+}) {
+  const shots = photos.filter(Boolean) as string[];
+  return (
+    <div className="cmp-side">
+      <span className="label">{label}</span>
+      {shots.length ? <div className="cmp-photos">{shots.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" />)}</div>
+        : <div className="faint" style={{ fontSize: 12 }}>Без фото</div>}
+      <strong style={{ fontSize: 15 }}>{address || 'Адрес не указан'}</strong>
+      <KV items={rows} />
+      {children}
+      {link?.href && <a href={link.href} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</a>}
+    </div>
+  );
+}
+
+export const listingRows = (l: Listing & { floor?: number | null }): [string, ReactNode][] => [
+  ['Цена', money(l.price, l.currency || 'USD')], ['Район', l.district || '—'], ['Спальни', bedroomsLabel(l.bedrooms) || '—'],
+  ['Площадь', l.area ? `${l.area} м²` : '—'], ['Этаж', l.floor ?? '—'],
+];
+
+/** The ad's column; the source link comes from the full listing (the feed hides it until you may see contacts). */
+export function ListingSide({ l }: { l: Listing & { floor?: number | null } }) {
+  const { data } = useQuery({ queryKey: ['listing', l.id], queryFn: () => api.listings.get(l.id) });
+  const href = l.url || (data as { urls?: string[] } | undefined)?.urls?.[0];
+  return (
+    <CompareSide label={`Это объявление${l.source ? ` · ${SOURCE_LABEL[l.source] || l.source}` : ''}`} photos={l.photos || []} address={l.address}
+      rows={listingRows(l)} link={{ href, text: 'Открыть источник' }} />
+  );
+}
+
+/** «Похож в канале»: the ad next to the agency channel post(s) it resembles. */
+function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: number | null }; onClose: () => void }) {
+  const similar = listing.similar || [];
+  return (
+    <Modal open wide onClose={onClose} title="Похожая квартира в канале">
+      <div className="col gap-lg">
+        <div className="alert alert-warn" style={{ fontSize: 13 }}>Похожая квартира уже есть в канале агентства. Сравните фото и параметры: это одна квартира или разные в одном доме?</div>
+        <div className="cmp">
+          <ListingSide l={listing} />
+          <div className="col gap-sm" style={{ minWidth: 0 }}>
+            {similar.map((s) => (
+              <CompareSide key={s.id} label={`Пост в канале · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
+                rows={[['Цена', money(s.price_usd ?? null, 'USD')], ['Спальни', bedroomsLabel(s.bedrooms) || '—'], ['Площадь', s.area ? `${s.area} м²` : '—'], ['Этаж', s.floor ?? '—']]}
+                link={{ href: s.url, text: 'Открыть пост в канале' }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 /** chips: one wrapping row of badges under the price (matches, known object); flag reasons live in the badges' tooltips. */
 export function ListingCard({ listing, locked, footer, chips, onOpen }: { listing: Listing; locked?: ReactNode; footer?: ReactNode; chips?: ReactNode; onOpen?: () => void }) {
   const ph = listing.photos?.[0];
   const [open, setOpen] = useState(false);
+  const [cmp, setCmp] = useState(false);
   const show = onOpen || (() => setOpen(true));
+  const similar = !listing.ai_flags?.duplicate ? listing.similar || [] : [];
   return (
     <article className={`card lcard ${locked ? 'locked' : ''}`}>
       {open && <ListingModal id={listing.id} onClose={() => setOpen(false)} />}
+      {cmp && <ChannelCompare listing={listing} onClose={() => setCmp(false)} />}
       <div className="lcard-photo" onClick={show} style={{ cursor: 'pointer' }}>
-        {ph ? <img src={mediaUrl(ph)} alt="" loading="lazy" /> : null}
+        {ph ? <img src={thumbUrl(ph)} alt="" loading="lazy" /> : null}
         <div className="badges"><AiFlagBadges flags={listing.ai_flags} /></div>
         {listing.address && <span className="plaque plaque-pos" style={{ position: 'absolute', left: 10, bottom: 10 }}>{listing.address}</span>}
       </div>
@@ -186,10 +245,10 @@ export function ListingCard({ listing, locked, footer, chips, onOpen }: { listin
           {listing.source && <Badge tone="grey">{SOURCE_LABEL[listing.source] || listing.source}</Badge>}
           {listing.created_at && <span className="faint" style={{ fontSize: 12 }}>{fmtDateTime(listing.created_at)}</span>}
         </div>
-        {(chips || (!listing.ai_flags?.duplicate && !!listing.similar?.length)) && (
-          <div className="row row-wrap gap-sm">
-            {!listing.ai_flags?.duplicate && !!listing.similar?.length && (
-              <ChipButton tone="redsoft" title="Похожая квартира уже есть в канале агентства: сравните фото и параметры" onClick={show}>Похож в канале</ChipButton>
+        {(chips || !!similar.length) && (
+          <div className="row row-wrap gap-sm" style={{ minWidth: 0 }}>
+            {!!similar.length && (
+              <ChipButton tone="redsoft" onClick={() => setCmp(true)}>Похож в канале{similar[0].address ? ` · ${similar[0].address}` : ''}</ChipButton>
             )}
             {chips}
           </div>

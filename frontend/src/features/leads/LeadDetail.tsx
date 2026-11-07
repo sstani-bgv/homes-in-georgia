@@ -2,9 +2,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, Hand, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
-import { itemsOf, mediaUrl } from '../../api/client';
+import { itemsOf, thumbUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
@@ -259,8 +259,8 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
           {l && (
             <div className="card lcard">
               {l.photos?.[0] && (objectHref
-                ? <Link to={objectHref} className="lcard-photo" aria-label="Открыть объект" style={{ display: 'block' }}><img src={mediaUrl(l.photos[0])} alt="" /></Link>
-                : <button type="button" className="lcard-photo" onClick={() => setListingOpen(true)} aria-label="Открыть объявление и контакты" style={{ border: 0, padding: 0, width: '100%', cursor: 'pointer' }}><img src={mediaUrl(l.photos[0])} alt="" /></button>)}
+                ? <Link to={objectHref} className="lcard-photo" aria-label="Открыть объект" style={{ display: 'block' }}><img src={thumbUrl(l.photos[0])} alt="" /></Link>
+                : <button type="button" className="lcard-photo" onClick={() => setListingOpen(true)} aria-label="Открыть объявление и контакты" style={{ border: 0, padding: 0, width: '100%', cursor: 'pointer' }}><img src={thumbUrl(l.photos[0])} alt="" /></button>)}
               <div className="lcard-body">
                 <div className="label">Объект{lead.property_id ? ` #${lead.property_id}` : ''}</div>
                 <div className="price">{money(l.price, l.currency || 'USD')}<span className="muted" style={{ fontSize: 12 }}>/мес</span></div>
@@ -276,6 +276,11 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
               <div className="col gap-sm" style={{ marginBottom: 12 }}>
                 {c?.phone && <a href={`tel:${c.phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{c.phone}</a>}
                 {c?.username && <a href={`https://t.me/${c.username}`} target="_blank" rel="noreferrer" style={{ fontWeight: 700 }}>@{c.username}</a>}
+                {(c?.username || c?.tg_id) && (
+                  <a className="btn btn-secondary" href={c.username ? `https://t.me/${c.username}` : `tg://user?id=${c.tg_id}`} target="_blank" rel="noreferrer">
+                    <MessageSquare size={16} />Написать клиенту
+                  </a>
+                )}
                 {lead.contacts_shared_at && <span className="faint" style={{ fontSize: 12 }}>Контакты переданы агенту {fmtDateTime(lead.contacts_shared_at)}</span>}
               </div>
             ) : (

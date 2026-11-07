@@ -224,14 +224,17 @@ def _safe(root: Path, rel: str) -> Path:
 
 
 @router.get("/media/{path:path}")
-def media_file(path: str, user: User = Depends(current_user)):
+def media_file(path: str, preview: bool = Query(False, alias="p"), user: User = Depends(current_user)):
+    """p=1: the ~640px preview (storage.preview_key), the original while there is none."""
     if storage.is_s3():
         if path.startswith("/") or ".." in path.split("/"):
             raise DomainError("not_found", "file not found")
-        return RedirectResponse(storage.url(path), status_code=307)
-    p = _safe(media_root(), path)
-    if not p.is_file():
+        pk = storage.preview_key(path)
+        return RedirectResponse(storage.url(pk if preview and storage.s3_has(pk) else path), status_code=307)
+    src = _safe(media_root(), path)
+    if not src.is_file():
         raise DomainError("not_found", "file not found")
+    p = (storage.local_preview(src, path) if preview and not path.startswith("previews/") else None) or src
     mt = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
     safe = mt.startswith(("image/", "video/")) and mt != "image/svg+xml"
     headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
@@ -249,8 +252,9 @@ def public_config():
 
 
 @public.get("/listing-photos/{listing_id}/{n}")
-def listing_photo(listing_id: str, n: int, db: Session = Depends(get_db, scope="function")):
-    """Photos of catalog listings (paths written by the bot's ingest, relative to bot/). Public like the channel."""
+def listing_photo(listing_id: str, n: int, preview: bool = Query(False, alias="p"), db: Session = Depends(get_db, scope="function")):
+    """Photos of catalog listings (paths written by the bot's ingest, relative to bot/). Public like the channel.
+    p=1: the ~640px preview, made on first request (remote http photos have none)."""
     x = get_or_404(db, Listing, listing_id, "listing")
     photos = jload(x.photos, []) or []
     if not 0 <= n < len(photos):
@@ -264,6 +268,9 @@ def listing_photo(listing_id: str, n: int, db: Session = Depends(get_db, scope="
         except DomainError:
             continue
         if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4"):
+            if preview:  # key as in `storage previews`: the path under the repo (bot/raw/img/<file>)
+                rel = p.relative_to(REPO_ROOT.resolve()).as_posix() if p.is_relative_to(REPO_ROOT.resolve()) else f"abs/{p.name}"
+                p = storage.local_preview(p, rel) or p
             return FileResponse(p, media_type=mimetypes.guess_type(p.name)[0] or "image/jpeg",
                                 headers={"Cache-Control": "public, max-age=86400"})
     raise DomainError("not_found", "photo file missing")

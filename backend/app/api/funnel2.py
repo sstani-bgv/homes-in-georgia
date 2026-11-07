@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import STAFF_ROLES, current_user, require_roles
 from app.db import get_db
-from app.models import Lead, User
+from app.models import Client, Lead, User
 from app.services import leads as L
 from app.services.common import get_or_404
 from app.services.errors import forbidden
@@ -53,7 +53,12 @@ def leads_board(db: Session = Depends(get_db, scope="function"), user: User = De
 
 @router.get("/leads/{lead_id}")
 def leads_get(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return L.detail(db, _visible(db, lead_id, user), user)
+    lead = _visible(db, lead_id, user)
+    d = L.detail(db, lead, user)
+    if d.get("contacts_visible") and d.get("client"):  # «Написать клиенту»: tg://user?id= when there is no @username
+        c = db.get(Client, lead.client_id)
+        d["client"]["tg_id"] = int(c.external_id) if c.channel == "tg" and c.external_id.isdigit() else None
+    return d
 
 
 @router.post("/leads/{lead_id}/take")
