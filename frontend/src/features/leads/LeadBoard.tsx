@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useState, type DragEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRightLeft, CalendarClock } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf } from '../../api/client';
 import type { Lead, LeadStatus } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
 import { AssignModal } from './LeadDetail';
 import { LeadStatusBadge, SlaChip } from '../../components/domain';
 import { Button, Empty, ErrorBox, Loading, Modal, Seg } from '../../components/ui';
-import { LEAD_BOARD, LEAD_STATUS, REFUSAL_LABEL, ago, fmtSlot } from '../../lib/format';
+import { LEAD_BOARD, LEAD_STATUS, OPERATOR_STAGES, REFUSAL_LABEL, ago, fmtSlot } from '../../lib/format';
 
 export function LeadCard({ lead, to, showStatus, onMove }: { lead: Lead; to: string; showStatus?: boolean; onMove?: () => void }) {
   return (
@@ -38,12 +39,40 @@ export function LeadCard({ lead, to, showStatus, onMove }: { lead: Lead; to: str
 
 const BEFORE_VIEWING: LeadStatus[] = ['new', 'operator_taken', 'agent_assigned', 'slots_sent'];
 
+/** Drag boards: dragover fires every ~50 ms while a card is held (even with the pointer still), so scroll the board
+ * sideways, the column under the pointer and the page whenever the pointer is near an edge. */
+export function dragEdgeScroll(e: DragEvent<HTMLElement>) {
+  const EDGE = 80, STEP = 28;
+  const el = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  if (e.clientX > r.right - EDGE) el.scrollLeft += STEP;
+  else if (e.clientX < r.left + EDGE) el.scrollLeft -= STEP;
+  const col = (e.target as Element).closest?.('.kanban-col-body');
+  if (col) {
+    const c = col.getBoundingClientRect();
+    if (e.clientY > c.bottom - 40) col.scrollTop += STEP / 2;
+    else if (e.clientY < c.top + 40) col.scrollTop -= STEP / 2;
+  }
+  if (e.clientY > window.innerHeight - EDGE) window.scrollBy(0, STEP);
+  else if (e.clientY < EDGE) window.scrollBy(0, -STEP);
+}
+/** scroll-snap would pull programmatic scrolling back to a column: off while dragging */
+export const dragBoardProps = {
+  onDragOver: dragEdgeScroll,
+  onDragStart: (e: DragEvent<HTMLElement>) => { e.currentTarget.style.scrollSnapType = 'none'; },
+  onDragEnd: (e: DragEvent<HTMLElement>) => { e.currentTarget.style.scrollSnapType = ''; },
+  onDropCapture: (e: DragEvent<HTMLElement>) => { e.currentTarget.style.scrollSnapType = ''; },
+};
+
 /** Drag a card to a column = do that step. Steps that need input open a dialog; the rest open the lead page. */
 export function LeadBoard({ base = '' }: { base?: string }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'board'], queryFn: api.leads.board, refetchInterval: 15_000 });
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
+  const { isStaff } = useAuth();
+  // an agent works from «Агент назначен» to the end: the operator columns are neither shown nor a drop target
+  const stages = isStaff ? LEAD_BOARD : LEAD_BOARD.filter((s) => !OPERATOR_STAGES.includes(s));
   const [over, setOver] = useState<LeadStatus | null>(null);
   const [assign, setAssign] = useState<Lead | null>(null);
   const [refuse, setRefuse] = useState<Lead | null>(null);
@@ -64,6 +93,9 @@ export function LeadBoard({ base = '' }: { base?: string }) {
     setOver(null);
     const lead = all.find((l) => l.id === id);
     if (!lead || lead.status === to) return;
+    if (!stages.includes(to)) { toast(`«${LEAD_STATUS[to]}» — этап оператора`, true); return; }
+    if (!isStaff && to === 'refused' && BEFORE_VIEWING.includes(lead.status)) { toast('До просмотра заявку отменяет оператор', true); return; }
+    if (!isStaff && to === 'agent_assigned') { toast('Агента назначает оператор; перенос просмотра — в карточке заявки'); navigate(`${base}/leads/${lead.id}`); return; }
     if (to === 'operator_taken' || to === 'rented' || to === 'thinking') act.mutate({ lead, to });
     else if (to === 'agent_assigned') setAssign(lead);
     else if (to === 'refused') setRefuse(lead);
@@ -72,9 +104,9 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   };
   return (
     <>
-      <div className="kanban">
+      <div className="kanban" {...dragBoardProps}>
         {/* Mini App: only non-empty stages (the «Перенести» menu still lists them all) */}
-        {LEAD_BOARD.filter((s) => !base || (data?.[s] || []).length).map((s) => {
+        {stages.filter((s) => !base || (data?.[s] || []).length).map((s) => {
           const items = data?.[s] || [];
           const overdue = items.filter((l) => l.sla_due_at && new Date(l.sla_due_at).getTime() < Date.now()).length;
           return (
@@ -94,7 +126,7 @@ export function LeadBoard({ base = '' }: { base?: string }) {
       </div>
       <Modal open={!!moving} onClose={() => setMoving(null)} title={`Перенести заявку #${moving?.id}`}>
         <div className="col">
-          {LEAD_BOARD.filter((st) => st !== moving?.status).map((st) => (
+          {stages.filter((st) => st !== moving?.status).map((st) => (
             <Button key={st} variant="secondary" block onClick={() => { const l = moving!; setMoving(null); drop(st, l.id); }}>{LEAD_STATUS[st]}</Button>
           ))}
         </div>

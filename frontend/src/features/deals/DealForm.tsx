@@ -154,7 +154,12 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
               ) : (
                 <Field label="Агент"><Input value={user?.name || ''} disabled /></Field>
               )}
-              <Field label="Уровень агента"><Seg value={Number(f.agent_level)} onChange={(v) => upd('agent_level', v)} options={[50, 70, 90].map((v) => ({ value: v, label: `${v}%` }))} /></Field>
+              {/* the level is set by admin/operator; the backend ignores agent_level sent by an agent */}
+              {isStaff ? (
+                <Field label="Уровень агента"><Seg value={Number(f.agent_level)} onChange={(v) => upd('agent_level', v)} options={[50, 70, 90].map((v) => ({ value: v, label: `${v}%` }))} /></Field>
+              ) : (
+                <Field label="Уровень агента" hint="Меняет администратор или оператор"><Input value={`${f.agent_level}%`} disabled /></Field>
+              )}
               <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Цена аренды, $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
               <Field label="Комиссия, % от цены"><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} /></Field>
               <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>

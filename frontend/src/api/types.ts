@@ -294,6 +294,18 @@ export interface Lead {
   history?: EventItem[];
 }
 
+/** GET /leads/{id}/contract: ContractWizard prefill (data keys = CxData). */
+export interface LeadContract {
+  lead_id: number;
+  property_id?: number | null;
+  deal_id?: number | null;
+  type: 'rent' | 'comm' | 'sale';
+  data: Record<string, string>;
+  district?: string | null;
+  client: { name?: string | null; phone?: string | null; username?: string | null };
+  owner: { name?: string | null; phone?: string | null };
+}
+
 export interface RecommendedAgent {
   agent: UserRef & { districts?: string[]; level?: number | null };
   score: number;

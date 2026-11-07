@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import FIELD, ROLES, User
+from app.models import FIELD, ROLES, STAFF, User
 from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
@@ -146,6 +146,8 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None) -> User
     data = dict(data)
     pw = data.pop("password", None)
     _check(data)
+    if actor is not None and actor.role not in STAFF and "level" in data and data["level"] != u.level:
+        raise DomainError("forbidden", "only an admin or operator changes an agent's level")
     if actor is not None and actor.role != "superadmin" and (
             u.role in ("superadmin", "admin") and u.id != actor.id
             or data.get("role") in ("superadmin", "admin") and data.get("role") != u.role):

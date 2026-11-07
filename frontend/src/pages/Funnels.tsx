@@ -9,7 +9,7 @@ import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Select, Tabs } from '../components/ui';
 import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
-import { NewListings, PropertyBoard, PropertyList } from '../features/properties/lists';
+import { MyProperties, NewListings, PropertyBoard, PropertyList } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
 import { DISTRICTS } from '../lib/format';
@@ -65,7 +65,7 @@ export function ObjectsPage() {
       {tab === 'board' && <PropertyBoard />}
       {tab === 'review' && <PropertyList key="review" status="review" />}
       {tab === 'requests' && <ChangeRequestQueue />}
-      {tab === 'mine' && <PropertyList mine />}
+      {tab === 'mine' && (isStaff ? <PropertyList mine /> : <MyProperties />)}
       {tab === 'all' && <PropertyList key="all" />}
       {tab === 'archive' && <PropertyList key="archive" archived />}
       <ManualProperty open={manual} onClose={() => setManual(false)} />

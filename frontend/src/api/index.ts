@@ -6,7 +6,7 @@ import {
 } from './normalize';
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
-  EventItem, Evaluation, Lead, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
+  EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
   Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
 } from './types';
 
@@ -113,6 +113,7 @@ export const api = {
     reschedule: (id: number) => http.post<Lead>(`/leads/${id}/reschedule`),
     outcome: (id: number, outcome: string, reason?: string) => http.post<Lead>(`/leads/${id}/outcome`, { outcome, reason }),
     cancel: (id: number, reason: string) => http.post<Lead>(`/leads/${id}/cancel`, { reason }),
+    contract: (id: number) => http.get<LeadContract>(`/leads/${id}/contract`),
   },
 
   clients: {

@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw, Search } from 'lucide-react';
+import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { Deal } from '../api/types';
+import type { Deal, LeadContract } from '../api/types';
 import { errText, useToast } from '../components/toast';
-import { Badge, Button, Card, Field, Input, PageHead, Switch, Tabs } from '../components/ui';
-import { fmtDate, todayStr } from '../lib/format';
+import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
+import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import {
   CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, monthsBetween, requiredFields, reviewLabels,
   type ContractDoc, type CxData, type CxLang, type CxType,
@@ -98,7 +98,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const dealId = Number(params.get('deal_id')) || 0;
-  const draft = useMemo(() => (dealId ? null : loadDraft()), [dealId]);
+  const leadId = Number(params.get('lead_id')) || 0;
+  const draft = useMemo(() => (dealId || leadId ? null : loadDraft()), [dealId, leadId]);
 
   const [step, setStep] = useState(1);
   const [type, setType] = useState<CxType | ''>(draft?.type || '');
@@ -108,10 +109,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const [tab, setTab] = useState<'parties' | 'property' | 'money'>('parties');
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState<Set<keyof CxData>>(new Set());
-  const [cadQ, setCadQ] = useState('');
-  const [found, setFound] = useState<Deal[] | null>(null);
-  const [finding, setFinding] = useState(false);
-  const [prefilledFrom, setPrefilledFrom] = useState<number | null>(null);
+  const [prefilled, setPrefilled] = useState<{ key: string; text: string } | null>(null);
   const [petTouched, setPetTouched] = useState(false);
 
   useEffect(() => { saveDraft({ type, lang, data: d, depTouched }); }, [type, lang, d, depTouched]);
@@ -120,35 +118,46 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const deal = useQuery({ queryKey: ['deal', dealId], queryFn: () => api.deals.get(dealId), enabled: !!dealId });
   const prop = useQuery({ queryKey: ['property', deal.data?.property_id], queryFn: () => api.properties.get(deal.data!.property_id!), enabled: !!deal.data?.property_id, retry: false });
   useEffect(() => {
-    if (!deal.data || prefilledFrom === deal.data.id || (deal.data.property_id && prop.isLoading)) return;
+    if (!deal.data || prefilled?.key === `deal:${deal.data.id}` || (deal.data.property_id && prop.isLoading)) return;
     applyDeal(deal.data, prop.data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deal.data, prop.data, prop.isLoading]);
 
+  function apply(type: CxType, data: Partial<CxData>, key: string, text: string) {
+    setType(type);
+    const filled = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '')) as Partial<CxData>;
+    if (filled.start_rent && filled.end_rent && !filled.rent_duration_months) filled.rent_duration_months = monthsBetween(filled.start_rent, filled.end_rent);
+    setD((cur) => ({ ...EMPTY, timestamp: cur.timestamp || todayStr(), ...filled }));
+    setDepTouched(false);
+    setPrefilled({ key, text });
+    setStep((s) => (s < 2 ? 2 : s));
+    toast(`Данные подставлены из ${key.startsWith('lead') ? 'заявки' : 'сделки'} #${key.split(':')[1]}`);
+  }
   function applyDeal(x: Deal, p?: Parameters<typeof fromDeal>[1]) {
     const r = fromDeal(x, p);
-    setType(r.type);
-    setD((cur) => ({ ...EMPTY, timestamp: cur.timestamp || todayStr(), ...Object.fromEntries(Object.entries(r.data).filter(([, v]) => v !== '')) }));
-    setDepTouched(false);
-    setPrefilledFrom(x.id);
-    setStep((s) => (s < 2 ? 2 : s));
-    toast(`Данные подставлены из сделки #${x.id}`);
+    apply(r.type, r.data, `deal:${x.id}`, `Данные подставлены из сделки #${x.id}${x.address ? ` · ${x.address}` : ''}.`);
   }
 
-  async function findByCadastral() {
-    const q = cadQ.trim() || d.cadastral_code.trim();
-    if (q.length < 5) { toast('Введите кадастровый код, минимум 5 символов', true); return; }
-    setFinding(true);
-    try { setFound(itemsOf(await api.deals.find(q))); } catch (e) { toast(errText(e), true); } finally { setFinding(false); }
+  // ---- prefill from /contracts?lead_id= (lead card «Оформить договор», or the picker below)
+  const leadC = useQuery({ queryKey: ['lead-contract', leadId], queryFn: () => api.leads.contract(leadId), enabled: !!leadId });
+  useEffect(() => {
+    const x = leadC.data;
+    if (!x || prefilled?.key === `lead:${x.lead_id}`) return;
+    applyLead(x);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadC.data]);
+  function applyLead(x: LeadContract) {
+    const who = (label: string, c: { name?: string | null; phone?: string | null; username?: string | null }) => {
+      const parts = [c.name, c.phone, c.username ? `@${c.username}` : null].filter(Boolean);
+      return parts.length ? ` ${label}: ${parts.join(' · ')}.` : '';
+    };
+    apply(x.type, x.data as Partial<CxData>, `lead:${x.lead_id}`,
+      `Данные подставлены из заявки #${x.lead_id}${x.data.street_house ? ` · ${x.data.street_house}` : ''}${x.district ? `, ${x.district}` : ''}.`
+      + who('Клиент', x.client) + who('Собственник', x.owner));
   }
-  async function pickDeal(id: number) {
-    try {
-      const x = await api.deals.get(id);
-      const p = x.property_id ? await api.properties.get(x.property_id).catch(() => null) : null;
-      applyDeal(x, p);
-      setFound(null);
-      setParams((sp) => { sp.set('deal_id', String(id)); return sp; }, { replace: true });
-    } catch (e) { toast(errText(e), true); }
+  const pickable = useQuery({ queryKey: ['leads', 'list', 'contract'], queryFn: () => api.leads.list({ status: CONTRACT_STAGES.join(',') }) });
+  function pickLead(id: number) {
+    setParams((sp) => { sp.delete('deal_id'); sp.set('lead_id', String(id)); return sp; }, { replace: true });
   }
 
   // ---- field updates with the old auto-sync rules
@@ -200,8 +209,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   function reset() {
     clearDraft();
     setType(''); setLang(''); setD({ ...EMPTY, timestamp: todayStr() }); setDepTouched(false); setPetTouched(false);
-    setStep(1); setErr(''); setMissing(new Set()); setFound(null); setPrefilledFrom(null);
-    if (dealId) setParams((sp) => { sp.delete('deal_id'); return sp; }, { replace: true });
+    setStep(1); setErr(''); setMissing(new Set()); setPrefilled(null);
+    if (dealId || leadId) setParams((sp) => { sp.delete('deal_id'); sp.delete('lead_id'); return sp; }, { replace: true });
   }
 
   const fileBase = `Contract_${type || 'x'}_${lang || 'x'}_${(d.cadastral_code || d.client_full_name || 'draft').replace(/[^\w.-]+/g, '_')}`;
@@ -243,8 +252,19 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
             </div>
           ))}
         </div>
-        {prefilledFrom && <div className="alert alert-info mt">Данные подставлены из сделки #{prefilledFrom}{deal.data?.address ? ` · ${deal.data.address}` : ''}. Проверьте и дополните поля.</div>}
+        {prefilled && <div className="alert alert-info mt">{prefilled.text} Проверьте и дополните поля (личные номера сторон вводятся вручную).</div>}
         {deal.error && <div className="alert alert-warn mt">Не удалось загрузить сделку #{dealId}: {errText(deal.error)}</div>}
+        {leadC.error && <div className="alert alert-warn mt">Не удалось загрузить заявку #{leadId}: {errText(leadC.error)}</div>}
+        {step < 4 && (
+          <Card label="Заявка или сделка" title="Подставить данные" className="mt">
+            {itemsOf(pickable.data).length === 0 ? (
+              <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра. Заполните договор вручную.'}</div>
+            ) : (
+              <Select aria-label="Заявка" value={leadId || ''} onChange={(e) => e.target.value && pickLead(Number(e.target.value))} placeholder="Выбрать заявку — или заполните вручную"
+                options={itemsOf(pickable.data).map((l) => ({ value: l.id, label: `#${l.id} · ${l.listing?.address || l.listing?.title || 'объект'} · ${l.client?.name || 'клиент'} · ${LEAD_STATUS[l.status]}${l.agent?.name ? ` · ${l.agent.name}` : ''}` }))} />
+            )}
+          </Card>
+        )}
       </div>
 
       {step === 1 && (
@@ -300,23 +320,6 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
                 {F({ k: 'floor', label: 'Этаж', placeholder: '2' })}
                 {F({ k: 'apartment_number', label: 'Квартира №', placeholder: 'Номер' })}
                 <div className="span2">{F({ k: 'apartment_area', label: 'Площадь, м²', placeholder: '45 или 45.05' })}</div>
-              </div>
-              <div className="outcome-card">
-                <div className="label">Поиск сделки по кадастровому коду</div>
-                <div className="row mt">
-                  <Input value={cadQ} onChange={(e) => setCadQ(e.target.value)} placeholder={d.cadastral_code || 'Кадастровый код'} onKeyDown={(e) => { if (e.key === 'Enter') findByCadastral(); }} />
-                  <Button variant="secondary" loading={finding} onClick={findByCadastral}><Search size={16} />Найти</Button>
-                </div>
-                {found && (found.length === 0 ? <div className="muted mt">Сделок с таким кадастровым кодом нет</div> : (
-                  <div className="col mt gap-sm">
-                    {found.map((x) => (
-                      <button key={x.id} type="button" className="list-row" style={{ background: 'none', border: 0, borderBottom: '1px solid var(--line)', textAlign: 'left', cursor: 'pointer', width: '100%' }} onClick={() => pickDeal(x.id)}>
-                        <span className="grow"><b>#{x.id} · {x.address || x.cadastral}</b><br /><span className="muted" style={{ fontSize: 12 }}>{x.rent_from ? `${fmtDate(x.rent_from)} – ${fmtDate(x.rent_to)}` : x.status}</span></span>
-                        <span className="label">Подставить</span>
-                      </button>
-                    ))}
-                  </div>
-                ))}
               </div>
             </div>
           )}

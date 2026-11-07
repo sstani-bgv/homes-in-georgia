@@ -37,7 +37,7 @@ export const REPORT_KINDS: { kind: ReportKind; label: string; icon: LucideIcon; 
     { k: 'photo', label: 'Фото, шт', type: 'number' }, { k: 'photoAddr', label: 'Адреса съёмок' }, { k: 'showing', label: 'Показов', type: 'number' },
     { k: 'showingDist', label: 'Район показов', type: 'district' }, { k: 'stickers', label: 'Стикеров', type: 'number' }, { k: 'stickersDist', label: 'Район расклейки', type: 'district' },
   ] },
-  { kind: 'makefoto', label: 'Make Foto', icon: ClipboardList, fields: [
+  { kind: 'makefoto', label: 'Запись на съёмку', icon: ClipboardList, fields: [
     { k: 'address', label: 'Адрес', span: true, required: true }, { k: 'owner', label: 'Собственник' }, { k: 'phone', label: 'Телефон', type: 'tel', required: true },
     { k: 'date', label: 'Дата и время съёмки', type: 'datetime-local', required: true }, { k: 'link', label: 'Ссылка на объявление', type: 'url' },
   ] },

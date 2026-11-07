@@ -2,15 +2,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, FileText, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
+import { CopyPhone, LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Avatar, Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Textarea } from '../../components/ui';
-import { OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, localToIso, money } from '../../lib/format';
+import { CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, localToIso, money } from '../../lib/format';
 
 const PETS: Record<string, string> = { none: 'нет', cat: 'кошка', dog: 'собака', other: 'другое' };
 
@@ -214,10 +214,17 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
           </div>
           <div className="row row-wrap" style={{ minWidth: 0, maxWidth: '100%' }}>
             {ownerPhone && (
-              <a className="btn btn-lg" href={`tel:${ownerPhone.replace(/[^+\d]/g, '')}`} style={{ minWidth: 0, maxWidth: '100%' }}>
-                <Phone size={18} style={{ flex: 'none' }} />
-                <span className="ellipsis">{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</span>
-              </a>
+              <div className="row row-wrap gap-sm" style={{ minWidth: 0, maxWidth: '100%' }}>
+                <a className="btn btn-lg" href={`tel:${ownerPhone.replace(/[^+\d]/g, '')}`} style={{ minWidth: 0, maxWidth: '100%' }}>
+                  <Phone size={18} style={{ flex: 'none' }} />
+                  <span className="ellipsis">{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</span>
+                </a>
+                <b className="num" style={{ fontSize: 16, userSelect: 'all' }}>{ownerPhone}</b>
+                <CopyPhone phone={ownerPhone} />
+              </div>
+            )}
+            {(isAgent || isStaff) && CONTRACT_STAGES.includes(lead.status) && (
+              <Link className="btn btn-secondary btn-lg" to={`${compact ? '/m' : ''}/contracts?lead_id=${lead.id}`}><FileText size={18} />Оформить договор</Link>
             )}
             {isStaff && lead.status === 'new' && <Button size="lg" loading={take.isPending} onClick={() => take.mutate()}><Hand size={18} />Взять</Button>}
             {isStaff && !closed && <Button size={lead.status === 'operator_taken' ? 'lg' : undefined} variant={lead.status === 'operator_taken' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}><UserPlus size={16} />{lead.agent ? 'Сменить агента' : 'Назначить агента'}</Button>}

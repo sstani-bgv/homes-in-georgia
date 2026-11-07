@@ -9,7 +9,7 @@ import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { AiFlagBadges, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
+import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
 import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
@@ -68,7 +68,7 @@ function useProp(id: number) {
 function OwnerPhone({ p }: { p: Property }) {
   const phone = p.owner?.phone || p.owner_phone;
   if (!phone) return <span className="muted">скрыт</span>;
-  return <a href={`tel:${phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{phone}</a>;
+  return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{phone}</a><CopyPhone phone={phone} /></span>;
 }
 
 function CallStep({ p }: { p: Property }) {

@@ -9,7 +9,8 @@ import { DealForm } from '../features/deals/DealForm';
 import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { BrandMark } from '../layout/AppLayout';
 import { LeadDetail } from '../features/leads/LeadDetail';
-import { NewListings, PropertyList } from '../features/properties/lists';
+import { MyProperties, NewListings, PropertyList } from '../features/properties/lists';
+import { useAuth } from '../auth/AuthContext';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { KIND_LABEL, ReportForm, ReportsList } from '../features/reports/ReportForms';
 import { CabinetView } from './Cabinet';
@@ -63,11 +64,12 @@ export function MLeads() {
 }
 export function MLead() { const { id } = useParams(); return <LeadDetail id={Number(id)} compact />; }
 export function MProperties() {
+  const { isStaff } = useAuth();
   const [view, setView] = useState<'mine' | 'all' | 'archive'>('mine');
   return (
     <div className="col">
       <Seg value={view} onChange={setView} options={[{ value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' }]} />
-      <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />
+      {view === 'mine' && !isStaff ? <MyProperties base="/m" /> : <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />}
     </div>
   );
 }

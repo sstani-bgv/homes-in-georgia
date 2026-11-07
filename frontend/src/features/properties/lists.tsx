@@ -7,7 +7,7 @@ import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
-import { ChipButton, CompareSide, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
+import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
@@ -173,7 +173,7 @@ export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id
       ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
       ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
       ['Агент', p.agent?.name || '—'],
-      ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a></>}</>] as [string, React.ReactNode]] : []),
+      ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{phone}</a> <CopyPhone phone={phone} /></>}</>] as [string, React.ReactNode]] : []),
     ]}>
       <div className="row row-wrap gap-sm">
         <PropertyStatusBadge status={p.status} />
@@ -247,23 +247,76 @@ export function PropertyMiniCard({ p, to }: { p: Property; to: string }) {
   );
 }
 
-export function PropertyBoard() {
+/** «В работе» (staff: every object, agent: his own); base="/m" hides empty columns like the Mini App lead board. */
+/** The first column of an agent's board: fresh ads nobody took yet, «Беру в работу» right on the card. */
+function NewToTakeColumn({ base }: { base: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const { data } = useQuery({ queryKey: ['listings', 'new', 'board'], queryFn: () => api.listings.new({ q: '', flag: '' }, 30) });
+  const take = useMutation({
+    mutationFn: (id: string) => api.properties.take(id),
+    onSuccess: (p) => {
+      qc.invalidateQueries({ queryKey: ['listings'] });
+      qc.invalidateQueries({ queryKey: ['properties'] });
+      toast('Объект закреплён за вами');
+      navigate(propLink(base, p.id));
+    },
+    onError: (e) => { toast(errText(e), true); qc.invalidateQueries({ queryKey: ['listings'] }); },
+  });
+  const items = itemsOf(data).filter((l) => !l.taken_by && !l.known_object);
+  return (
+    <div className="kanban-col">
+      <div className="kanban-col-head"><span className="label">Новые · можно взять</span><span className="tab-count">{data?.total ?? items.length}</span></div>
+      <div className="kanban-col-body">
+        {items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div> : items.map((l) => (
+          <div className="kcard" key={l.id}>
+            <div className="row" style={{ alignItems: 'flex-start' }}>
+              {l.photos?.[0] && <img src={thumbUrl(l.photos[0])} alt="" loading="lazy" style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
+              <div className="grow">
+                <div className="kcard-title ellipsis">{l.address || l.title || l.id}</div>
+                <div className="kcard-meta">{[l.district, bedroomsLabel(l.bedrooms), money(l.price, 'USD')].filter(Boolean).join(' · ')}</div>
+                {!!l.demand && <div className="kcard-meta"><Users size={12} /> подходит клиентов: {l.demand}</div>}
+              </div>
+            </div>
+            <Button block size="sm" className="mt" loading={take.isPending && take.variables === l.id} onClick={() => take.mutate(l.id)}>Беру в работу</Button>
+          </div>
+        ))}
+        {(data?.total ?? 0) > items.length && <Link className="faint" style={{ fontSize: 12, padding: 6 }} to={base === '/m' ? '/m/new' : '/objects?tab=new'}>Все новые объявления →</Link>}
+      </div>
+    </div>
+  );
+}
+
+export function PropertyBoard({ base = '', withNew }: { base?: string; withNew?: boolean }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['properties', 'board'], queryFn: api.properties.board, refetchInterval: 30_000 });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   return (
     <div className="kanban">
-      {PROPERTY_BOARD.map((s) => {
+      {withNew && <NewToTakeColumn base={base} />}
+      {PROPERTY_BOARD.filter((s) => !base || (data?.[s] || []).length).map((s) => {
         const items = data?.[s] || [];
         return (
           <div className="kanban-col" key={s}>
             <div className="kanban-col-head"><span className="label">{PROPERTY_STATUS[s]}</span><span className="tab-count">{items.length}</span></div>
             <div className="kanban-col-body">
-              {items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div> : items.map((p) => <PropertyMiniCard key={p.id} p={p} to={`/objects/${p.id}`} />)}
+              {items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div> : items.map((p) => <PropertyMiniCard key={p.id} p={p} to={propLink(base, p.id)} />)}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** an agent's «Мои объекты»: status columns by default (statuses read at a glance), the table as the alternative */
+export function MyProperties({ base = '' }: { base?: string }) {
+  const [view, setView] = useState<'board' | 'list'>('board');
+  return (
+    <div className="col">
+      <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
+      {view === 'board' ? <PropertyBoard base={base} withNew /> : <PropertyList mine base={base} />}
     </div>
   );
 }
