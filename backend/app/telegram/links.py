@@ -35,6 +35,13 @@ def map_pin(listing, lang="ru"):
                                        "title": f"{listing.get('district') or ''} · ${listing.get('price_usd')}", "lang": lang})
 
 
+def google_maps(listing):
+    """Google Maps link to the listing's point, or None without coordinates."""
+    if not listing or listing.get("lat") is None or listing.get("lng") is None:
+        return None
+    return f"https://www.google.com/maps/search/?api=1&query={listing['lat']:.6f},{listing['lng']:.6f}"
+
+
 def ics_url(lead_id):
     """GET /api/public/ics/<token> (backend app.services.ics)."""
     try:

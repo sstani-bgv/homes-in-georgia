@@ -506,12 +506,15 @@ async def on_like(update: Update, ctx, cl, lid):
             await answer(query, core.t(cl["lang"], "gone"))
             return
         # the lead first (B1 card + A3 edit of exactly the tapped card, via notify.tapped_card), then the toast
+        knew = await th(notify.knows_operator, cl["id"])
         tok = notify.tapped_card.set((query.message.chat.id, query.message.message_id) if query.message else None)
         try:
             lead, err = await svc(leads.create_from_like, cl["id"], lid, request_of(cl))
         finally:
             notify.tapped_card.reset(tok)
         await answer(query, core.t(cl["lang"], "gone" if err else "liked"))
+        if not err and not knew:  # the first ❤️: the operator's account writes first (or the client gets the DM link)
+            await th(notify.operator_intro, lead)
     if err:
         log.warning("create_from_like %s/%s: %s", cl["id"], lid, err)
         try:

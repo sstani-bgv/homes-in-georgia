@@ -223,7 +223,7 @@ def client_own_time(db: Session, lead_id: int, text: str) -> Lead:
     _event(db, lead, "client_own_time", label="client", note=lead.client_note)
     _set_sla(db, lead, "agent_slots")
     db.commit()
-    _notify("lead_assigned_agent", lead)
+    _notify("client_own_time_agent", lead, lead.client_note)
     _notify("client_time_staff", lead, lead.client_note)
     return lead
 

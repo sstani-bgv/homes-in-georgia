@@ -265,27 +265,18 @@ class JourneyE2E(unittest.TestCase):
         self.assertTrue(views and len(views) == views[0][2], views)
         self.assertEqual([r[0] for r in saved], ["900"])
 
-        # A3, a client who never contacted the operator: ❤️ opens the operator's DM with the first message (no bot message);
-        # the lead comes when that DM reaches the operator's account (the userbot)
+        # A3: ❤️ is the bot's callback — the lead at once; the operator's account writes first (operator_intro)
         like = next(b for row in f.markup(card) for b in row if b["text"] == "❤️ Нравится")
-        lid = next(b["callback_data"][3:] for row in f.markup(card) for b in row if (b.get("callback_data") or "").startswith("no:"))
-        self.assertNotIn("callback_data", like)
-        with db.tx() as c:  # an agency listing: the link to its post in our channel
-            post = next(u for u in json.loads(c.execute("SELECT urls FROM listings WHERE id = ?", (lid,)).fetchone()[0]) if "t.me/" in u)
-        from urllib.parse import quote, unquote
-        first_dm = f"Здравствуйте! Мне нравится этот вариант: {post}"
-        self.assertEqual(like["url"], "https://t.me/nino_e2e?text=" + quote(first_dm))
-        from app.telegram import userbot
+        self.assertTrue(like["callback_data"].startswith("like:"))
         m = self.fake.mark()
-        self.assertEqual(userbot.on_incoming(cid, "anna_e2e", unquote(like["url"].split("text=", 1)[1])), "liked")
+        f.press(CLIENT, card, "❤️ Нравится")
         grp = self.with_text(GROUP["id"], "Заявка #1", m)              # B1
         self.assertIn("2 человека", grp["text"])
         ack = self.find(cid, lambda c: c["method"] == "editMessageReplyMarkup" and c.get("message_id") == card["message_id"], m, "A3 mark")
         self.assertEqual(self.fake.markup(ack)[0][0]["text"], "❤️ Нравится ✅")   # the same card marks the like
-        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing else to the client
-        with db.tx() as c:
-            self.assertEqual([tuple(r) for r in c.execute("SELECT kind, note FROM lead_events WHERE lead_id = 1 AND kind = "
-                                                          "'message_from_client'")], [("message_from_client", first_dm)])
+        intro = self.find(cid, lambda c: "Вы отметили вариант: https://t.me/" in (c.get("text") or ""), m, "operator intro")
+        self.assertIn("оператор Homes in Georgia", intro["text"])                 # the operator's account wrote first
+        self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing from the bot
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, sla_stage FROM leads WHERE id = 1").fetchone()[:], ("new", "operator_take"))
 
@@ -304,21 +295,19 @@ class JourneyE2E(unittest.TestCase):
         self.assertNotIn("anna_e2e", c6["text"])
         self.with_text(GROUP["id"], "Агент: <b>Георгий</b>", m)
 
-        m = self.press(AGENT, AGENT["id"], "⚡ Время кнопками")                    # C7 in the bot
-        quick = self.with_button(AGENT["id"], "📤 Отправить клиенту", m)
-        times = [b["text"] for row in f.markup(quick) for b in row if b["callback_data"].startswith("ls:t:")][:2]
-        m = self.press(AGENT, AGENT["id"], times[0], since=m)
-        self.with_button(AGENT["id"], "✓ " + times[0], m)
-        m = self.press(AGENT, AGENT["id"], times[1], since=m)
-        m = self.press(AGENT, AGENT["id"], "📤 Отправить клиенту · 2", since=m)
-        self.with_text(AGENT["id"], "✅ Отправил клиенту", m)
+        self.assertEqual([b.get("text") for row in f.markup(c6) for b in row], ["🕐 Предложить время"])   # C7: the Mini App only
+        from app.services import leads
+        from datetime import datetime, timezone
+        m = f.mark()
+        self.svc(lambda s: leads.add_slots(s, 1, [datetime.now(timezone.utc) + timedelta(days=1, hours=h) for h in (1, 3)],
+                                           self.user(s, AGENT["id"])))
         slots = self.inline_card(cid, m)                                         # A4a: in the operator's DM, «via @bot»
         iq = next(c for c in f.calls(since=m) if c["method"] == "answerInlineQuery")
         self.assertEqual((iq["cache_time"], iq["is_personal"]), ("0", "true"))
         self.assertIn("Выберите удобное время", slots["text"])
         labels = [b["text"] for row in f.markup(slots) for b in row]
         self.assertEqual(labels[-1], "🕐 Другое время")
-        self.assertIn(times[0], labels)
+        times = [x for x in labels if x[:1].isalpha() and x[-3:-2] == ":"][:2]       # the slot buttons («Завтра 13:20»)
         self.assertFalse([c for c in f.calls(chat=cid, since=m) if c["method"].startswith("send")])   # nothing from the bot itself
         with db.tx() as c:
             token = c.execute("SELECT token FROM inline_cards WHERE kind = 'slots' AND ref = '1'").fetchone()[0]
@@ -468,23 +457,24 @@ class JourneyE2E(unittest.TestCase):
         lead = self.svc(leads.create_from_like, cl["id"], "tg2", "2 bedrooms")
         m = f.mark()
         self.svc(lambda s: leads.assign_agent(s, lead.id, self.user(s, AGENT["id"]).id, self.user(s, OPERATOR["id"])))
-        self.with_text(AGENT["id"], f"Заявка #{lead.id}", m)
-        m = self.press(AGENT, AGENT["id"], "✍️ Написать время", since=m)
-        self.with_text(AGENT["id"], "Напишите свободное время", m)
-        m = self.say(AGENT, "завтра 12:00, завтра 17:30")
-        self.with_text(AGENT["id"], "✅ Отправил клиенту: Завтра 12:00, Завтра 17:30", m)
+        card = self.with_text(AGENT["id"], f"Заявка #{lead.id}", m)
+        self.assertEqual([b.get("text") for row in f.markup(card) for b in row], ["🕐 Предложить время"])   # one way: the Mini App
+        from datetime import datetime, timezone
+        m = f.mark()
+        self.svc(lambda s: leads.add_slots(s, lead.id, [datetime.now(timezone.utc) + timedelta(days=1, hours=h) for h in (1, 3)],
+                                           self.user(s, AGENT["id"])))
         slots = self.inline_card(u["id"], m)
         self.assertIn("Pick a convenient time", slots["text"])
-        self.assertEqual([b["text"] for row in f.markup(slots) for b in row],
-                         ["Open the listing", "Tomorrow 12:00", "Tomorrow 17:30", "🕐 Another time"])
+        self.assertEqual([b["text"] for row in f.markup(slots) for b in row][-1], "🕐 Another time")
         _, ed = self.press_inline(u, slots, "🕐 Another time")
         self.assertIn("Reply with a time that suits you", ed["text"])
         from app.telegram import userbot
         m = f.mark()
         self.assertEqual(userbot.on_incoming(u["id"], "john_e2e", "Saturday after 3 pm"), "own_time")   # typed in the operator's DM
-        again = self.with_text(AGENT["id"], "Клиент предложил своё время:</b> Saturday after 3 pm", m)
+        again = self.with_text(AGENT["id"], f"🕐 <b>Заявка #{lead.id} · клиент предложил своё время</b>\n«Saturday after 3 pm»", m)
         self.with_text(OPERATOR["id"], f"Клиент предложил своё время · заявка #{lead.id}</b>\n«Saturday after 3 pm»", m)
-        self.assertIn(f"ls:quick:{lead.id}", [b.get("callback_data") for row in f.markup(again) for b in row])
+        self.assertEqual([b.get("text") for row in f.markup(again) for b in row], ["🕐 Предложить время"])
+        self.assertFalse([c for c in f.calls(chat=AGENT["id"], since=m) if "🆕" in (c.get("text") or "")])   # no repeated new-lead card
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, client_note FROM leads WHERE id = ?", (lead.id,)).fetchone()[:],
                              ("slots_sent", "Saturday after 3 pm"))
@@ -590,28 +580,6 @@ class JourneyE2E(unittest.TestCase):
 
         m = f.mark()
         self.svc(lambda s: leads.assign_agent(s, lead.id, self.user(s, AGENT["id"]).id, self.user(s, zura["id"])))
-        m = self.press(AGENT, AGENT["id"], "⚡ Время кнопками", since=m)
-        quick = self.with_button(AGENT["id"], "📤 Отправить клиенту", m)
-        first = next(b["text"] for row in f.markup(quick) for b in row if b["callback_data"].startswith("ls:t:"))
-        m = self.press(AGENT, AGENT["id"], first, since=m)
-        send = self.with_button(AGENT["id"], "📤 Отправить клиенту · 1", m)
-        m = f.mark()
-        f.press(AGENT, send, "📤 Отправить клиенту · 1")
-        f.press(AGENT, send, "📤 Отправить клиенту · 1")
-        f.wait(lambda calls: len([c for c in calls if c["method"] == "answerCallbackQuery"]) >= 2, since=m, what="two answers")
-        self.inline_card(u["id"], m)
-        time.sleep(1)
-        self.assertEqual(len([c for c in f.calls(chat=u["id"], since=m) if "Выберите удобное время" in (c.get("text") or c.get("caption") or "")]), 1)
-
-        m = self.press(AGENT, AGENT["id"], "✍️ Написать время", since=0)
-        self.with_text(AGENT["id"], "Напишите свободное время", m)
-        m = self.say(AGENT, "когда-нибудь")
-        self.with_text(AGENT["id"], "Не понял время", m)                         # still waiting
-        m = self.say(AGENT, "/cancel")
-        self.with_text(AGENT["id"], "Отменено", m)
-        m = self.say(AGENT, "завтра 12:00")                                      # not slot times any more: a search
-        self.find(AGENT["id"], lambda c: any(b.get("callback_data") == "more" for row in f.markup(c) for b in row), m, "search done")
-        self.assertFalse([c for c in f.calls(chat=AGENT["id"], since=m) if "Отправил клиенту" in (c.get("text") or "")])
 
         m = f.mark()
         f.edit_text(u, 999, "edited text")                                       # edited_message: no handler, no crash

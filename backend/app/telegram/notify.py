@@ -244,10 +244,29 @@ def lead_assigned_agent(lead):
         t += f"\n\n🕐 <b>Клиент предложил своё время:</b> {e(g(lead, 'client_note'))}"
     if urls := i.get("urls"):
         t += "\n\n🔗 " + "\n".join(f'<a href="{e(u)}">{e(u)}</a>' for u in urls[:3])
-    m = tg.send(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))],
-                                     [cb("⚡ Время кнопками", f"ls:quick:{lid}"), cb("✍️ Написать время", f"ls:text:{lid}")]]))
+    t += maps_line(i)
+    m = tg.send(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))]]))
     if m:
         store.remember("agent_lead", lid, m["chat"]["id"], m["message_id"])
+
+
+def maps_line(i):
+    """«🗺 Google Карты» under an object's address (empty without coordinates)."""
+    u = links.google_maps(i)
+    return f'\n🗺 <a href="{e(u)}">Google Карты</a>' if u else ""
+
+
+@safe
+def client_own_time_agent(lead, own_text):
+    """The client wrote their own time (A4a): the event first, then the task — not a repeat of the new-lead card."""
+    _, i, _ = ctx(lead)
+    lid, ag = g(lead, "id"), store.user(g(lead, "agent_id"))
+    if not ag or not ag.get("tg_id"):
+        return
+    t = (f"🕐 <b>Заявка #{lid} · клиент предложил своё время</b>\n«{e(own_text)}»\n\n"
+         "Что сделать: согласуйте это время с собственником и отправьте клиенту 1-2 варианта кнопкой ниже.\n\n"
+         f"🏠 {e(address(i))}" + maps_line(i))
+    tg.send(ag["tg_id"], t, kb([[app_btn("🕐 Предложить время", links.lead_app(lid))]]))
 
 
 LIKED = {"ru": ("❤️ Нравится ✅", "➡️ Следующий вариант"), "en": ("❤️ I like it ✅", "➡️ Next option"),
@@ -305,19 +324,57 @@ def knows_operator(client_id):
 
 
 def like_button(cl, listing_id, label):
-    """❤️ on a client card. A client who never contacted the operator: t.me/<operator>?text=«…вариант #<obj> · …», one
-    tap opens the operator's DM with that first message and the userbot makes the lead when it arrives (so the operator
-    can then write to clients with paid messages or no @username). Everyone else: the bot's callback like:<id>."""
-    u = not knows_operator(cl["id"]) and operator_username()
+    """❤️ on a client card: always the bot's callback like:<id> — the lead is made at once, the client types nothing.
+    The operator's account then writes first (operator_intro); only if it can't, the client gets operator_dm_link."""
+    return cb(label, f"like:{listing_id}")
+
+
+def operator_dm_link(cl, listing_id):
+    """t.me/<operator>?text=«…этот вариант: <post>» (or «…вариант #<obj> · …»), or None without an operator @username:
+    the client's one tap opens the operator's DM, and the userbot ties that first message to the lead."""
+    u = operator_username()
     i = u and store.listing(listing_id)
     if not i:
-        return cb(label, f"like:{listing_id}")
+        return None
     lang = texts.lang_of(cl.get("lang"))
-    prop = store.q("SELECT id FROM properties WHERE listing_id = %s ORDER BY id LIMIT 1", (listing_id,), one=True)
     if link := channel_post_of(listing_id):
-        return url_btn(label, f"https://t.me/{u}?text=" + quote(LIKE_DM_POST[lang].format(url=link)))
+        return f"https://t.me/{u}?text=" + quote(LIKE_DM_POST[lang].format(url=link))
+    prop = store.q("SELECT id FROM properties WHERE listing_id = %s ORDER BY id LIMIT 1", (listing_id,), one=True)
     what = " · ".join(x for x in (address(i, lang), i.get("price_usd") and texts.money(i["price_usd"])) if x)
-    return url_btn(label, f"https://t.me/{u}?text=" + quote(LIKE_DM[lang].format(obj=prop["id"] if prop else listing_id, what=what)))
+    return f"https://t.me/{u}?text=" + quote(LIKE_DM[lang].format(obj=prop["id"] if prop else listing_id, what=what))
+
+
+INTRO = {"ru": ("Здравствуйте! Я оператор Homes in Georgia 👋\nВы отметили вариант: {what}\n"
+                "Агент уже узнаёт у собственника время просмотра, варианты пришлю сюда."),
+         "en": ("Hello! I'm the Homes in Georgia operator 👋\nYou liked this option: {what}\n"
+                "The agent is checking viewing times with the owner, I'll send them here."),
+         "ka": ("გამარჯობა! მე ვარ Homes in Georgia-ს ოპერატორი 👋\nთქვენ მოიწონეთ ვარიანტი: {what}\n"
+                "აგენტი მესაკუთრესთან აზუსტებს ნახვის დროს, ვარიანტებს აქ გამოგიგზავნით.")}
+WRITE_FIRST = {"ru": ("Чтобы оператор прислал вам время просмотра, отправьте ему одно сообщение — оно уже готово 👇",
+                      "💬 Написать оператору"),
+               "en": ("So that the operator can send you viewing times, send them one message — it's ready 👇",
+                      "💬 Message the operator"),
+               "ka": ("რომ ოპერატორმა ნახვის დრო გამოგიგზავნოთ, მიწერეთ ერთი შეტყობინება — უკვე მზადაა 👇",
+                      "💬 მიწერეთ ოპერატორს")}
+
+
+@safe
+def operator_intro(lead):
+    """Right after the first ❤️ of a client the operator's account never talked to: the userbot writes first (it
+    checks that this needs no Stars / Premium and that the client is reachable). If it can't, the bot gives the client
+    the prefilled DM link instead -> 'userbot' | 'link' | None."""
+    cl, i, lang = ctx(lead)
+    what = channel_post_of(g(lead, "listing_id")) or " · ".join(
+        x for x in (address(i, lang), i.get("price_usd") and texts.money(i["price_usd"])) if x)
+    from app.telegram import userbot
+    if userbot.send_to_client(cl, INTRO[lang].format(what=what)):
+        return "userbot"
+    url, chat = operator_dm_link(cl, g(lead, "listing_id")), chat_of(cl)
+    if url and chat:
+        text, label = WRITE_FIRST[lang]
+        tg.send(chat, text, kb([[url_btn(label, url)]]))
+        return "link"
+    return None
 
 
 PUSH = {"ru": ("🏡 Новый вариант под ваш запрос, его ещё нет в канале:", "❤️ Нравится", "👎 Не то"),
@@ -537,7 +594,7 @@ def contacts_to_agent(lead):
     t = (f"✅ <b>Клиент выбрал: {e(texts.when_long(at)) if at else '—'}</b>\nЗаявка #{lid} · {e(address(i))}\n\n"
          f"🔓 <b>Контакты клиента</b>\n\n👤 {e(cl.get('name') or '—')}" + (f"\n📞 {e(cl['phone'])}" if cl.get("phone") else "") +
          (f"\n💬 @{e(cl['username'])}" if cl.get("username") else "") +
-         "\n\nНапишите клиенту до встречи. Напомню вам и клиенту за 1 час.")
+         "\n\nНапишите клиенту до встречи. Напомню вам и клиенту за 1 час." + maps_line(i))
     tg.send(ag["tg_id"], t, kb([[url_btn("💬 Написать", contact)], [app_btn("📍 Адрес объекта", links.map_pin(i))]]))
 
 
@@ -625,7 +682,7 @@ def sla_warning(lead, stage):
         ag = store.user(g(lead, "agent_id")) or {}
         if ag.get("tg_id"):
             tg.send(ag["tg_id"], f"{head}{left_t}, чтобы предложить время просмотра.\n{info}",
-                    kb([[app_btn("🕐 Предложить время", links.lead_app(lid))], [cb("⚡ Время кнопками", f"ls:quick:{lid}")]]))
+                    kb([[app_btn("🕐 Предложить время", links.lead_app(lid))]]))
         return
     action = cb("✋ Взять заявку", f"lg:take:{lid}") if stage == "operator_take" else None
     to_operators(None, lid, f"{head}{left_t} на {STAGE_RU.get(stage, stage)}.\n{info}",

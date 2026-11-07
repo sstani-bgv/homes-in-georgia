@@ -240,6 +240,7 @@ async def send(client, client_id, text, options=None, choice=None, inline=None):
         if not cl.get("username"):
             raise
         entity = cl["username"]
+    await _check_free_dm(client, entity, client_id)
     if inline:
         try:
             res = await client.inline_query(conf("BOT_USERNAME").strip().lstrip("@"), inline)
@@ -257,6 +258,19 @@ async def send(client, client_id, text, options=None, choice=None, inline=None):
     if choice:
         set_state(client_id, dm_choice=choice)
     return m.id
+
+
+async def _check_free_dm(client, entity, client_id):
+    """PermissionError if this client takes DMs only for Stars (paid messages) or only from Premium users; an API
+    error of the check itself does not block the send (the send then fails or not on its own)."""
+    from telethon.tl import functions, types
+    try:
+        req = await client(functions.users.GetRequirementsToContactRequest(id=[entity]))
+    except Exception as e:  # noqa: BLE001
+        log.info("requirements to contact client %s: %r", client_id, e)
+        return
+    if req and not isinstance(req[0], types.RequirementToContactEmpty):
+        raise PermissionError(f"client {client_id}: {type(req[0]).__name__}")
 
 
 def match_client_by_id(client_id):

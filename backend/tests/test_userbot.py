@@ -139,10 +139,10 @@ class FakeHttp:
         return type("R", (), {"json": lambda self: {"ok": True, "result": {"message_id": 1, "chat": {"id": chat}}}})()
 
 
-def test_like_is_the_operator_dm_link_until_the_client_writes(db, monkeypatch):
-    """A client who never contacted the operator: ❤️ = t.me/<operator>?text=«…вариант #<obj> · …» (one tap, no bot
-    message); the userbot makes the lead from that first DM (create_from_like: B1 card through the one bot, the card
-    marked) and logs it. After that (a lead, or any DM) ❤️ is the callback like:<id>."""
+def test_like_is_a_callback_and_the_dm_link_still_makes_the_lead(db, monkeypatch):
+    """❤️ is always the bot's callback (the lead at once, the client types nothing). The prefilled DM link
+    (operator_dm_link, the fallback when the operator's account can't write first) still makes the lead from that first
+    DM in the userbot (create_from_like: B1 card through the one bot, the card marked) and logs it."""
     from app.models import Property
     from app.telegram import client as tg
     monkeypatch.undo()                                                        # the real notify (the autouse `sent` stubs it)
@@ -153,9 +153,10 @@ def test_like_is_the_operator_dm_link_until_the_client_writes(db, monkeypatch):
     cl, lst = make_client(db), make_listing(db)
     cl.lang = "ka"                                                            # clients_lang_check allows ka (migration 0011)
     db.commit()
-    btn = notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️")
-    assert btn["url"].startswith("https://t.me/op_nino?text=") and "callback_data" not in btn
-    text = unquote(btn["url"].split("text=", 1)[1])
+    assert notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️") == {"text": "❤️", "callback_data": f"like:{lst.id}"}
+    url = notify.operator_dm_link({"id": cl.id, "lang": "ka"}, lst.id)
+    assert url.startswith("https://t.me/op_nino?text=")
+    text = unquote(url.split("text=", 1)[1])
     assert text == f"გამარჯობა! მომწონს ვარიანტი #{lst.id} · ვაკე, ул. Палиашвили 10 · $850"
     from app.telegram import store
     store.remember("card", f"{cl.id}:{lst.id}", 5550001, 1)
@@ -165,28 +166,24 @@ def test_like_is_the_operator_dm_link_until_the_client_writes(db, monkeypatch):
     assert ("bot123456:TEST-TOKEN", "-100777") in {(u.rsplit("/", 2)[-2], d.get("chat_id")) for u, d in http.urls}   # B1
     mark = next(d for u, d in http.urls if u.endswith("/editMessageReplyMarkup"))
     assert (mark["chat_id"], mark["message_id"]) == ("5550001", "1") and "მომწონს ✅" in mark["reply_markup"]
-    assert not [d for u, d in http.urls if u.endswith("/sendMessage") and d.get("chat_id") == "5550001"]   # no bot message
-    assert notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️") == {"text": "❤️", "callback_data": f"like:{lst.id}"}
 
     other = make_client(db, external_id=5550002)
     prop = Property(listing_id=lst.id, status="published", address="x")
     db.add(prop)
     db.commit()
-    url = notify.like_button({"id": other.id, "lang": "ru"}, lst.id, "❤️")["url"]
+    url = notify.operator_dm_link({"id": other.id, "lang": "ru"}, lst.id)
     assert unquote(url.split("text=", 1)[1]) == f"Здравствуйте! Мне нравится вариант #{prop.id} · Ваке, ул. Палиашвили 10 · $850"
-    assert userbot.on_incoming(5550002, None, "Добрый день") == "no_lead"     # wrote without a ❤️: known from now on
-    assert "callback_data" in notify.like_button({"id": other.id, "lang": "ru"}, lst.id, "❤️")
     assert userbot.on_incoming(5550002, None, "Мне нравится вариант #999999 · …") == "no_lead"   # no such object: no lead
-    assert userbot.on_incoming(5550002, None, f"Здравствуйте! Мне нравится вариант #{prop.id} · …") == "liked"   # an old link card
+    assert userbot.on_incoming(5550002, None, f"Здравствуйте! Мне нравится вариант #{prop.id} · …") == "liked"
     assert db.query(Lead).filter_by(client_id=other.id, listing_id=lst.id).count() == 1
     monkeypatch.delenv("OPERATOR_TG_USERNAME")                                # (no operator with a @username either)
-    assert "callback_data" in notify.like_button({"id": make_client(db, external_id=5550003).id, "lang": "ru"}, lst.id, "❤️")   # nobody to DM
+    assert notify.operator_dm_link({"id": other.id, "lang": "ru"}, lst.id) is None
     assert not hasattr(notify, "client_message") and not hasattr(notify, "handoff")
 
 
 def test_like_sends_the_channel_post_link(db, monkeypatch):
-    """An object published in our channel: ❤️ prefills a link to its post (the operator sees which flat at once), and the
-    userbot finds the object by that link."""
+    """An object published in our channel: the DM link prefills a link to its post (the operator sees which flat at
+    once), and the userbot finds the object by that link."""
     from app.models import Property
     from app.telegram import client as tg
     monkeypatch.undo()                                                        # the real notify (the autouse `sent` stubs it)
@@ -197,12 +194,50 @@ def test_like_sends_the_channel_post_link(db, monkeypatch):
                     post_message_id="548723")
     db.add(prop)
     db.commit()
-    text = unquote(notify.like_button({"id": cl.id, "lang": "ru"}, lst.id, "❤️")["url"].split("text=", 1)[1])
+    text = unquote(notify.operator_dm_link({"id": cl.id, "lang": "ru"}, lst.id).split("text=", 1)[1])
     assert text == "Здравствуйте! Мне нравится этот вариант: https://t.me/rent_tbilisi_ge/548723"
     assert userbot.on_incoming(5550011, None, text) == "liked"
     assert db.query(Lead).filter_by(client_id=cl.id, listing_id=lst.id).count() == 1
     other = make_client(db, external_id=5550012)
     assert userbot.on_incoming(5550012, None, "Мне нравится https://t.me/rent_tbilisi_ge/1") == "no_lead"   # unknown post
+
+
+def test_operator_intro_userbot_first_else_the_dm_link(db, monkeypatch):
+    """First ❤️: the operator's account writes first; if it can't (Stars / Premium-only DMs, no way to reach), the bot
+    sends the client the prefilled DM link instead."""
+    from app.models import Property
+    from app.telegram import client as tg
+    monkeypatch.undo()
+    http = FakeHttp()
+    monkeypatch.setattr(tg, "_client", lambda: http)
+    monkeypatch.setenv("OPERATOR_TG_USERNAME", "op_nino")
+    cl, lst = make_client(db, external_id=5550021), make_listing(db)
+    db.add(Property(listing_id=lst.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/7"))
+    db.commit()
+    lead = leads.create_from_like(db, cl.id, lst.id)
+    sent = []
+    monkeypatch.setattr(userbot, "send_to_client", lambda c, text, **kw: sent.append(text) or {"ok": True, "message_id": 1})
+    assert notify.operator_intro(lead) == "userbot" and "https://t.me/rent_tbilisi_ge/7" in sent[0]
+    assert not [d for u, d in http.urls if u.endswith("/sendMessage") and d.get("chat_id") == "5550001"]
+    monkeypatch.setattr(userbot, "send_to_client", lambda c, text, **kw: None)
+    assert notify.operator_intro(lead) == "link"
+    msg = next(d for u, d in http.urls if u.endswith("/sendMessage") and d.get("chat_id") == "5550001")
+    assert "t.me/op_nino?text=" in msg["reply_markup"]
+
+
+def test_paid_dm_blocks_the_userbot_send(db):
+    """A client who takes DMs only for Stars: send() refuses (the caller falls back), no message goes out."""
+    from telethon.tl import types
+    cl = make_client(db, external_id=5550031)
+
+    class Paid(FakeTelethon):
+        async def __call__(self, req):
+            return [types.RequirementToContactPaidMessages(stars_amount=10)]
+    fake = Paid(cached={5550031})
+    with pytest.raises(PermissionError):
+        asyncio.run(userbot.send(fake, cl.id, "hi"))
+    assert not fake.sent
+
 
 def fake_userbot(monkeypatch, posts):
     import httpx

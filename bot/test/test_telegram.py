@@ -201,7 +201,7 @@ class NotifyTest(unittest.TestCase):
         c6 = self.last("sendMessage", 600, m)
         self.assertIn("от оператора Нино", c6["text"])
         self.assertNotIn("Анна", c6["text"])  # no client contacts before the time is chosen
-        self.assertEqual([b[1] for b in self.buttons(c6)], [f"https://crm.test/m/leads/{self.lid}", f"ls:quick:{self.lid}", f"ls:text:{self.lid}"])
+        self.assertEqual([b[1] for b in self.buttons(c6)], [f"https://crm.test/m/leads/{self.lid}"])
         self.assertIn("👤 Агент: <b>Георгий</b>", self.last("editMessageText", -100777, m)["text"])
 
     def test_client_ack_edits_the_card(self):

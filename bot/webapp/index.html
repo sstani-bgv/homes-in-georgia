@@ -48,6 +48,8 @@
     border: 2px solid #fff; box-shadow: 0 0 0 2px var(--blue); box-sizing: border-box; }
   .note button { width: 100%; border: 0; border-radius: 10px; padding: 13px; cursor: pointer; background: var(--blue); color: #fff;
     font: 700 12px Montserrat, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+  .ext { display: flex; gap: 8px; margin-bottom: 8px; }
+  .note .ext button { background: #fff; color: var(--blue); box-shadow: inset 0 0 0 1.5px var(--blue); letter-spacing: .06em; }
   .pin div { width: 26px; height: 26px; background: var(--blue); border: 3px solid #fff; border-radius: 50% 50% 50% 0;
     transform: rotate(-45deg); box-shadow: 0 2px 8px rgba(2,31,74,.45); box-sizing: border-box; }
 </style>
@@ -61,7 +63,9 @@
 </div>
 <div class="hint pick-only"><span id="hint">Нажмите на карту, где хотите жить</span></div>
 <div class="radius pick-only" id="radius"></div>
-<div class="note view-only"><p><span class="dot"></span><b id="caption"></b></p><button type="button" id="close"></button></div>
+<div class="note view-only"><p><span class="dot"></span><b id="caption"></b></p>
+  <div class="ext"><button type="button" id="gmaps">Открыть в Google Картах</button></div>
+  <button type="button" id="close"></button></div>
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -91,6 +95,11 @@ if (VIEW) {
   const back = document.referrer.startsWith(location.origin);  // opened from the agents' panel: back to it
   close.textContent = back ? (en ? 'Back' : 'Назад') : en ? 'Close' : 'Закрыть';
   close.onclick = () => back ? history.back() : tg.close();
+  // the same point in an outside map app (routes, street view): Telegram opens it outside the Mini App
+  const ll = pin.map(x => x.toFixed(6));
+  const open = (u) => { try { tg.openLink(u); } catch (e) { window.open(u, '_blank'); } };
+  document.getElementById('gmaps').onclick = () => open(`https://www.google.com/maps/search/?api=1&query=${ll[0]},${ll[1]}`);
+  if (en) document.getElementById('gmaps').textContent = 'Open in Google Maps';
   L.marker(pin, { icon: pinIcon, interactive: false }).addTo(map);
   map.setView(pin, qs.get('prec') === 'район' ? 15 : 17);
   const top = document.querySelector('.top').offsetHeight, bottom = document.querySelector('.note').offsetHeight + 14;
