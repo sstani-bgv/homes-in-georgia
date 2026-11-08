@@ -726,25 +726,16 @@ def fmt_date(d):
 
 @safe
 def deal_confirmed(deal):
-    """C9c to the agent; the #Rented text to the deals topic of the work group."""
+    """C9c to the agent. Everything else lives in the CRM: no #Rented to a work group (Stanislav 2026-11-08)."""
     ag = store.user(g(deal, "agent_id")) or {}
-    did = g(deal, "id")
     if ag.get("tg_id"):
-        t = ("✅ <b>Сделка подтверждена</b>\n#Rented опубликован в топике «Сделки».\n\n"
+        t = ("✅ <b>Сделка подтверждена</b>\n\n"
              f"💼 Ваша доля: <b>{texts.money(g(deal, 'agent_amount'))}</b>\n📊 Эксклюзивных сделок: {ag.get('exclusive_deals') or 0}")
         if g(deal, "rent_from"):
             t += f"\n\n🗓 T14 напомню <b>{fmt_date(g(deal, 't14_date'))[:5] if g(deal, 't14_date') else '—'}</b>"
         if g(deal, "rent_to"):
             t += f"\n🔔 Конец договора {fmt_date(g(deal, 'rent_to'))}: напомню за 30, 7 и 1 день"
-        tg.send(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(did))]]))
-    chat, topic = chat_and_topic("WORK_GROUP_CHAT_ID", "TOPIC_DEAL")
-    if chat:
-        try:
-            from app.services import deals as deals_svc
-            text = deals_svc.rented_text(deal)  # HTML
-        except Exception:
-            text = f"#Rented\n{e(g(deal, 'address') or '')}\n{texts.money(g(deal, 'price'))}\nАгент: {e(staff_name(ag))}"
-        tg.send(chat, text, thread_id=topic)
+        tg.send(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(g(deal, "id")))]]))
 
 
 T14_INTRO = {"ru": "{name}, вы живёте в новой квартире 14 дней 🏡\nВсё ли хорошо? Оцените, пожалуйста, три пункта (это 10 секунд):",

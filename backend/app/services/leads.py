@@ -402,6 +402,24 @@ def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) ->
     return lead
 
 
+ARCHIVABLE = ("rented", "refused", "thinking")
+
+
+def set_archived(db: Session, lead_id: int, actor: User, archived: bool) -> Lead:
+    """Closed leads leave the board but stay searchable (filter «Архив»); restoring puts them back."""
+    lead = _lead(db, lead_id, lock=True)
+    if actor.role not in STAFF and lead.agent_id != actor.id:
+        raise forbidden("not your lead")
+    if archived:
+        _require_status(lead, *ARCHIVABLE)
+    if bool(lead.archived_at) != archived:
+        lead.archived_at = now() if archived else None
+        _touch(lead)
+        _event(db, lead, "archived" if archived else "unarchived", actor)
+        db.commit()
+    return lead
+
+
 def log_operator_dm(db: Session, lead_id: int, text: str, actor: User | None = None) -> Lead:
     """The operator wrote to the client from their own Telegram (seen by the userbot): history only."""
     lead = _lead(db, lead_id)
@@ -624,6 +642,7 @@ def card(db: Session, lead: Lead, user: User, cache: dict | None = None) -> dict
         "viewing_at": lead.viewing_at.isoformat() if lead.viewing_at else None,
         "client_outcome": lead.client_outcome, "agent_outcome": lead.agent_outcome,
         "refusal_reason": lead.refusal_reason, "client_note": lead.client_note, "deal_id": lead.deal_id,
+        "archived_at": lead.archived_at.isoformat() if lead.archived_at else None,
         "request": lead.request,
     }
 
@@ -657,8 +676,8 @@ def can_view(lead: Lead, user: User) -> bool:
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None,
-          operator_id: int | None = None, q: str | None = None):
-    stmt = select(Lead)
+          operator_id: int | None = None, q: str | None = None, archived: bool = False):
+    stmt = select(Lead).where(Lead.archived_at.isnot(None) if archived else Lead.archived_at.is_(None))
     if user.role not in STAFF:
         stmt = stmt.where(Lead.agent_id == user.id)
     elif agent_id:

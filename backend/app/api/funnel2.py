@@ -46,9 +46,9 @@ def _visible(db: Session, lead_id: int, user: User) -> Lead:
 
 @router.get("/leads")
 def leads_list(status: str | None = None, agent_id: int | None = None, operator_id: int | None = None,
-               q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
-               user: User = Depends(current_user)):
-    return L.page(db, L.query(db, user, status, agent_id, operator_id, q), user, limit, offset)
+               q: str | None = None, archived: bool = False, limit: int = 50, offset: int = 0,
+               db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return L.page(db, L.query(db, user, status, agent_id, operator_id, q, archived), user, limit, offset)
 
 
 @router.get("/leads/board")
@@ -154,6 +154,16 @@ def leads_reschedule(lead_id: int, db: Session = Depends(get_db, scope="function
 def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
     return L.detail(db, L.set_outcome(db, lead_id, "agent", body.outcome, body.reason, user), user)
+
+
+class ArchiveIn(BaseModel):
+    archived: bool = True
+
+
+@router.post("/leads/{lead_id}/archive")
+def leads_archive(lead_id: int, body: ArchiveIn, db: Session = Depends(get_db, scope="function"),
+                  user: User = Depends(current_user)):
+    return L.detail(db, L.set_archived(db, lead_id, user, body.archived), user)
 
 
 @router.post("/leads/{lead_id}/cancel")

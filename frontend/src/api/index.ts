@@ -103,7 +103,7 @@ export const api = {
   },
 
   leads: {
-    list: (q?: { status?: string; agent_id?: number; operator_id?: number; q?: string }) => then(http.get<L<Lead>>('/leads', { ...q, limit: LIMIT }), (d) => normPage(d, normLead)),
+    list: (q?: { status?: string; agent_id?: number; operator_id?: number; q?: string; archived?: boolean }) => then(http.get<L<Lead>>('/leads', { ...q, limit: LIMIT }), (d) => normPage(d, normLead)),
     board: () => then(http.get<Record<string, Lead[]>>('/leads/board'), (d) => normBoard(d, normLead)),
     get: (id: number) => then(http.get<Lead>(`/leads/${id}`), normLead),
     take: (id: number) => http.post<Lead>(`/leads/${id}/take`),
@@ -113,6 +113,7 @@ export const api = {
     reschedule: (id: number) => http.post<Lead>(`/leads/${id}/reschedule`),
     outcome: (id: number, outcome: string, reason?: string) => http.post<Lead>(`/leads/${id}/outcome`, { outcome, reason }),
     cancel: (id: number, reason: string) => http.post<Lead>(`/leads/${id}/cancel`, { reason }),
+    archive: (id: number, archived = true) => http.post<Lead>(`/leads/${id}/archive`, { archived }),
     contract: (id: number) => http.get<LeadContract>(`/leads/${id}/contract`),
   },
 

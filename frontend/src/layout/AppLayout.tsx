@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Building2, Calculator, CalendarDays, CircleUser, ClipboardList, Eye, FileText, Handshake, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
+  Building2, CalendarDays, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
   Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -19,14 +19,12 @@ export const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/objects', label: 'Объекты', icon: Building2 },
   { to: '/leads', label: 'Заявки', icon: Inbox },
-  { to: '/deals', label: 'Сделки', icon: Handshake },
   { to: '/contracts', label: 'Договоры', icon: FileText },
   { to: '/calendar', label: 'Календарь', icon: CalendarDays },
   { to: '/clients', label: 'Клиенты', icon: UsersRound, roles: STAFF },
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
-  { to: '/calc', label: 'Калькулятор', icon: Calculator },
   { to: '/admin', label: 'Управление', icon: Settings, roles: ['superadmin', 'admin'] },
   { to: '/me', label: 'Кабинет', icon: CircleUser },
 ];
@@ -34,7 +32,6 @@ export const NAV: NavItem[] = [
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
 const QUICK: { to: string; title: string; sub: string; icon: LucideIcon }[] = [
   { to: '/objects?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
-  { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },
   { to: '/contracts', title: 'Договор', sub: 'Создать договор', icon: FileText },
   { to: '/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
   { to: '/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },

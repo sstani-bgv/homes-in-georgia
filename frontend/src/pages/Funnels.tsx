@@ -7,7 +7,7 @@ import { itemsOf } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Select, Tabs } from '../components/ui';
-import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
+import { ArchivedLeads, LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyBoard, PropertyList } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
@@ -85,12 +85,12 @@ export function PropertyPage() {
 
 export function LeadsPage() {
   const { isStaff } = useAuth();
-  const [tab, setTab] = useState<'board' | 'mine'>(isStaff ? 'board' : 'mine');
+  const [tab, setTab] = useState<'board' | 'mine' | 'archive'>(isStaff ? 'board' : 'mine');
   return (
     <>
       <PageHead title="Заявки" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'board', label: 'Доска' }, { value: 'mine', label: isStaff ? 'Списком' : 'Мои заявки' }]} />
-      {tab === 'board' ? <LeadBoard /> : <div style={{ maxWidth: 640 }}><MyLeadsList /></div>}
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'board', label: 'Доска' }, { value: 'mine', label: isStaff ? 'Списком' : 'Мои заявки' }, { value: 'archive', label: 'Архив' }]} />
+      {tab === 'board' ? <LeadBoard /> : tab === 'archive' ? <ArchivedLeads /> : <div style={{ maxWidth: 640 }}><MyLeadsList /></div>}
     </>
   );
 }

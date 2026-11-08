@@ -60,7 +60,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
   const [evalKind, setEvalKind] = useState<'t0' | 't14' | null>(initialEval ?? null);
   const nameOf = useUserNames();
   const refresh = () => { qc.invalidateQueries({ queryKey: ['deal', id] }); qc.invalidateQueries({ queryKey: ['deals'] }); qc.invalidateQueries({ queryKey: ['evals', id] }); };
-  const confirm = useMutation({ mutationFn: () => api.deals.confirm(id), onSuccess: () => { refresh(); toast('Сделка подтверждена · #Rented опубликован'); }, onError: (e) => toast(errText(e), true) });
+  const confirm = useMutation({ mutationFn: () => api.deals.confirm(id), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['lead'] }); qc.invalidateQueries({ queryKey: ['leads'] }); toast('Сделка подтверждена'); }, onError: (e) => toast(errText(e), true) });
   const cancel = useMutation({ mutationFn: () => api.deals.cancel(id), onSuccess: () => { refresh(); toast('Сделка отменена'); onClose(); }, onError: (e) => toast(errText(e), true) });
   if (error) return <ErrorBox error={error} />;
   if (isLoading || !d) return <Loading />;
@@ -157,7 +157,7 @@ function DealsList({ onOpen }: { onOpen: (id: number) => void }) {
   );
 }
 
-function Expiring({ onOpen }: { onOpen: (id: number) => void }) {
+export function Expiring({ onOpen }: { onOpen: (id: number) => void }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['deals', 'expiring'], queryFn: () => api.deals.expiring(30) });
   const items = itemsOf(data);
   const nameOf = useUserNames();

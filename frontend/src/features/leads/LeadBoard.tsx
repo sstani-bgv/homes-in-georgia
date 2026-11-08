@@ -99,7 +99,7 @@ export function LeadBoard({ base = '' }: { base?: string }) {
     if (to === 'operator_taken' || to === 'rented' || to === 'thinking') act.mutate({ lead, to });
     else if (to === 'agent_assigned') setAssign(lead);
     else if (to === 'refused') setRefuse(lead);
-    else if (to === 'deal_pending') navigate(`${base}/deals/new?lead=${lead.id}`);
+    else if (to === 'deal_pending') navigate(`${base}/leads/${lead.id}?deal=1`);
     else { toast(`«${LEAD_STATUS[to]}»: этот шаг делается в карточке заявки`); navigate(`${base}/leads/${lead.id}`); }
   };
   return (
@@ -155,6 +155,27 @@ export function MyLeadsList({ base = '' }: { base?: string }) {
       {active.length === 0 ? <Empty text="Активных заявок нет" /> : active.map((l) => <LeadCard key={l.id} lead={l} to={`${base}/leads/${l.id}`} showStatus />)}
       {closed.length > 0 && <div className="label mt">Остальные</div>}
       {closed.map((l) => <LeadCard key={l.id} lead={l} to={`${base}/leads/${l.id}`} showStatus />)}
+    </div>
+  );
+}
+
+/** «Архив»: closed leads taken off the board; search by client, address, district or #id. */
+export function ArchivedLeads({ base = '' }: { base?: string }) {
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['leads', 'list', 'archived', q, status],
+    queryFn: () => api.leads.list({ archived: true, q: q.trim() || undefined, status: status || undefined }),
+  });
+  const items = itemsOf(data);
+  return (
+    <div className="col" style={{ maxWidth: 640 }}>
+      <div className="row row-wrap">
+        <input className="input" style={{ flex: 1, minWidth: 200 }} placeholder="Клиент, адрес, район или #номер" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Seg value={status} onChange={setStatus} options={[{ value: '', label: 'Все' }, { value: 'rented', label: 'Сдано' }, { value: 'refused', label: 'Отказ' }, { value: 'thinking', label: 'Думает' }]} />
+      </div>
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="В архиве ничего не нашлось" />
+        : items.map((l) => <LeadCard key={l.id} lead={l} to={`${base}/leads/${l.id}`} showStatus />)}
     </div>
   );
 }

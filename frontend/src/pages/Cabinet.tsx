@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, Calculator, CalendarClock, CalendarDays, FileText } from 'lucide-react';
+import { BookOpen, CalendarClock, CalendarDays, FileText } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { PropertyStatusBadge } from '../components/domain';
@@ -60,7 +60,6 @@ export function CabinetView({ base = '' }: { base?: string }) {
               <div className="add-grid">
                 <Link to={`${base}/contracts`} className="add-item"><FileText size={20} /><span><b>Договор</b><small>Аренда или продажа</small></span></Link>
                 <Link to={`${base}/calendar`} className="add-item"><CalendarDays size={20} /><span><b>Календарь</b><small>Показы и съёмки</small></span></Link>
-                {!base && <Link to="/calc" className="add-item"><Calculator size={20} /><span><b>Калькулятор</b><small>Система 90/10</small></span></Link>}
                 {!base && <Link to="/team?tab=standards" className="add-item"><BookOpen size={20} /><span><b>Стандарты</b><small>Лестница и викторина</small></span></Link>}
               </div>
             </Card>

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ReportKind } from '../api/types';
-import { Card, PageHead, Tabs } from '../components/ui';
+import { Card, Drawer, PageHead, Tabs } from '../components/ui';
+import { DealsAnalytics } from '../features/deals/Analytics';
+import { DealView, Expiring } from './Deals';
 import { KIND_LABEL, REPORT_KINDS, ReportForm, ReportsList } from '../features/reports/ReportForms';
 import { PropertyCheck } from './Tools';
 
@@ -27,14 +29,18 @@ export function ReportsPage() {
 function ReportsInner() {
   const [params] = useSearchParams();
   const qKind = params.get('kind') as ReportKind | null;
-  const [tab, setTab] = useState<'new' | 'list' | 'check'>((params.get('tab') as 'new' | 'list' | 'check') || 'new');
+  type Tab = 'new' | 'list' | 'check' | 'expiring' | 'deals';
+  const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) || 'new');
+  const [deal, setDeal] = useState<number | null>(null);
   const [kind, setKind] = useState<ReportKind>(qKind && REPORT_KINDS.some((k) => k.kind === qKind) ? qKind : 'photo');
   const [filter, setFilter] = useState<string>('');
   return (
     <>
       <PageHead label="Фото, показы, расклейка, сдачи — то, что агенты раньше слали в рабочую группу" title="Отчёты" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'new', label: 'Новый отчёт' }, { value: 'list', label: 'Журнал' }, { value: 'check', label: 'Проверка объекта' }]} />
-      {tab === 'check' ? <PropertyCheck /> : tab === 'new' ? (
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'new', label: 'Новый отчёт' }, { value: 'list', label: 'Журнал' }, { value: 'check', label: 'Проверка объекта' },
+        { value: 'expiring', label: 'Истекают договоры' }, { value: 'deals', label: 'Аналитика сделок' }]} />
+      <Drawer open={!!deal} onClose={() => setDeal(null)} title={`Сделка #${deal}`}>{deal && <DealView id={deal} onClose={() => setDeal(null)} />}</Drawer>
+      {tab === 'expiring' ? <Expiring onOpen={setDeal} /> : tab === 'deals' ? <DealsAnalytics /> : tab === 'check' ? <PropertyCheck /> : tab === 'new' ? (
         <div style={{ maxWidth: 760 }}>
           <ReportKindPicker value={kind} onChange={setKind} />
           <Card label="Отчёт" title={KIND_LABEL[kind]}><ReportForm key={kind} kind={kind} /></Card>

@@ -1,8 +1,8 @@
 // Lead page: B2–B6 (operator) and C6–C9 (agent). Used by /leads/:id and /m/leads/:id.
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, FileText, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { Archive, ArchiveRestore, CalendarClock, CheckCircle2, FileText, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
@@ -10,6 +10,8 @@ import { useAuth } from '../../auth/AuthContext';
 import { CopyPhone, LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Avatar, Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Textarea } from '../../components/ui';
+import { DealForm } from '../deals/DealForm';
+import { DealView } from '../../pages/Deals';
 import { CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, localToIso, money } from '../../lib/format';
 
 const PETS: Record<string, string> = { none: 'нет', cat: 'кошка', dog: 'собака', other: 'другое' };
@@ -29,6 +31,9 @@ export function ProfileView({ profile }: { profile: ClientProfile }) {
     ]} />
   );
 }
+
+const ARCHIVABLE = ['rented', 'refused', 'thinking'];
+const DEAL_STAGES = ['time_chosen', 'viewing_done', 'thinking', 'deal_pending'];  // backend leads.DEAL_STAGES
 
 function useLeadMut() {
   const qc = useQueryClient();
@@ -142,15 +147,8 @@ function AgentOutcome({ lead }: { lead: Lead }) {
   );
 }
 
-function OutcomeCompare({ lead, compact }: { lead: Lead; compact?: boolean }) {
-  const { isStaff } = useAuth();
-  const { done, toast, qc } = useLeadMut();
+function OutcomeCompare({ lead }: { lead: Lead }) {
   const match = lead.client_outcome && lead.agent_outcome && lead.client_outcome === lead.agent_outcome;
-  const confirm = useMutation({
-    mutationFn: () => api.deals.confirm(lead.deal_id!),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['deals'] }); api.leads.get(lead.id).then((l) => done(l, 'Сделка подтверждена · #Rented')); },
-    onError: (e) => toast(errText(e), true),
-  });
   const box = (who: string, v?: string | null) => (
     <div className="outcome-card">
       <div className="label">{who}</div>
@@ -162,15 +160,6 @@ function OutcomeCompare({ lead, compact }: { lead: Lead; compact?: boolean }) {
       <div className="side-by-side">{box('Агент', lead.agent_outcome)}{box('Клиент', lead.client_outcome)}</div>
       {lead.refusal_reason && <div className="muted">Причина отказа: <b>{REFUSAL_LABEL[lead.refusal_reason] || lead.refusal_reason}</b></div>}
       {lead.client_outcome && lead.agent_outcome && !match && <div className="alert alert-warn">Ответы расходятся · уточните у агента и клиента</div>}
-      {isStaff && lead.status === 'deal_pending' && lead.deal_id && (
-        <div className="row row-wrap">
-          <Button variant="ok" size="lg" loading={confirm.isPending} onClick={() => confirm.mutate()}><CheckCircle2 size={18} />Подтвердить сделку</Button>
-          <Link className="btn btn-secondary btn-lg" to={`/deals?open=${lead.deal_id}`}>Открыть сделку</Link>
-        </div>
-      )}
-      {lead.status === 'deal_pending' && !lead.deal_id && (
-        <Link className="btn btn-lg" to={compact ? `/m/deal?lead_id=${lead.id}` : `/deals/new?lead_id=${lead.id}`}>Заполнить форму сделки</Link>
-      )}
     </div>
   );
 }
@@ -178,13 +167,16 @@ function OutcomeCompare({ lead, compact }: { lead: Lead; compact?: boolean }) {
 export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const { user, isStaff } = useAuth();
   const { data: lead, isLoading, error } = useQuery({ queryKey: ['lead', id], queryFn: () => api.leads.get(id), refetchInterval: 20_000 });
-  const { done, toast } = useLeadMut();
+  const { done, toast, qc } = useLeadMut();
+  const [params] = useSearchParams();
+  const [dealOpen, setDealOpen] = useState(params.get('deal') === '1');
   const [assignOpen, setAssignOpen] = useState(false);
   const [listingOpen, setListingOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
   const take = useMutation({ mutationFn: () => api.leads.take(id), onSuccess: (l) => done(l, 'Заявка ваша'), onError: (e) => toast(errText(e), true) });
   const resched = useMutation({ mutationFn: () => api.leads.reschedule(id), onSuccess: (l) => done(l, 'Агент снова введёт время') , onError: (e) => toast(errText(e), true) });
+  const archive = useMutation({ mutationFn: (on: boolean) => api.leads.archive(id, on), onSuccess: (l) => done(l, l.archived_at ? 'Заявка в архиве' : 'Заявка вернулась на доску'), onError: (e) => toast(errText(e), true) });
   const cancel = useMutation({ mutationFn: () => api.leads.cancel(id, reason), onSuccess: (l) => { done(l, 'Заявка отменена'); setCancelOpen(false); }, onError: (e) => toast(errText(e), true) });
 
   if (isLoading) return <Loading />;
@@ -253,7 +245,25 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
           {isAgent && ['time_chosen', 'viewing_done', 'thinking'].includes(lead.status) && !lead.agent_outcome && (
             <Card label="Шаг C9a" title="Итог просмотра"><AgentOutcome lead={lead} /></Card>
           )}
-          {showOutcome && <Card label="Шаг B6" title="Итог: агент и клиент"><OutcomeCompare lead={lead} compact={compact} /></Card>}
+          {showOutcome && <Card label="Шаг B6" title="Итог: агент и клиент"><OutcomeCompare lead={lead} /></Card>}
+          {(isAgent || isStaff) && !lead.deal_id && !dealOpen && lead.status !== 'deal_pending' && DEAL_STAGES.includes(lead.status) && (
+            <Button variant="secondary" onClick={() => setDealOpen(true)}><FileText size={16} />Оформить сделку</Button>
+          )}
+          {(lead.deal_id || ((lead.status === 'deal_pending' || (dealOpen && DEAL_STAGES.includes(lead.status))) && (isAgent || isStaff))) && (
+            <Card label="Сделка" title={lead.deal_id ? `Сделка #${lead.deal_id}` : 'Форма сделки'}>
+              {lead.deal_id
+                ? <DealView id={lead.deal_id} onClose={() => qc.invalidateQueries({ queryKey: ['lead', lead.id] })} />
+                : <DealForm leadId={lead.id} onDone={() => { qc.invalidateQueries({ queryKey: ['lead', lead.id] }); qc.invalidateQueries({ queryKey: ['leads'] }); toast('Сделка сохранена, ждёт подтверждения оператора'); }} />}
+            </Card>
+          )}
+          {(isAgent || isStaff) && (lead.archived_at || ARCHIVABLE.includes(lead.status)) && (
+            <div className="row row-wrap">
+              {lead.archived_at && <span className="muted">В архиве с {fmtDateTime(lead.archived_at)}</span>}
+              <Button variant="secondary" loading={archive.isPending} onClick={() => archive.mutate(!lead.archived_at)}>
+                {lead.archived_at ? <><ArchiveRestore size={16} />Вернуть из архива</> : <><Archive size={16} />В архив</>}
+              </Button>
+            </div>
+          )}
           {isStaff && !closed && (
             <div className="row row-wrap">
               {['slots_sent', 'time_chosen'].includes(lead.status) && <Button variant="secondary" loading={resched.isPending} onClick={() => resched.mutate()}><RotateCcw size={16} />Перенести</Button>}

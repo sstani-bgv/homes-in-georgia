@@ -45,3 +45,27 @@ def test_submit_requires_params_and_no_duplicate(db, sent):
     q.cadastral_code = "01.14.12.003.001"
     db.commit()
     assert _code(db, q.id, ag) == ("object_exists", f"Этот объект уже есть в базе: #{p.id} {p.address}")
+
+
+
+def test_lead_archive_hides_from_board_and_finds_by_search(db, client):
+    from app.models import Lead
+    from app.services.common import now_text
+    from tests.conftest import auth, make_client
+    ag, op = make_user(db, "agent"), make_user(db, "operator")
+    c = make_client(db, "Тамара")
+    lead = Lead(client_id=c.id, listing_id=make_listing(db, "ss9").id, status="time_chosen", agent_id=ag.id,
+                created_at=now_text(), updated_at=now_text())
+    db.add(lead)
+    db.commit()
+    r = client.post(f"/api/leads/{lead.id}/archive", json={"archived": True}, headers=auth(ag))
+    assert r.status_code == 409  # only closed leads (rented / refused / thinking)
+    lead.status = "refused"
+    db.commit()
+    assert client.post(f"/api/leads/{lead.id}/archive", json={}, headers=auth(ag)).json()["archived_at"]
+    assert not client.get("/api/leads/board", headers=auth(op)).json()["refused"]
+    assert client.get("/api/leads", headers=auth(op)).json()["total"] == 0
+    found = client.get("/api/leads?archived=true&q=Тамар", headers=auth(op)).json()
+    assert [x["id"] for x in found["items"]] == [lead.id]
+    assert not client.post(f"/api/leads/{lead.id}/archive", json={"archived": False}, headers=auth(op)).json()["archived_at"]
+    assert [x["id"] for x in client.get("/api/leads/board", headers=auth(op)).json()["refused"]] == [lead.id]

@@ -290,6 +290,7 @@ export interface Lead {
   agent_outcome?: string | null;
   refusal_reason?: string | null;
   client_note?: string | null;
+  archived_at?: string | null;
   deal_id?: number | null;
   created_at?: string | null;
   slots?: Slot[];

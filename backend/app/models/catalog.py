@@ -128,6 +128,7 @@ class Lead(Base):
     refusal_reason = Column(Text)
     client_note = Column(Text)
     deal_id = Column(Integer, ForeignKey("deals.id", ondelete="SET NULL", use_alter=True, name="leads_deal_id_fkey"))
+    archived_at = Column(DateTime(timezone=True))  # off the board, kept for search (migration 0014)
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
     created_ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

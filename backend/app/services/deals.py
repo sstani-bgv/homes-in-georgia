@@ -229,7 +229,7 @@ def live_deal_for_lead(db: Session, lead: Lead | None) -> Deal | None:
 
 
 def confirm(db: Session, deal_id: int, actor: User) -> Deal:
-    """B6/C9c: operator confirms → exclusive counter/level, lead rented, #Rented to TOPIC_DEAL, T14 + contract jobs."""
+    """B6/C9c: operator confirms → exclusive counter/level, lead rented, T14 + contract jobs."""
     if actor.role not in STAFF:
         raise forbidden("only operators confirm deals")
     deal = get_or_404(db, Deal, int(deal_id), "deal", lock=True)
