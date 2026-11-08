@@ -119,8 +119,11 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : l && (
         <div className="col gap-lg">
           {!!l.photos?.length && (
-            <div className="row" style={{ overflowX: 'auto', gap: 8 }}>
-              {l.photos.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" style={{ height: 180, borderRadius: 10, flex: 'none' }} />)}
+            <div className="col gap-sm">
+              <div className="row" style={{ overflowX: 'auto', gap: 8, scrollSnapType: 'x mandatory', scrollbarWidth: 'none', paddingBottom: 2 }}>
+                {l.photos.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" style={{ height: 180, borderRadius: 10, flex: 'none', scrollSnapAlign: 'start' }} />)}
+              </div>
+              {l.photos.length > 2 && <div className="faint" style={{ fontSize: 12 }}>{l.photos.length} фото · листайте вбок</div>}
             </div>
           )}
           <div className="row row-wrap gap-sm"><AiFlagBadges flags={l.ai_flags} /></div>

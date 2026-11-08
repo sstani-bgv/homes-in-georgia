@@ -75,8 +75,10 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       client_name: l.client?.name || x.client_name,
       client_phone: l.client?.phone || x.client_phone,
       client_tg: l.client?.username ? `@${l.client.username}` : x.client_tg,
+      ad_link: l.listing?.url || x.ad_link,
     }));
-    if (l.property_id) setPid(l.property_id);
+    // a lead on a channel post usually has no object in the base yet: start with the object typed by hand (from the ad)
+    if (l.property_id) setPid(l.property_id); else setManual(true);
   }, [lead.data]);
 
   const agentList = itemsOf(agents.data);
@@ -138,6 +140,10 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   const objectOk = manual ? !!f.address.trim() : !!obj && !obj.blocked;
   const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from);
   const calcBusy = debouncing || calc.isFetching;
+  const missing = [
+    !manual && !pid && 'объект (найдите в базе или «Объекта нет в базе»)', manual && !f.address.trim() && 'адрес',
+    !(Number(f.price) > 0) && 'цена', !(Number(f.agent_id) > 0) && 'агент', f.deal_type === 'rent' && !f.rent_from && 'дата начала аренды',
+  ].filter(Boolean) as string[];
 
   return (
     <div className="split">
@@ -250,7 +256,8 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
           {calcBusy && <div style={{ fontSize: 11, opacity: .6, marginTop: 6 }}>пересчёт…</div>}
         </div>
         <Button size="lg" variant="ok" block disabled={!valid || calcBusy} loading={save.isPending} onClick={() => save.mutate()}><CheckCircle2 size={18} />Отправить на подтверждение</Button>
-        <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором бот опубликует #Rented, поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>
+        {missing.length > 0 && <div className="alert alert-warn" style={{ fontSize: 13 }}>Чтобы отправить, заполните: {missing.join(', ')}</div>}
+        <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором заявка станет «Сдано», бот поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>
       </div>
     </div>
   );

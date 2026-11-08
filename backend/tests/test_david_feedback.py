@@ -69,3 +69,9 @@ def test_lead_archive_hides_from_board_and_finds_by_search(db, client):
     assert [x["id"] for x in found["items"]] == [lead.id]
     assert not client.post(f"/api/leads/{lead.id}/archive", json={"archived": False}, headers=auth(op)).json()["archived_at"]
     assert [x["id"] for x in client.get("/api/leads/board", headers=auth(op)).json()["refused"]] == [lead.id]
+
+
+def test_channel_post_is_not_similar_to_itself(db):
+    post = make_client_listing(db, "tg7", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
+    make_client_listing(db, "tg8", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
+    assert properties.similar_in_channel(db, [post]) == {}

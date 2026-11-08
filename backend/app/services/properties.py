@@ -230,7 +230,10 @@ def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60,
     compare by eye. Not a dup verdict: two flats in one house look alike on paper (Uznadze 4: 1st vs 4th floor).
     A «twin» (same bedrooms and floor, area ±10%) counts up to twin_radius and ranks first: channel pins can be off by a
     kilometre (8/10 Shroshi geocoded 1 km away while 1 Shroshi, 5th floor, sat 51 m from the 11th-floor ad)."""
-    rows = [r for r in rows if r.lat is not None and r.lng is not None and not listing_flags(r)["duplicate"]]
+    # a post of the agency channel itself (client leads are made on them) is not compared with the channel: it would
+    # find itself at 0 m (David 2026-11-08, 30 Bob Walsh St)
+    rows = [r for r in rows if r.source != "agency" and r.lat is not None and r.lng is not None
+            and not listing_flags(r)["duplicate"]]
     if not rows:
         return {}
     agency = db.scalars(select(Listing).where(Listing.source == "agency", Listing.status == "published",
@@ -247,7 +250,7 @@ def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60,
 
     out = {}
     for l in rows:
-        cand = [(not twin(l, a), _near(l, a), a) for a in agency if close(l, a)]
+        cand = [(not twin(l, a), _near(l, a), a) for a in agency if a.id != l.id and close(l, a)]
         near = sorted(((t, d, a) for t, d, a in cand if d <= (radius if t else twin_radius)), key=lambda x: x[:2])
         near = [(d, a) for _, d, a in near[:2]]
         if near:
