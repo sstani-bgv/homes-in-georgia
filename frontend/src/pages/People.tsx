@@ -192,13 +192,20 @@ function OwnerForm({ owner, onDone }: { owner?: Owner; onDone: () => void }) {
 
 export function OwnersPage() {
   const [q, setQ] = useState('');
+  const [scope, setScope] = useState<'base' | 'unlinked' | 'agents'>('base');
   const [open, setOpen] = useState<Owner | 'new' | null>(null);
-  const { data, isLoading, error } = useQuery({ queryKey: ['owners', q], queryFn: () => api.owners.list(q) });
+  const { data, isLoading, error } = useQuery({ queryKey: ['owners', q, scope], queryFn: () => api.owners.list(q, scope) });
   const items = itemsOf(data);
   const cur = open && open !== 'new' ? open : null;
   return (
     <>
       <PageHead title="Собственники" actions={<Button onClick={() => setOpen('new')}><Plus size={16} />Добавить</Button>} />
+      <Seg value={scope} onChange={setScope} options={[{ value: 'base', label: 'В базе' }, { value: 'unlinked', label: 'Без привязки' }, { value: 'agents', label: 'Агенты' }]} />
+      <div className="muted" style={{ fontSize: 12 }}>
+        {scope === 'base' ? 'Собственники квартир, которые агент снял и отправил оператору.'
+          : scope === 'unlinked' ? 'Старые контакты из таблицы без квартиры. Агенты выбирают их в анкете объекта и в сделке — тогда появится привязка.'
+          : 'Номера, по которым ответил агент, а не собственник.'}
+      </div>
       <SearchBox value={q} onChange={setQ} placeholder="Имя, телефон, адрес" />
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Собственников не найдено" /> : (
         <div className="card table-wrap">

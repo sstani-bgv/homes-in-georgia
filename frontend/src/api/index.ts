@@ -66,6 +66,7 @@ export const api = {
       return http.post<Property>(`/properties/${id}/media`, fd);
     },
     deleteMedia: (id: number, mid: number) => http.del<unknown>(`/properties/${id}/media/${mid}`),
+    mediaRoom: (id: number, mid: number, room: string | null) => http.patch<{ id: number; room: string | null }>(`/properties/${id}/media/${mid}`, { room }),
     checklist: (id: number, checklist: Record<string, boolean>) => http.post<Property>(`/properties/${id}/checklist`, { checklist }),
     submit: (id: number) => http.post<Property>(`/properties/${id}/submit`),
     review: (id: number, approve: boolean, comment?: string) => http.post<Property>(`/properties/${id}/review`, { approve, comment }),
@@ -95,7 +96,7 @@ export const api = {
   },
 
   owners: {
-    list: (q?: string) => http.get<L<Owner>>('/owners', { q }),
+    list: (q?: string, scope?: 'base' | 'unlinked' | 'agents' | 'all') => http.get<L<Owner>>('/owners', { q, scope }),
     create: (b: Partial<Owner>) => http.post<Owner>('/owners', b),
     update: (id: number, b: Partial<Owner>) => http.patch<Owner>(`/owners/${id}`, b),
     /** «Передать собственника агенту…» (staff): the owner and his live objects move to the agent */

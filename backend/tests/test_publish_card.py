@@ -3,7 +3,7 @@ post generator: the object's caption + hashtags, edited text, picked media in or
 from app.config import settings
 from app.models import Property, PropertyPublication
 from app.telegram import notify
-from tests.conftest import auth, make_listing, make_user
+from tests.conftest import auth, fill_required, make_listing, make_user
 
 JPG = ("files", ("a.jpg", b"\xff\xd8jpeg", "image/jpeg"))
 
@@ -17,6 +17,7 @@ def _submitted(db, client):
     db.commit()
     media = client.post(f"/api/properties/{pid}/media", files=[JPG, ("files", ("b.mp4", b"video", "video/mp4"))],
                         headers=auth(georgiy)).json()["media"]
+    fill_required(db, pid)
     assert client.post(f"/api/properties/{pid}/submit", headers=auth(georgiy)).json()["status"] == "review"
     return georgiy, nino, pid, [m["id"] for m in media]
 
@@ -39,7 +40,9 @@ def test_post_text_endpoint(db, client, sent):
     assert r["text"].startswith("#Vake\n📍[ул. Палиашвили 10](https://www.google.com/maps/search/?api=1&query=ул.+Палиашвили+10,+Tbilisi)")
     assert "70 sq.m | 4/9 Floor" in r["text"]
     assert "💰 850$ + Deposit 850$" in r["text"] and "#Георгий" in r["text"]
-    assert r["hashtags"] == ["#Vake", "#2Bed", "#Apartment", "#Rent", "#Price700to900", "#Георгий"]
+    tags = r["hashtags"]
+    assert tags[:4] == ["#Vake", "#2Bed", "#Apartment", "#Rent"] and tags[-1] == "#Георгий"
+    assert {"#NewBuilding", "#CentralHeating", "#Price700to900"} <= set(tags)
     assert r["channels"] == ["tg"]
 
 

@@ -27,5 +27,6 @@
     {"key": "roombloom_ge", "name": "RoomBloom"},
     {"key": "ttflat.tbilisi", "name": "TTFlat"},
     {"key": "anabelspace.tb", "name": "Anabel Space"}
-  ]
+  ],
+  "threads_defaults": {"queries": ["сдаю квартиру Тбилиси", "аренда квартиры Тбилиси", "квартира в аренду Тбилиси", "apartment for rent Tbilisi", "flat for rent Tbilisi", "ქირავდება ბინა თბილისში"], "per_query": 50, "days_back": 7, "photos": 5}
 }

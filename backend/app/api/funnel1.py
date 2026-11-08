@@ -104,6 +104,7 @@ class PropertyIn(BaseModel):
     source_type: str | None = None
     owner_name: str | None = None
     owner_phone: str | None = None
+    owner_id: int | None = None  # picked from the owners list
     post_fields: dict | None = None  # services.properties.POST_ONE / POST_MANY / POST_NUM
     reason: str | None = None  # why: goes with a «Запрос оператору» for locked fields (stage 6)
 
@@ -257,6 +258,13 @@ async def properties_media(pid: int, files: list[UploadFile] = File(...), room: 
     return P.out(db, get_or_404(db, Property, pid), user, full=True)
 
 
+@router.patch("/properties/{pid}/media/{mid}")
+def properties_media_room(pid: int, mid: int, body: dict, db: Session = Depends(get_db, scope="function"),
+                          user: User = Depends(current_user)):
+    m = P.set_media_room(db, pid, mid, body.get("room"), user)
+    return {"id": m.id, "room": m.room}
+
+
 @router.delete("/properties/{pid}/media/{mid}")
 def properties_media_delete(pid: int, mid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     P.delete_media(db, pid, mid, user)
@@ -378,9 +386,19 @@ def owner_out(o: Owner, show_phone: bool = True) -> dict:
 
 
 @router.get("/owners")
-def owners_list(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
-                user: User = Depends(current_user)):
+def owners_list(q: str | None = None, scope: str = "all", limit: int = 50, offset: int = 0,
+                db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """scope: base = owners of objects the agent shot and sent (review / published / rented / verified); unlinked = the old
+    Owner_Base contacts with no object yet (agents pick them in forms, the link appears then); agents; all."""
     stmt = select(Owner)
+    in_base = select(Property.owner_id).where(Property.owner_id.isnot(None), or_(
+        Property.status.in_(("review", "published", "rented")), Property.verified_at.isnot(None)))
+    if scope == "base":
+        stmt = stmt.where(Owner.id.in_(in_base), Owner.is_agent.is_(False))
+    elif scope == "unlinked":
+        stmt = stmt.where(~Owner.id.in_(select(Property.owner_id).where(Property.owner_id.isnot(None))), Owner.is_agent.is_(False))
+    elif scope == "agents":
+        stmt = stmt.where(Owner.is_agent.is_(True))
     if q:
         like = f"%{q.strip()}%"
         pn = norm_phone(q)

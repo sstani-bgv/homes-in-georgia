@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -15,6 +15,7 @@ import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, S
 import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
+import { OwnerSuggest } from '../../components/OwnerSuggest';
 
 const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
@@ -175,24 +176,24 @@ function ShootStep({ p }: { p: Property }) {
   );
 }
 
-function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
+function MediaStep({ p, canEdit, onEdit }: { p: Property; canEdit: boolean; onEdit: () => void }) {
   const { toast, set, qc } = useProp(p.id);
-  const [room, setRoom] = useState(ROOMS[0]);
   const fileRef = useRef<HTMLInputElement>(null);
   const checklist = p.checklist || {};
   const media = p.media || [];
+  const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
+  // one batch, no room picked up front: the agent selects everything in the gallery, then tags rooms on the photos
   const upload = useMutation({
-    mutationFn: (files: File[]) => api.properties.uploadMedia(p.id, files, room),
+    mutationFn: (files: File[]) => api.properties.uploadMedia(p.id, files),
     onSuccess: (r) => { set(r); toast('Файлы загружены'); },
     onError: (e) => toast(errText(e), true),
   });
-  const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: () => qc.invalidateQueries({ queryKey: ['property', p.id] }) });
+  const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: refresh });
+  const room = useMutation({ mutationFn: ([mid, r]: [number, string | null]) => api.properties.mediaRoom(p.id, mid, r), onSuccess: refresh, onError: (e) => toast(errText(e), true) });
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
   const submit = useMutation({ mutationFn: () => api.properties.submit(p.id), onSuccess: (r) => { set(r); toast('Отправлено оператору'); }, onError: (e) => toast(errText(e), true) });
   const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
-  // mirrors backend properties.REQUIRED_FIELDS: the card goes to the operator only complete
-  const missing = ([['address', 'адрес'], ['price', 'цена'], ['bedrooms', 'спальни'], ['area', 'площадь'], ['floor', 'этаж']] as const)
-    .filter(([f]) => p[f] == null || p[f] === '').map(([, l]) => l);
+  const missing = p.missing || [];
 
   return (
     <div className="col">
@@ -200,15 +201,15 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
       {p.shoot_at && <div className="muted">Съёмка: <b>{fmtDateTime(p.shoot_at)}</b></div>}
       {p.status === 'shoot_scheduled' && <DupCheck value={p.dup_check} />}
       {canEdit && (
-        <div className="row row-wrap" style={{ alignItems: 'flex-end' }}>
-          <Field label="Комната"><Select value={room} onChange={(e) => setRoom(e.target.value)} options={ROOMS.map((r) => ({ value: r, label: r }))} /></Field>
+        <>
           <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) upload.mutate(f); e.target.value = ''; }} />
-          <Button loading={upload.isPending} onClick={() => fileRef.current?.click()}><Upload size={16} />Загрузить фото и видео</Button>
-        </div>
+          <Button block loading={upload.isPending} onClick={() => fileRef.current?.click()}><Upload size={16} />Загрузить фото и видео</Button>
+          <div className="muted" style={{ fontSize: 12 }}>Выберите в галерее сразу все файлы. Потом под каждым фото можно указать комнату — это необязательно.</div>
+        </>
       )}
-      <MediaGrid p={p} onDelete={canEdit ? (id) => del.mutate(id) : undefined} />
+      <MediaGrid p={p} onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit ? (id, r) => room.mutate([id, r]) : undefined} />
       <div>
-        <div className="row row-between"><span className="label">Чек-лист комнат</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
+        <div className="row row-between"><span className="label">Что снято</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
         <div className="row row-wrap gap-sm mt">
           {ROOMS.map((r) => {
             const on = !!checklist[r] || media.some((m) => m.room === r);
@@ -223,10 +224,15 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
       </div>
       {canEdit && (
         <>
-          <div className="muted" style={{ fontSize: 12 }}>После отправки фото, видео и чек-лист закрываются: дальше объектом занимается оператор. Если нужно что-то переснять, он вернёт объект с комментарием.</div>
-          {missing.length > 0 && <div className="alert alert-warn">Заполните параметры объекта («Править» в блоке «Параметры»): {missing.join(', ')}</div>}
+          {missing.length > 0 && (
+            <div className="alert alert-warn col gap-sm" style={{ alignItems: 'stretch' }}>
+              <span>Перед отправкой заполните анкету объекта: <b>{missing.join(', ')}</b></span>
+              <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={14} />Заполнить анкету</Button>
+            </div>
+          )}
+          <div className="muted" style={{ fontSize: 12 }}>После отправки фото, видео и анкета закрываются: дальше объектом занимается оператор. Если нужно что-то переснять, он вернёт объект с комментарием.</div>
           <Button size="lg" variant="ok" disabled={!media.length || missing.length > 0} loading={submit.isPending}
-            onClick={() => { if (window.confirm('Отправить объект оператору? Фото, видео и чек-лист больше нельзя будет менять.')) submit.mutate(); }}>
+            onClick={() => { if (window.confirm('Отправить объект оператору? Фото, видео и анкету больше нельзя будет менять.')) submit.mutate(); }}>
             <Send size={18} />Готово — отправить оператору
           </Button>
         </>
@@ -265,7 +271,7 @@ function Lightbox({ items, index, onIndex, onClose }: { items: Shot[]; index: nu
   );
 }
 
-function MediaGrid({ p, items, onDelete }: { p?: Property; items?: Shot[]; onDelete?: (id: number) => void }) {
+function MediaGrid({ p, items, onDelete, onRoom }: { p?: Property; items?: Shot[]; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void }) {
   const media = items || (p ? shotsOf(p) : []);
   const [open, setOpen] = useState<number | null>(null);
   if (!media.length) return <div className="muted" style={{ fontSize: 13 }}>Файлов пока нет</div>;
@@ -275,7 +281,15 @@ function MediaGrid({ p, items, onDelete }: { p?: Property; items?: Shot[]; onDel
       {media.map((m, i) => (
         <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
           {m.kind === 'video' ? <video src={mediaUrl(m.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={thumbUrl(m.src)} alt={m.room || ''} loading="lazy" />}
-          {m.room && <span className="room badge badge-blue">{m.room}</span>}
+          {onRoom ? (
+            <span className="room-pick" onClick={(e) => e.stopPropagation()}>
+              <span className={`badge badge-blue ${m.room ? '' : 'no-room'}`}>{m.room || 'Комната?'}<ChevronDown size={12} /></span>
+              <select value={m.room || ''} aria-label="Комната" onChange={(e) => onRoom(Number(m.id), e.target.value || null)}>
+                <option value="">Не указана</option>
+                {ROOMS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </span>
+          ) : m.room && <span className="room badge badge-blue">{m.room}</span>}
           {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
         </div>
       ))}
@@ -676,7 +690,7 @@ function PostFieldsForm({ value: f, onChange }: { value: PostFields; onChange: (
 
 function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
-  type Form = Partial<Property> & { owner_name?: string; owner_phone?: string };
+  type Form = Partial<Property> & { owner_name?: string; owner_phone?: string; owner_id?: number | null };
   const [f, setF] = useState<Form>({});
   const v: Form = { ...p, owner_name: p.owner?.name || '', owner_phone: p.owner?.phone || '', ...f };
   const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
@@ -695,6 +709,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
   return (
     <Modal open={open} onClose={onClose} title="Поля объекта">
       <div className="form-grid">
+        {(p.missing || []).length > 0 && <div className="alert alert-warn span2" style={{ fontSize: 13, display: 'block' }}>Для отправки оператору не хватает: <b>{(p.missing || []).join(', ')}</b></div>}
         <Field label="Район"><Select value={v.district || ''} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
         <Field label="Адрес" hint={lockHint('address')}><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
         <Field label="Цена, $" hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
@@ -704,6 +719,10 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         <Field label="Этажей в доме"><Input type="number" value={v.total_floors ?? ''} onChange={(e) => upd('total_floors', numOrNull(e.target.value))} /></Field>
         <Field label="Собственник" hint={lockHint('owner_name')}><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
         <Field label="Телефон собственника" hint={lockHint('owner_phone')}><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
+        {!p.owner && (f.owner_name !== undefined || f.owner_phone !== undefined) && !f.owner_id && (
+          <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name || ''}
+            onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>
+        )}
         <Field label="Кадастровый код" className="span2" hint={lockHint('cadastral_code')}><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
         <div className="span2 col gap-sm">
@@ -777,7 +796,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   let action: React.ReactNode = null;
   if (['taken', 'call_failed'].includes(p.status)) action = canWork ? <CallStep p={p} /> : null;
   else if (p.status === 'owner_confirmed') action = canWork ? <ShootStep p={p} /> : null;
-  else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <MediaStep p={p} canEdit={canWork} />;
+  else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <MediaStep p={p} canEdit={canWork} onEdit={() => setEdit(true)} />;
   else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">Отправлено оператору · фото и чек-лист закрыты. Оператор проверит и опубликует, обычно до 1 часа. Если нужно что-то переснять, объект вернётся к вам с комментарием.</div>;
   else if (p.status === 'agent_marked') action = <div className="alert alert-info">Ответил агент · объект остаётся в базе с пометкой «агент»</div>;
   else if (['published', 'rented'].includes(p.status)) action = (

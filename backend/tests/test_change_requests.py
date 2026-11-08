@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from app.models import ChangeRequest, Event, Owner, Property
 from app.services import properties
-from tests.conftest import auth, make_listing, make_user
+from tests.conftest import auth, fill_required, make_listing, make_user
 
 
 def _verified(db, client, sent, lid="ss6001"):
@@ -20,6 +20,7 @@ def _verified(db, client, sent, lid="ss6001"):
     p.status = "shoot_scheduled"
     db.commit()
     client.post(f"/api/properties/{pid}/media", files=[("files", ("a.jpg", b"\xff\xd8", "image/jpeg"))], headers=auth(georgiy))
+    fill_required(db, pid)
     client.post(f"/api/properties/{pid}/submit", headers=auth(georgiy))
     return georgiy, nino, pid
 

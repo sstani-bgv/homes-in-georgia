@@ -143,3 +143,23 @@ def client():
 def auth(user):
     from app.api.deps import create_token
     return {"Authorization": f"Bearer {create_token(user)}"}
+
+
+POST_OK = {"deal": "Rent", "prop_type": "Apartment", "building": "NewBuilding", "design": "New", "heating": "CentralHeating",
+           "pets": "ByAgreement", "periods": ["12Month"]}
+
+
+def fill_required(db, pid, owner=True):
+    """The card fields properties.missing_fields asks for before «Отправить оператору» (the listing gives the rest)."""
+    from app.models import Owner, Property
+    p = db.get(Property, pid)
+    p.total_floors = p.total_floors or 9
+    p.district = p.district or "Ваке"
+    p.post_fields = {**POST_OK, **(p.post_fields or {})}
+    if owner and not p.owner_id:
+        o = Owner(name="Нана", phone="+995 599 00 00 01", phone_norm="599000001")
+        db.add(o)
+        db.flush()
+        p.owner_id = o.id
+    db.commit()
+    return p

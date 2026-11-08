@@ -177,7 +177,7 @@ def group_text(lead, timer=True):
     """B1: the lead card in the operators group."""
     cl, i, _ = ctx(lead)
     src = i.get("source") or ""
-    src = SOURCE_RU.get(src) or (src.startswith("tg:") and f"канал {src[3:]}") or (src.startswith("fb:") and "Facebook") or (src.startswith("ig:") and f"Instagram {src[3:]}") or src
+    src = SOURCE_RU.get(src) or (src.startswith("tg:") and f"канал {src[3:]}") or (src.startswith("fb:") and "Facebook") or (src.startswith("ig:") and f"Instagram {src[3:]}") or (src.startswith("th:") and f"Threads {src[3:]}") or src
     urls = i.get("urls") or []
     t = (f"🆕 <b>Заявка #{g(lead, 'id')}</b>" + (f"  ·  ⏱ {env_int('SLA_OPERATOR_TAKE_MIN', 5)} мин на назначение" if timer else "") +
          f"\n\n👤 <b>{e(client_name(cl))}</b> · Telegram" + (f" · {cl.get('lang', 'ru')}" if cl.get("lang") not in (None, "ru") else "") +

@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.config import settings as env
-from app.models import FIELD, STAFF, Client, Deal, Evaluation, Lead, Property, User
+from app.models import FIELD, STAFF, Client, Deal, Evaluation, Lead, Owner, Property, User
 from app.services import evaluations, jobs, users
 from app.services.common import TZ, get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
@@ -100,6 +100,9 @@ def _month(d: date | None) -> str:
 def create(db: Session, data: dict, actor: User | None, commit: bool = True, notify_lead: bool = True) -> Deal:
     """C9b deal form → deals.status=pending. Optional T0 (`t0_h2o_client`.. or `t0: {...}`) stored as evaluation."""
     data = dict(data or {})
+    if oid := data.pop("owner_id", None):  # picked from the owners list (autocomplete): the base's contact, not a retype
+        o = get_or_404(db, Owner, int(oid), "owner")
+        data["owner_name"], data["owner_phone"] = o.name or data.get("owner_name"), o.phone or data.get("owner_phone")
     agent = None
     if data.get("agent_id"):
         agent = get_or_404(db, User, int(data["agent_id"]), "agent")

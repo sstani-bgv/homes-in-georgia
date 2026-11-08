@@ -151,6 +151,11 @@ def from_instagram(i):
     return {**from_facebook(i), "id": f"ig{i['id']}", "source": f"ig:{i['group']}", "owner_id": f"ig:{i['author']}"}
 
 
+def from_threads(i):
+    """Threads post found by keywords (fetch_threads.py): free text like Facebook; the author is the Threads username."""
+    return {**from_facebook(i), "id": f"th{i['id']}", "source": f"th:{i['group']}", "owner_id": f"th:{i['author'] or i['id']}"}
+
+
 def _video(i):
     """raw post's video (fetchers download it under the size cap) -> {"videos": [...]} if the file is there."""
     v = i.get("video")
@@ -557,7 +562,7 @@ def main():
     items = channel_items("agency") + [conv(i) for path, conv in [("raw/ss.json", from_ss),
                                          ("raw/myhome.json", from_myhome), ("raw/livo.json", from_livo),
                                          ("raw/korter.json", from_korter), ("raw/facebook.json", from_facebook),
-                                         ("raw/instagram.json", from_instagram)]
+                                         ("raw/instagram.json", from_instagram), ("raw/threads.json", from_threads)]
              if os.path.exists(path) for i in json.load(open(path))]
     items += channel_items("competitor")
     counts = Counter(i["source"] for i in items)

@@ -6,7 +6,7 @@ from app import worker
 from app.models import Job, Listing, Owner, Property, Report
 from app.services import jobs, properties
 from app.services.dedup import address_match, norm_phone
-from tests.conftest import auth, make_listing, make_user
+from tests.conftest import auth, fill_required, make_listing, make_user
 
 
 def test_property_funnel_end_to_end(db, client, sent):
@@ -65,6 +65,9 @@ def test_property_funnel_end_to_end(db, client, sent):
     media_url = r["media"][0]["url"]
     assert client.get(media_url, headers=auth(georgiy)).content == b"\xff\xd8jpeg"
     client.post(f"/api/properties/{pid}/checklist", json={"checklist": {"kitchen": True}}, headers=auth(georgiy))
+    r = client.post(f"/api/properties/{pid}/submit", headers=auth(georgiy)).json()
+    assert r["code"] == "missing_fields" and "сроки аренды" in str(r)
+    fill_required(db, pid)
     r = client.post(f"/api/properties/{pid}/submit", headers=auth(georgiy)).json()
     assert r["status"] == "review" and sent.of("property_review_request")
 

@@ -98,6 +98,7 @@ export interface PostFields {
 export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?: string; room?: string | null; position?: number }
 
 export interface Property {
+  missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
   id: number;
   listing_id?: string | null;
   source_type?: string | null;

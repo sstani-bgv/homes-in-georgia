@@ -503,3 +503,15 @@ details > summary::-webkit-details-marker { display: none; }
 .vbar > div { width: 100%; max-width: 38px; background: var(--brand); border-radius: 6px 6px 2px 2px; min-height: 2px; }
 .vbar span { font-size: 10px; color: var(--muted); font-weight: 700; white-space: nowrap; }
 .vbar em { font-style: normal; font-size: 10px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+
+/* iOS Safari zooms the page into any field under 16px on focus and leaves it panned sideways (David's video, 2026-11-08):
+   16px fields on phones, and the page itself never scrolls horizontally (clip keeps position: sticky working). */
+html, body { overflow-x: clip; }
+@media (max-width: 768px) {
+  input, select, textarea, .input, .select, .textarea { font-size: 16px; }
+}
+/* per-photo room: the badge shows the room, an invisible 16px select on top opens the native picker */
+.photo-strip .ph .room-pick { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); }
+.photo-strip .ph .room-pick .badge { position: static; display: inline-flex; gap: 4px; align-items: center; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.photo-strip .ph .room-pick select { position: absolute; inset: 0; opacity: 0; font-size: 16px; width: 100%; cursor: pointer; }
+.photo-strip .ph .room-pick .badge.no-room { background: rgba(255,255,255,.92); color: var(--brand); }

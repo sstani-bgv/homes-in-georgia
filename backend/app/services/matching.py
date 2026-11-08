@@ -43,7 +43,7 @@ MAX_CANDIDATES = 3   # similar objects stored per ad
 # a Georgian cadastral code as people write it in ads: 01.14.05.003.017(.01.501)
 CADASTRAL = re.compile(r"(?<![\d.])\d{2}\.\d{2}\.\d{2}\.\d{3}\.\d{3}(?:\.\d{2}\.\d{3})?(?![\d])")
 SOURCE_NAME = {"ss": "ss.ge", "myhome": "myhome.ge", "livo": "livo.ge", "korter": "korter.ge", "facebook": "Facebook",
-               "instagram": "Instagram", "telegram": "Telegram"}
+               "instagram": "Instagram", "threads": "Threads", "telegram": "Telegram"}
 
 
 def _ingest():

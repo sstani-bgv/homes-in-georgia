@@ -4,7 +4,7 @@
 # agents marked as "agent" (owners.is_agent) make a listing agent-suspect on sync.
 # Run by hand or on a schedule (not installed, see docs/README.md "Автообновление"), e.g. cron every 6 hours:
 #   0 */6 * * * /path/to/rent-tbilisi-ai/refresh.sh >> /path/to/rent-tbilisi-ai/data/refresh.log 2>&1
-# Env: PY (python, default .venv/bin/python), TG (telegram-user-session runtime), SKIP_FACEBOOK=1 / SKIP_INSTAGRAM=1 (Apify costs money), FB_EVERY_MIN (15), IG_EVERY_MIN (60),
+# Env: PY (python, default .venv/bin/python), TG (telegram-user-session runtime), SKIP_FACEBOOK=1 (Apify costs money), FB_EVERY_MIN (120), SKIP_THREADS=1, TH_EVERY_MIN (60),
 #      SKIP_LIVO=1, SKIP_KORTER=1,
 #      TG_FETCH=session (default: Telethon via TG) | web (public channels via t.me/s, fetch_channel_web.py; the server).
 # A failed fetcher keeps its previous raw/*.json; a failed ingest skips the sync (the base stays as it was).
@@ -30,18 +30,20 @@ elif [ -x "$TG" ]; then
 else
   echo "no tg runtime at $TG, skipping Telegram channels"
 fi
-# Facebook and Instagram go through Apify and are incremental (only posts since the last run are paid for), but each
+# Facebook goes through Apify and is incremental (only posts since the last run are paid for), but each
 # run has a floor: FB $0.005 per start, IG ~$0.005 for "no new posts" rows. So they run at most every *_EVERY_MIN
-# (FB 15 -> ~$14/month in starts, IG 60 -> ~$4/month) even when refresh itself runs every 5 minutes.
+# (FB every 2 h: ~900 posts/day x $0.0015 + 12 starts -> ~$40/month) even when refresh itself runs every 5 minutes.
 due() { [ ! -f "$1" ] || [ -z "$(find "$1" -mmin -"$2")" ]; }  # state file older than N minutes (or none yet)
 if [ "${SKIP_FACEBOOK:-0}" = 1 ]; then :
-elif due raw/facebook_state.json "${FB_EVERY_MIN:-15}"; then
+elif due raw/facebook_state.json "${FB_EVERY_MIN:-120}"; then
   "$PY" fetch_facebook.py || echo "fetch_facebook failed, keeping old raw/facebook.json"
-else echo "facebook: fetched < ${FB_EVERY_MIN:-15} min ago, skipping Apify"; fi
-if [ "${SKIP_INSTAGRAM:-0}" = 1 ]; then :
-elif due raw/instagram_state.json "${IG_EVERY_MIN:-60}"; then
-  "$PY" fetch_instagram.py || echo "fetch_instagram failed, keeping old raw/instagram.json"
-else echo "instagram: fetched < ${IG_EVERY_MIN:-60} min ago, skipping Apify"; fi
+else echo "facebook: fetched < ${FB_EVERY_MIN:-120} min ago, skipping Apify"; fi
+# Instagram is off (2026-11-08: agencies only, no owners there); Threads replaces it: official API keyword search, free,
+# skipped without a token (THREADS_ACCESS_TOKEN / THREADS_TOKEN_FILE)
+if [ "${SKIP_THREADS:-0}" = 1 ]; then :
+elif due raw/threads_state.json "${TH_EVERY_MIN:-60}"; then
+  "$PY" fetch_threads.py || echo "fetch_threads failed, keeping old raw/threads.json"
+else echo "threads: fetched < ${TH_EVERY_MIN:-60} min ago, skipping"; fi
 "$PY" ingest.py || { echo "ingest failed"; exit 1; }
 # video links (ss.ge HLS, YouTube...) -> mp4 in the album with yt-dlp, only listings without a local video; failures are
 # cached for VIDEO_RETRY_DAYS and keep the "🎥 Видео" button (YouTube may block server IPs)

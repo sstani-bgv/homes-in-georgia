@@ -235,8 +235,16 @@ def row(r):
 
 # ---------- sources <-> sources.json ----------
 
+# Threads has no groups to list: the fetcher searches posts by these keywords (fetch_threads.py)
+THREADS_DEFAULTS = {"queries": ["сдаю квартиру Тбилиси", "аренда квартиры Тбилиси", "квартира в аренду Тбилиси",
+                                "apartment for rent Tbilisi", "flat for rent Tbilisi", "ქირავდება ბინა თბილისში"],
+                    "per_query": 50, "days_back": 7, "photos": 5}
+
+
 def import_sources(c, cfg):
     set_setting("telegram_defaults", json.dumps(cfg.get("telegram_defaults", {})), c)
+    if cfg.get("threads_defaults"):
+        set_setting("threads_defaults", json.dumps(cfg["threads_defaults"], ensure_ascii=False), c)
     set_setting("facebook_defaults", json.dumps(cfg.get("facebook_defaults", {})), c)
     set_setting("instagram_defaults", json.dumps(cfg.get("instagram_defaults", {})), c)
     n = 0
@@ -265,7 +273,8 @@ def sources_config(c):
     ig = [{"key": r["key"], "name": r["name"]} for r in rows if r["kind"] == "ig_account"]
     return {"telegram_defaults": json.loads(get_setting("telegram_defaults", c) or "{}"), "telegram_channels": tg,
             "facebook_defaults": json.loads(get_setting("facebook_defaults", c) or "{}"), "facebook_groups": fb,
-            "instagram_defaults": json.loads(get_setting("instagram_defaults", c) or "{}"), "instagram_accounts": ig}
+            "instagram_defaults": json.loads(get_setting("instagram_defaults", c) or "{}"), "instagram_accounts": ig,
+            "threads_defaults": json.loads(get_setting("threads_defaults", c) or "null") or THREADS_DEFAULTS}
 
 
 def export_sources(path="sources.json"):
@@ -277,7 +286,8 @@ def export_sources(path="sources.json"):
              f'  "facebook_defaults": {j(cfg["facebook_defaults"])},', '  "facebook_groups": [',
              ",\n".join(f"    {j(x)}" for x in cfg["facebook_groups"]), "  ],",
              f'  "instagram_defaults": {j(cfg["instagram_defaults"])},', '  "instagram_accounts": [',
-             ",\n".join(f"    {j(x)}" for x in cfg["instagram_accounts"]), "  ]", "}"]
+             ",\n".join(f"    {j(x)}" for x in cfg["instagram_accounts"]), "  ],",
+             f'  "threads_defaults": {j(cfg["threads_defaults"])}', "}"]
     Path(path).write_text("\n".join(lines) + "\n")
     return cfg
 

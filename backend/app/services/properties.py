@@ -105,6 +105,8 @@ def source_type_of(listing: Listing) -> str:
         return "livo"
     if lid.startswith("kr"):
         return "korter"
+    if lid.startswith("th") or src.startswith("th:"):
+        return "threads"
     if lid.startswith("ig") or src.startswith("ig:"):
         return "instagram"
     if lid.startswith("fb") or src.startswith("fb:"):
@@ -141,7 +143,7 @@ def listing_out(listing: Listing, full: bool = False) -> dict:
     return d
 
 
-SOURCE_PREFIX = {"ss": "ss", "myhome": "mh", "livo": "lv", "korter": "kr", "facebook": "fb", "instagram": "ig", "telegram": "tg"}
+SOURCE_PREFIX = {"ss": "ss", "myhome": "mh", "livo": "lv", "korter": "kr", "facebook": "fb", "instagram": "ig", "threads": "th", "telegram": "tg"}
 
 
 def _metro():
@@ -420,6 +422,9 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
     a «Запрос оператору» (p.change_request is set then); the rest is applied as usual."""
     p = _prop(db, pid)
     _require_owner(p, actor)
+    if oid := data.pop("owner_id", None):  # picked from the owners list: that contact, its phone may be hidden to agents
+        o = get_or_404(db, Owner, int(oid), "owner")
+        data["owner_name"], data["owner_phone"] = o.name, o.phone
     locked = {}
     if is_locked_for(p, actor):
         data, locked = split_locked(db, p, data)
@@ -776,6 +781,18 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
     return out
 
 
+def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: User) -> PropertyMedia:
+    """Tag one uploaded file with its room after a batch upload (the agent taps the photo)."""
+    p = _prop(db, pid)
+    _require_media_editable(p, actor)
+    m = db.get(PropertyMedia, mid)
+    if not m or m.property_id != p.id:
+        raise DomainError("not_found", "media not found")
+    m.room = (room or "").strip() or None
+    db.commit()
+    return m
+
+
 def delete_media(db: Session, pid: int, mid: int, actor: User) -> None:
     p = _prop(db, pid)
     _require_media_editable(p, actor)
@@ -804,12 +821,24 @@ def set_checklist(db: Session, pid: int, checklist: dict, actor: User) -> Proper
     return p
 
 
-REQUIRED_FIELDS = {"address": "адрес", "price": "цена", "bedrooms": "спальни", "area": "площадь", "floor": "этаж"}
+REQUIRED_FIELDS = {"district": "район", "address": "адрес", "price": "цена", "bedrooms": "спальни", "area": "площадь",
+                   "floor": "этаж", "total_floors": "этажей в доме"}
+# the post generator's groups the agent must pick (frontend PostFieldsForm); rent-only ones are skipped for a sale
+REQUIRED_POST = {"prop_type": "тип", "building": "дом", "design": "дизайн", "heating": "отопление", "pets": "животные",
+                 "periods": "сроки аренды"}
+RENT_ONLY_POST = ("pets", "periods")
 
 
 def missing_fields(p: Property) -> list[str]:
-    """Card parameters the agent must fill before the operator sees the object (one pass, one moderation)."""
-    return [label for f, label in REQUIRED_FIELDS.items() if getattr(p, f) in (None, "")]
+    """Everything the agent must fill before the operator sees the object (one pass, one moderation): the card, the owner,
+    and the post fields, so the post (TG now, other channels later) is built from the form, not typed by the operator."""
+    out = [label for f, label in REQUIRED_FIELDS.items() if getattr(p, f) in (None, "")]
+    if not p.owner_id:
+        out.append("собственник")
+    pf = p.post_fields or {}
+    sale = pf.get("deal") == "Sale"
+    out += [label for k, label in REQUIRED_POST.items() if not (sale and k in RENT_ONLY_POST) and not pf.get(k)]
+    return out
 
 
 def _same_object(db: Session, p: Property) -> Property | None:
@@ -1260,6 +1289,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         d["media"] = [{"id": m.id, "kind": m.kind, "room": m.room, "position": m.position, "url": f"/api/media/{m.path}",
                        "preview": f"/api/media/{m.path}?p=1"}
                       for m in media(db, p.id)]
+        d["missing"] = missing_fields(p)  # what still blocks «Отправить оператору»
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
         d.update(card(db, p, user))

@@ -14,7 +14,7 @@ import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } fr
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
-const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', tg: 'Telegram' };
+const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', th: 'Threads', tg: 'Telegram' };
 const sourceName = (s: string) => { const [k, ...rest] = s.split(':'); return PREFIX_LABEL[k] && rest.length ? `${PREFIX_LABEL[k]} · ${rest.join(':')}` : s; };
 const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
 

@@ -10,6 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
 import { PropertyStatusBadge } from '../../components/domain';
 import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from '../../components/ui';
+import { OwnerSuggest } from '../../components/OwnerSuggest';
 import { levelFor, money, todayStr } from '../../lib/format';
 
 function useDebounced<T>(v: T, ms = 300): T {
@@ -41,7 +42,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
     agent_id: user?.id ?? 0, recruit_id: '' as string | number, deal_type: 'rent' as 'rent' | 'sale', sub_type: 'long',
     is_exclusive: false, is_rerented: false, price: '' as string | number, commission_pct: 50, commission_total: '' as string | number,
     agent_level: user?.level || levelFor(user?.exclusive_deals || 0), recruit_pct: 0, client_src: '',
-    address: '', cadastral: '', ad_link: '', metro: '', client_name: '', client_phone: '', client_tg: '', owner_name: '', owner_phone: '',
+    address: '', cadastral: '', ad_link: '', metro: '', client_name: '', client_phone: '', client_tg: '', owner_name: '', owner_phone: '', owner_id: 0, owner_typed: false,
     rent_from: todayStr(), rent_to: '',
   });
   const [t0, setT0] = useState<{ c: number | null; o: number | null; p: number | null; comment: string }>({ c: null, o: null, p: null, comment: '' });
@@ -114,7 +115,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
         client_src: f.client_src || null,
         address: str(f.address), cadastral: str(f.cadastral), ad_link: str(f.ad_link), metro: str(f.metro),
         client_name: str(f.client_name), client_phone: str(f.client_phone), client_tg: str(f.client_tg),
-        owner_name: str(f.owner_name), owner_phone: str(f.owner_phone),
+        owner_name: str(f.owner_name), owner_phone: str(f.owner_phone), owner_id: f.owner_id || null,
         rent_from: f.deal_type === 'rent' ? f.rent_from || null : null, rent_to: f.deal_type === 'rent' ? f.rent_to || null : null,
       };
       const d = await api.deals.create(body);
@@ -230,8 +231,12 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
             <Field label="Клиент"><Input value={f.client_name} onChange={(e) => upd('client_name', e.target.value)} /></Field>
             <Field label="Телефон клиента"><Input value={f.client_phone} onChange={(e) => upd('client_phone', e.target.value)} inputMode="tel" /></Field>
             <Field label="Telegram клиента"><Input value={f.client_tg} onChange={(e) => upd('client_tg', e.target.value)} /></Field>
-            <Field label="Собственник"><Input value={f.owner_name} onChange={(e) => upd('owner_name', e.target.value)} disabled={!manual && (!pid || ro('owner_name'))} /></Field>
-            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => upd('owner_phone', e.target.value)} inputMode="tel" disabled={!manual && (!pid || ro('owner_phone'))} /></Field>
+            <Field label="Собственник"><Input value={f.owner_name} onChange={(e) => setF((x) => ({ ...x, owner_name: e.target.value, owner_id: 0, owner_typed: true }))} disabled={!manual && (!pid || ro('owner_name'))} /></Field>
+            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => setF((x) => ({ ...x, owner_phone: e.target.value, owner_id: 0, owner_typed: true }))} inputMode="tel" disabled={!manual && (!pid || ro('owner_phone'))} /></Field>
+            {f.owner_typed && !f.owner_id && (
+              <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name}
+                onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>
+            )}
           </div>
         </Card>
         <Card label="День 0" title="Оценка сделки при заключении · H2O 0–3">

@@ -2,7 +2,7 @@
 from app.models import Property
 from app.services import properties
 from app.services.errors import DomainError
-from tests.conftest import make_client_listing, make_listing, make_user
+from tests.conftest import fill_required, make_client_listing, make_listing, make_user
 
 
 def test_channel_twin_ranks_over_nearer_flat(db):
@@ -20,7 +20,7 @@ def _ready(db, agent, lid, **kw):
     properties.owner_or_agent(db, p.id, agent, True, "Гиорги", "+995 555 12 34 56")
     p.status = "media_uploaded"
     properties.upload_media(db, p.id, [("a.jpg", b"\xff\xd8jpeg")], "kitchen", agent)
-    return db.get(Property, p.id)
+    return fill_required(db, p.id)
 
 
 def _code(db, pid, agent):
@@ -115,3 +115,32 @@ def test_deal_keeps_owner_and_cadastral_on_the_object_and_contract_gets_them(db,
     c = client.get(f"/api/leads/{lead.id}/contract", headers=auth(ag)).json()
     assert c["data"]["owner_full_name"] == "Гиорги" and c["data"]["cadastral_code"] == "01.14.12.003.045"
     assert c["data"]["owner_birth_day"] == "1980-05-01" and c["data"]["start_rent"] == "2026-12-01"
+
+
+def test_owner_scopes_media_room_and_picked_owner(db, client, sent):
+    """David 2026-11-08: owners list = base (shot and sent) / unlinked (old Owner_Base); rooms tagged per photo after
+    a batch upload; a deal picks an owner from the list instead of retyping him."""
+    from app.models import Owner
+    from tests.conftest import auth
+    ag, op = make_user(db, "agent"), make_user(db, "operator")
+    old = Owner(name="Старый", phone="+995 577 00 00 01", phone_norm="577000001", notes="import:Owner_Base")
+    db.add(old)
+    db.commit()
+    p = _ready(db, ag, "ss77")  # owner from the call: on an object in work, not in the base yet
+    names = lambda scope: {o["name"] for o in client.get("/api/owners", params={"scope": scope}, headers=auth(op)).json()["items"]}
+    assert names("unlinked") == {"Старый"} and names("base") == set()
+    assert properties.missing_fields(p) == []
+    assert _code(db, p.id, ag)[0] == "ok"
+    assert names("base") == {"Гиорги"}
+
+    mid = properties.media(db, p.id)[0].id
+    r = client.patch(f"/api/properties/{p.id}/media/{mid}", json={"room": "Спальня 1"}, headers=auth(op)).json()
+    assert r == {"id": mid, "room": "Спальня 1"}
+
+    q = _ready(db, ag, "ss78", address="ул. Другая 3")
+    q.owner_id = None
+    db.commit()
+    assert "собственник" in properties.missing_fields(q)
+    r = client.patch(f"/api/properties/{q.id}", json={"owner_id": old.id}, headers=auth(ag)).json()
+    db.expire_all()
+    assert db.get(Property, q.id).owner_id == old.id, r

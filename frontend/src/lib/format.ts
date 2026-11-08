@@ -42,7 +42,7 @@ export const CR_FIELD: Record<string, string> = {
 };
 
 export const SOURCE_LABEL: Record<string, string> = {
-  ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', instagram: 'Instagram', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',
+  ss: 'ss.ge', myhome: 'myhome.ge', livo: 'livo.ge', korter: 'korter.ge', facebook: 'Facebook', instagram: 'Instagram', threads: 'Threads', telegram: 'Telegram', agency_channel: 'Канал', direct: 'Напрямую',
   referral: 'Рекомендация', import: 'Импорт', deal: 'Из сделки', other: 'Другое',
 };
 
