@@ -1,9 +1,13 @@
 """Public Facebook groups (sources.json -> facebook_groups) -> raw/facebook.json (+ photos in raw/img/).
 
-Scraped through the Apify actor thedoor~facebook-group-post-scraper (no cookies, ~$0.0015 per post + $0.005 per run).
+Scraped through the Apify actor dami_studio~facebook-groups-scraper (no cookies, $0.0007 per post + $0.002 per run;
+2026-11-08: 2x cheaper per post than thedoor's, and posts dropped by the keyword filter are free). Only posts with a
+rent word (KEYWORDS, ka/ru/en) are delivered: seekers, ads and chatter cost nothing; our skip_reason still filters the rest.
 Incremental: each run asks only for posts newer than the previous successful run (raw/facebook_state.json, +15 min
 overlap), so a run pays for new posts only; they are merged into raw/facebook_apify.json, which keeps the last
-`days_back` days. --full refetches the whole window. Token: $APIFY_TOKEN (.env) or ~/.config/apify/token.
+`days_back` days. --full refetches the whole window.
+Keys: several Apify accounts, tried in order; one out of usage (HTTP 402, free $5 a month) hands over to the next:
+$APIFY_TOKENS (comma separated), $APIFY_TOKEN (.env), ~/.config/apify/token.
 `--reuse` rebuilds raw/facebook.json from the kept dataset without paying.
 
 Usage: python fetch_facebook.py [--posts 30] [--days 7] [--only <key>,<key>] [--full | --reuse]
@@ -19,7 +23,9 @@ import httpx
 import db
 from imgutil import VIDEO_DIR, download_video, to_jpeg
 
-ACTOR = "thedoor~facebook-group-post-scraper"
+ACTOR = "dami_studio~facebook-groups-scraper"
+# the rent words the actor keeps (case-insensitive substring); posts without one are not delivered and not charged
+KEYWORDS = ["rent", "сдаю", "сдам", "сдается", "сдаётся", "сдаем", "сдаём", "аренд", "ქირავდება", "გაქირავ", "ქირით"]
 API = "https://api.apify.com/v2"
 RAW, IMG, STATE = "raw/facebook_apify.json", "raw/img", "raw/facebook_state.json"
 OVERLAP_H = 0.25  # re-ask the last 15 min: a post published while the previous run was going is not lost
@@ -67,22 +73,69 @@ def author_key(p):
     return u.get("profileUrl") or p.get("user_url") or name
 
 
-def run_actor(actor, inp):
-    """One Apify run, waited for -> dataset items. Token: $APIFY_TOKEN (also from .env) or ~/.config/apify/token."""
+class NoUsage(Exception):
+    """Every Apify key is out of usage this month."""
+
+
+def tokens():
+    """Apify keys in order, without duplicates: $APIFY_TOKENS, $APIFY_TOKEN, ~/.config/apify/token."""
     db.load_env()
-    tok = os.environ.get("APIFY_TOKEN") or open(os.path.expanduser("~/.config/apify/token")).read().strip()
-    with httpx.Client(headers={"Authorization": f"Bearer {tok}"}, timeout=60) as c:
-        run = c.post(f"{API}/acts/{actor}/runs", params={"memory": 1024}, json=inp).raise_for_status().json()["data"]
-        while run["status"] in ("READY", "RUNNING"):
-            time.sleep(5)
-            run = c.get(f"{API}/actor-runs/{run['id']}").raise_for_status().json()["data"]
-        print("apify:", actor, run["status"], f"${run.get('usageTotalUsd') or 0:.3f}", run.get("chargedEventCounts"))
-        return c.get(f"{API}/datasets/{run['defaultDatasetId']}/items", params={"clean": "true"}).raise_for_status().json()
+    out = [t.strip() for t in os.environ.get("APIFY_TOKENS", "").replace(";", ",").split(",")]
+    out.append(os.environ.get("APIFY_TOKEN", "").strip())
+    f = os.path.expanduser("~/.config/apify/token")
+    if os.path.exists(f):
+        out.append(open(f).read().strip())
+    return list(dict.fromkeys(t for t in out if t))
+
+
+def _out_of_usage(r):
+    if r.status_code == 402:
+        return True
+    try:
+        kind = (r.json().get("error") or {}).get("type") or ""
+    except ValueError:
+        return False
+    return "usage" in kind or "limit" in kind
+
+
+def run_actor(actor, inp):
+    """One Apify run, waited for -> dataset items. The first key with usage left runs it (logged as key #n, never the key)."""
+    keys = tokens()
+    if not keys:
+        raise NoUsage("no Apify key: set APIFY_TOKENS or APIFY_TOKEN")
+    for n, tok in enumerate(keys, 1):
+        with httpx.Client(headers={"Authorization": f"Bearer {tok}"}, timeout=60) as c:
+            r = c.post(f"{API}/acts/{actor}/runs", params={"memory": 1024}, json=inp)
+            if _out_of_usage(r):
+                print(f"apify: key #{n} is out of usage this month, trying the next one")
+                continue
+            run = r.raise_for_status().json()["data"]
+            while run["status"] in ("READY", "RUNNING"):
+                time.sleep(5)
+                run = c.get(f"{API}/actor-runs/{run['id']}").raise_for_status().json()["data"]
+            print(f"apify: key #{n}", actor, run["status"], f"${run.get('usageTotalUsd') or 0:.3f}", run.get("chargedEventCounts"))
+            return c.get(f"{API}/datasets/{run['defaultDatasetId']}/items", params={"clean": "true"}).raise_for_status().json()
+    raise NoUsage(f"all {len(keys)} Apify keys are out of usage this month")
+
+
+def normalize(x):
+    """A dami_studio row -> the post shape the rest of this file reads (post_id, text, media, user, group_id, ...)."""
+    media = [{"type": "Photo" if a.get("type") == "photo" else "Video" if a.get("type") == "video" else a.get("type"),
+              "uri": a.get("thumbnail") if a.get("type") == "photo" else a.get("videoUrl") or a.get("url")}
+             for a in x.get("attachments") or []]
+    u = x.get("user") or {}
+    return {"post_id": x.get("id"), "post_url": x.get("url"), "text": x.get("text") or x.get("sharedPostText") or "",
+            "media": media, "user": {"name": u.get("name"), "profileUrl": u.get("profileUrl") or (u.get("id") and f"fb-user:{u['id']}"),
+                                     "type": u.get("type")},
+            "user_name": u.get("name"), "group_id": x.get("groupId"), "creation_timestamp": x.get("timestamp"),
+            "creation_time": x.get("time")}
 
 
 def apify_run(groups, posts, hours):
-    return run_actor(ACTOR, {"url": [g["url"] for g in groups], "maxPosts": posts, "postsNewerThanHours": round(hours, 2),
-                             "sortingOrder": "newest_posts", "includeTopComment": False})
+    rows = run_actor(ACTOR, {"startUrls": [{"url": g["url"]} for g in groups], "maxPostsPerGroup": posts,
+                             "resultsLimit": min(5000, posts * len(groups)), "viewOption": "CHRONOLOGICAL",
+                             "onlyPostsNewerThan": f"{max(1, round(hours * 60))} minutes", "keywords": KEYWORDS})
+    return [normalize(x) for x in rows if x.get("recordType", "post") == "post" and x.get("id")]
 
 
 def download(post_id, urls, prefix="fb"):
