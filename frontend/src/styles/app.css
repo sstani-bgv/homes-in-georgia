@@ -515,3 +515,9 @@ html, body { overflow-x: clip; }
 .photo-strip .ph .room-pick .badge { position: static; display: inline-flex; gap: 4px; align-items: center; max-width: 100%; overflow: hidden; white-space: nowrap; }
 .photo-strip .ph .room-pick select { position: absolute; inset: 0; opacity: 0; font-size: 16px; width: 100%; cursor: pointer; }
 .photo-strip .ph .room-pick .badge.no-room { background: rgba(255,255,255,.92); color: var(--brand); }
+
+/* agent's post generator step: blocks like the agency's old generator, and the post as it will look in the channel */
+.gen-block { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.post-preview { white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.45; padding: 12px 14px; border-radius: 12px;
+  background: var(--brand-soft); border: 1px solid var(--line); }
+.gen-title { font-weight: 800; font-size: 15px; color: var(--brand); }

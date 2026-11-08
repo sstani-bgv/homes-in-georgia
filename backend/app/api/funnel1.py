@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
+from app.services.errors import forbidden
 from app.services import change_requests as CR
 from app.services import demand, matching
 from app.services import properties as P
@@ -293,9 +294,13 @@ def properties_verify(pid: int, db: Session = Depends(get_db, scope="function"),
 
 
 @router.get("/properties/{pid}/post")
-def properties_post(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
-    """The card's post generator: the channel caption built from the object, its hashtags, the channels to post to."""
-    text = P.post_text(db, get_or_404(db, Property, pid, "property"))
+def properties_post(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """The card's post generator: the channel caption built from the object, its hashtags, the channels to post to.
+    Staff, and the object's agent (he fills the generator and sees the post before sending it to moderation)."""
+    p = get_or_404(db, Property, pid, "property")
+    if user.role not in STAFF and p.agent_id != user.id:
+        raise forbidden("only the object's agent or staff")
+    text = P.post_text(db, p)
     return {"text": text, "hashtags": P.hashtags(text), "channels": list(PUBLICATION_CHANNELS)}
 
 

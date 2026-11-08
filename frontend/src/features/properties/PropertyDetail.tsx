@@ -20,7 +20,7 @@ import { OwnerSuggest } from '../../components/OwnerSuggest';
 const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
 export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Ванная', 'Балкон', 'Вид из окна', 'Подъезд'];
-const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Фото', 'Проверка', 'Публикация'];
+const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Пост и фото', 'Проверка', 'Публикация'];
 
 function stepOf(p: Property): number {
   switch (p.status) {
@@ -69,7 +69,7 @@ function useProp(id: number) {
 function OwnerPhone({ p }: { p: Property }) {
   const phone = p.owner?.phone || p.owner_phone;
   if (!phone) return <span className="muted">скрыт</span>;
-  return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{phone}</a><CopyPhone phone={phone} /></span>;
+  return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/\s/g, '')}`} style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{phone}</a><CopyPhone phone={phone} /></span>;
 }
 
 function CallStep({ p }: { p: Property }) {
@@ -176,64 +176,213 @@ function ShootStep({ p }: { p: Property }) {
   );
 }
 
-function MediaStep({ p, canEdit, onEdit }: { p: Property; canEdit: boolean; onEdit: () => void }) {
+type GenForm = {
+  is_exclusive: boolean; district: string; address: string; price: string; bedrooms: string; area: string; floor: string;
+  total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields;
+};
+const BEDROOM_CHIPS: Record<string, string> = { 0: 'Студия', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5+' };
+const AMENITY_FIXED = ['Elevator', 'Oven', 'ParkingPlace', 'Conditioner']; // backend FIXED_AMENITIES: ✖️ in a rent post when absent
+const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+const genOf = (p: Property): GenForm => ({
+  is_exclusive: !!p.is_exclusive, district: str(p.district), address: str(p.address), price: str(p.price), bedrooms: str(p.bedrooms),
+  area: str(p.area), floor: str(p.floor), total_floors: str(p.total_floors),
+  owner_name: str(p.owner?.name), owner_phone: str(p.owner?.phone), post_fields: { deal: 'Rent', ...(p.post_fields || {}) },
+});
+/** what changed in the generator since the last save, in PATCH /properties shape */
+function genDiff(a: GenForm, b: GenForm): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const num = (x: string) => (x.trim() === '' ? null : Number(x));
+  (['district', 'address'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = b[k].trim() || null; });
+  (['price', 'bedrooms', 'area', 'floor', 'total_floors'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = num(b[k]); });
+  if (a.is_exclusive !== b.is_exclusive) out.is_exclusive = b.is_exclusive;
+  if (b.owner_id && b.owner_id !== a.owner_id) out.owner_id = b.owner_id;
+  else if (a.owner_name !== b.owner_name || a.owner_phone !== b.owner_phone) { out.owner_name = b.owner_name; out.owner_phone = b.owner_phone; }
+  if (JSON.stringify(a.post_fields) !== JSON.stringify(b.post_fields)) out.post_fields = b.post_fields;
+  return out;
+}
+
+/** The caption as Telegram shows it: `[text](url)` becomes a link (notify.post_html does the same on publish). */
+const postPreview = (t: string) => t.split(/(\[[^\]]+\]\([^)\s]+\))/g).map((x, i) => {
+  const m = x.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+  return m ? <a key={i} href={m[2]} target="_blank" rel="noreferrer">{m[1]}</a> : x;
+});
+
+/** One-of tag group as chips (the old generator's buttons); a tap on the picked one clears it. */
+function Chips({ options, value, onChange }: { options: Record<string, string>; value?: string; onChange: (v?: string) => void }) {
+  return (
+    <div className="row row-wrap gap-sm">
+      {Object.entries(options).map(([v, l]) => (
+        <button key={v} type="button" className={`chip ${value === v ? 'active' : ''}`} aria-pressed={value === v}
+          onClick={() => onChange(value === v ? undefined : v)}>{value === v ? <CheckCircle2 size={14} /> : null}{l}</button>
+      ))}
+    </div>
+  );
+}
+
+/** The agent's step after the shoot: the agency's post generator («Заполни текст для публикации») on one page, in its
+ * order — place, flat, amenities, price and terms, owner — then photos and videos, then the post text it builds.
+ * Every change is saved (debounced) and the post below is rebuilt by the backend; «Отправить на модерацию» only when
+ * nothing required is missing (backend properties.missing_fields). */
+function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const { toast, set, qc } = useProp(p.id);
+  const [f, setF] = useState<GenForm>(() => genOf(p));
+  const saved = useRef<GenForm>(f);
   const fileRef = useRef<HTMLInputElement>(null);
-  const checklist = p.checklist || {};
   const media = p.media || [];
-  const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
-  // one batch, no room picked up front: the agent selects everything in the gallery, then tags rooms on the photos
-  const upload = useMutation({
-    mutationFn: (files: File[]) => api.properties.uploadMedia(p.id, files),
-    onSuccess: (r) => { set(r); toast('Файлы загружены'); },
+  const checklist = p.checklist || {};
+  const save = useMutation({
+    mutationFn: (d: Record<string, unknown>) => api.properties.update(p.id, d as Parameters<typeof api.properties.update>[1]),
+    onSuccess: (r) => set(r),
     onError: (e) => toast(errText(e), true),
   });
+  const flush = async () => {
+    const d = genDiff(saved.current, f);
+    if (!Object.keys(d).length) return;
+    saved.current = f;
+    await save.mutateAsync(d);
+  };
+  useEffect(() => {
+    if (!canEdit) return;
+    const t = setTimeout(() => { flush().catch(() => undefined); }, 700);
+    return () => clearTimeout(t);
+  }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
+  const upd = <K extends keyof GenForm>(k: K, v: GenForm[K]) => setF((x) => ({ ...x, [k]: v }));
+  const pf = f.post_fields;
+  const setPf = (k: string, v: unknown) => setF((x) => ({ ...x, post_fields: { ...x.post_fields, [k]: v === '' || v === undefined ? undefined : v } }));
+  const toggleMany = (k: 'amenities' | 'periods', a: string) => { const cur = pf[k] || []; setPf(k, cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]); };
+  const sale = pf.deal === 'Sale';
+  const one = (k: string) => POST_ONE[k][1];
+  const AMENITY_ALL = Object.keys(POST_MANY.amenities[1]);
+  const AMENITY_REST = AMENITY_ALL.filter((a) => !AMENITY_FIXED.includes(a));
+
+  const upload = useMutation({ mutationFn: (files: File[]) => api.properties.uploadMedia(p.id, files), onSuccess: (r) => { set(r); toast('Файлы загружены'); }, onError: (e) => toast(errText(e), true) });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
   const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: refresh });
   const room = useMutation({ mutationFn: ([mid, r]: [number, string | null]) => api.properties.mediaRoom(p.id, mid, r), onSuccess: refresh, onError: (e) => toast(errText(e), true) });
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
-  const submit = useMutation({ mutationFn: () => api.properties.submit(p.id), onSuccess: (r) => { set(r); toast('Отправлено оператору'); }, onError: (e) => toast(errText(e), true) });
+  const submit = useMutation({ mutationFn: async () => { await flush(); return api.properties.submit(p.id); }, onSuccess: (r) => { set(r); toast('Отправлено на модерацию'); }, onError: (e) => toast(errText(e), true) });
+  const post = useQuery({ queryKey: ['property-post', p.id], queryFn: () => api.properties.post(p.id) });
   const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
   const missing = p.missing || [];
+  const dirty = Object.keys(genDiff(saved.current, f)).length > 0 || save.isPending;
+  const ro = !canEdit;
 
   return (
-    <div className="col">
+    <div className="col gap-lg">
       {p.status === 'returned' && p.review_comment && <div className="alert alert-warn">Оператор вернул: {p.review_comment}</div>}
       {p.shoot_at && <div className="muted">Съёмка: <b>{fmtDateTime(p.shoot_at)}</b></div>}
       {p.status === 'shoot_scheduled' && <DupCheck value={p.dup_check} />}
-      {canEdit && (
-        <>
-          <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const f = Array.from(e.target.files || []); if (f.length) upload.mutate(f); e.target.value = ''; }} />
-          <Button block loading={upload.isPending} onClick={() => fileRef.current?.click()}><Upload size={16} />Загрузить фото и видео</Button>
-          <div className="muted" style={{ fontSize: 12 }}>Выберите в галерее сразу все файлы. Потом под каждым фото можно указать комнату — это необязательно.</div>
-        </>
-      )}
-      <MediaGrid p={p} onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit ? (id, r) => room.mutate([id, r]) : undefined} />
-      <div>
+      <fieldset disabled={ro} className="col gap-lg" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <div className="row row-between row-wrap gap-sm">
+          <span className="label">Заполни текст для публикации</span>
+          <Seg value={pf.deal || 'Rent'} onChange={(d) => setPf('deal', d)} options={[{ value: 'Rent', label: '🏠 Аренда' }, { value: 'Sale', label: '💼 Продажа' }]} />
+        </div>
+
+        <div className="gen-block">
+          <span className="gen-title">1 · Основное</span>
+          <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="❗️ Exclusive listing" />
+          <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
+          <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
+          <Field label="🚇 Метро"><Select value={pf.metro || ''} placeholder="—" onChange={(e) => setPf('metro', e.target.value)} options={opts(one('metro'))} /></Field>
+          <Field label="Адрес"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} /></Field>
+        </div>
+
+        <div className="gen-block">
+          <span className="gen-title">2 · Объект</span>
+          <Field label="Тип"><Chips options={one('prop_type')} value={pf.prop_type} onChange={(v) => setPf('prop_type', v)} /></Field>
+          <Field label="Спальни"><Chips options={BEDROOM_CHIPS} value={f.bedrooms} onChange={(v) => upd('bedrooms', v ?? '')} /></Field>
+          <Field label="Здание"><Chips options={one('building')} value={pf.building} onChange={(v) => setPf('building', v)} /></Field>
+          {sale && <Field label="Состояние"><Chips options={one('condition')} value={pf.condition} onChange={(v) => setPf('condition', v)} /></Field>}
+          <div className="form-grid">
+            <Field label="Площадь (м²)"><Input type="number" inputMode="decimal" value={f.area} onChange={(e) => upd('area', e.target.value)} /></Field>
+            <Field label="Этаж / Всего">
+              <div className="row gap-sm" style={{ flexWrap: 'nowrap' }}>
+                <Input type="number" inputMode="numeric" aria-label="Этаж" value={f.floor} onChange={(e) => upd('floor', e.target.value)} />
+                <span className="muted">/</span>
+                <Input type="number" inputMode="numeric" aria-label="Всего этажей" value={f.total_floors} onChange={(e) => upd('total_floors', e.target.value)} />
+              </div>
+            </Field>
+            {!sale && <Field label="Жильцы макс."><Input type="number" inputMode="numeric" min={1} value={pf.tenants ?? ''} onChange={(e) => setPf('tenants', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>}
+          </div>
+          <Field label="Дизайн"><Chips options={one('design')} value={pf.design} onChange={(v) => setPf('design', v)} /></Field>
+          <Field label="Ванные комнаты" hint="Одна — не отмечать"><Chips options={one('bathrooms')} value={pf.bathrooms} onChange={(v) => setPf('bathrooms', v)} /></Field>
+          <Field label="Отопление"><Chips options={one('heating')} value={pf.heating} onChange={(v) => setPf('heating', v)} /></Field>
+          {((sale ? [['Удобства', AMENITY_ALL]] : [['✅/✖️ в посте', AMENITY_FIXED], ['Остальные (только ✅ если есть)', AMENITY_REST]]) as [string, string[]][]).map(([label, keys]) => (
+            <Field key={label} label={label}>
+              <div className="row row-wrap gap-sm">
+                {keys.map((a) => {
+                  const on = (pf.amenities || []).includes(a);
+                  return <button key={a} type="button" className={`chip ${on ? 'active' : ''}`} aria-pressed={on} onClick={() => toggleMany('amenities', a)}>{on ? <CheckCircle2 size={14} /> : null}{POST_MANY.amenities[1][a]}</button>;
+                })}
+              </div>
+            </Field>
+          ))}
+          {!sale && <Field label="Питомцы"><Chips options={one('pets')} value={pf.pets} onChange={(v) => setPf('pets', v)} /></Field>}
+        </div>
+
+        <div className="gen-block">
+          <span className="gen-title">3 · Цена</span>
+          {sale ? <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={pf.sale_price ?? ''} onChange={(e) => setPf('sale_price', e.target.value === '' ? undefined : Number(e.target.value))} /></Field> : <>
+            <div className="form-grid">
+              <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={f.price} onChange={(e) => upd('price', e.target.value)} /></Field>
+              <Field label="Депозит ($)" hint="Пусто — равен цене, 0 — без депозита"><Input type="number" inputMode="numeric" min={0} value={pf.deposit ?? ''} onChange={(e) => setPf('deposit', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>
+            </div>
+            <Field label="Срок аренды">
+              <div className="row row-wrap gap-sm">
+                {Object.entries(POST_MANY.periods[1]).map(([a, l]) => {
+                  const on = (pf.periods || []).includes(a);
+                  return <button key={a} type="button" className={`chip ${on ? 'active' : ''}`} aria-pressed={on} onClick={() => toggleMany('periods', a)}>{on ? <CheckCircle2 size={14} /> : null}{l}</button>;
+                })}
+              </div>
+            </Field>
+          </>}
+        </div>
+
+        <div className="gen-block">
+          <span className="gen-title">4 · Команда</span>
+          <div className="muted" style={{ fontSize: 13 }}>Агент: <b>{agentLabel(p.agent)}</b> — тег агента ставится в пост сам</div>
+          <div className="form-grid">
+            <Field label="Имя собственника"><Input value={f.owner_name} onChange={(e) => setF((x) => ({ ...x, owner_name: e.target.value, owner_id: undefined }))} /></Field>
+            <Field label="Телефон собственника"><Input type="tel" value={f.owner_phone} onChange={(e) => setF((x) => ({ ...x, owner_phone: e.target.value, owner_id: undefined }))} /></Field>
+          </div>
+          {!p.owner && !f.owner_id && (f.owner_name || f.owner_phone) && (
+            <OwnerSuggest query={f.owner_phone || f.owner_name} onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} />
+          )}
+        </div>
+      </fieldset>
+
+      <div className="gen-block">
+        <span className="gen-title">Фото и видео</span>
+        {canEdit && (
+          <>
+            <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); if (fl.length) upload.mutate(fl); e.target.value = ''; }} />
+            <Button block loading={upload.isPending} onClick={() => fileRef.current?.click()}><Upload size={16} />Загрузить фото и видео</Button>
+            <div className="muted" style={{ fontSize: 12 }}>Выберите в галерее сразу все файлы. Потом под каждым фото можно указать комнату — это необязательно.</div>
+          </>
+        )}
+        <MediaGrid p={p} onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit ? (id, r) => room.mutate([id, r]) : undefined} />
         <div className="row row-between"><span className="label">Что снято</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
-        <div className="row row-wrap gap-sm mt">
+        <div className="row row-wrap gap-sm">
           {ROOMS.map((r) => {
             const on = !!checklist[r] || media.some((m) => m.room === r);
-            return (
-              <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit}
-                onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>
-                {on ? <CheckCircle2 size={14} /> : null}{r}
-              </button>
-            );
+            return <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit} onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>{on ? <CheckCircle2 size={14} /> : null}{r}</button>;
           })}
         </div>
       </div>
+
+      <div className="gen-block">
+        <div className="row row-between"><span className="gen-title">5 · Превью поста</span>{dirty && <span className="faint" style={{ fontSize: 12 }}>сохраняем…</span>}</div>
+        {post.isLoading ? <Loading /> : <div className="post-preview">{postPreview(post.data?.text || '—')}</div>}
+        <div className="muted" style={{ fontSize: 12 }}>Пост собирается из полей выше. Оператор проверит его, при необходимости поправит и опубликует.</div>
+      </div>
+
       {canEdit && (
         <>
-          {missing.length > 0 && (
-            <div className="alert alert-warn col gap-sm" style={{ alignItems: 'stretch' }}>
-              <span>Перед отправкой заполните анкету объекта: <b>{missing.join(', ')}</b></span>
-              <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={14} />Заполнить анкету</Button>
-            </div>
-          )}
-          <div className="muted" style={{ fontSize: 12 }}>После отправки фото, видео и анкета закрываются: дальше объектом занимается оператор. Если нужно что-то переснять, он вернёт объект с комментарием.</div>
-          <Button size="lg" variant="ok" disabled={!media.length || missing.length > 0} loading={submit.isPending}
-            onClick={() => { if (window.confirm('Отправить объект оператору? Фото, видео и анкету больше нельзя будет менять.')) submit.mutate(); }}>
-            <Send size={18} />Готово — отправить оператору
+          {missing.length > 0 && !dirty && <div className="alert alert-warn" style={{ display: 'block' }}>Чтобы отправить, заполните: <b>{missing.join(', ')}</b></div>}
+          {!media.length && <div className="alert alert-warn" style={{ display: 'block' }}>Загрузите фото или видео</div>}
+          <Button size="lg" variant="ok" disabled={!media.length || missing.length > 0 || dirty} loading={submit.isPending}
+            onClick={() => { if (window.confirm('Отправить объект на модерацию? Пост, фото и видео больше нельзя будет менять.')) submit.mutate(); }}>
+            <Send size={18} />Отправить на модерацию
           </Button>
         </>
       )}
@@ -796,7 +945,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   let action: React.ReactNode = null;
   if (['taken', 'call_failed'].includes(p.status)) action = canWork ? <CallStep p={p} /> : null;
   else if (p.status === 'owner_confirmed') action = canWork ? <ShootStep p={p} /> : null;
-  else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <MediaStep p={p} canEdit={canWork} onEdit={() => setEdit(true)} />;
+  else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <PostGeneratorStep key={p.id} p={p} canEdit={canWork} />;
   else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">Отправлено оператору · фото и чек-лист закрыты. Оператор проверит и опубликует, обычно до 1 часа. Если нужно что-то переснять, объект вернётся к вам с комментарием.</div>;
   else if (p.status === 'agent_marked') action = <div className="alert alert-info">Ответил агент · объект остаётся в базе с пометкой «агент»</div>;
   else if (['published', 'rented'].includes(p.status)) action = (
