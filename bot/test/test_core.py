@@ -37,7 +37,12 @@ class Base(unittest.TestCase):
     def sync(self, ok, dropped=(), full=True):
         Path(self.listings).write_text(json.dumps(ok))
         Path(self.dropped).write_text(json.dumps(list(dropped)))
-        return db.sync(self.listings, self.dropped, full=full)
+        r = db.sync(self.listings, self.dropped, full=full)
+        # agency channel posts are imported as published objects (backend app.importers.channel_objects)
+        with db.tx() as c:
+            have = {x["listing_id"] for x in c.execute("SELECT listing_id FROM properties").fetchall()}
+        self.publish_objects(*[x["id"] for x in ok if x.get("source") == "agency" and x["id"] not in have])
+        return r
 
     def publish_objects(self, *ids):
         """Parser search fixtures become client-visible only after agency publication."""
@@ -152,8 +157,11 @@ class CoreTest(Base):
 
     def test_client_catalog_requires_agency_publication(self):
         with db.tx() as c:
+            c.execute("DELETE FROM properties WHERE listing_id != 'tg1'")
+        self.assertEqual([i["id"] for i in core.published()], ["tg1"])   # the channel post, imported as an object
+        with db.tx() as c:
             c.execute("DELETE FROM properties")
-        self.assertEqual([i["id"] for i in core.published()], ["tg1"])
+        self.assertEqual(core.published(), [])   # a channel post without an object is not a catalog entry
         # Old settings and stale result cards cannot reopen the parser catalog.
         db.set_setting("client_catalog", "listings")
         self.assertIsNone(core.react(self.cl, "ss1", "like"))
@@ -167,7 +175,7 @@ class CoreTest(Base):
         self.publish_objects("ss2")
         with db.tx() as c:
             c.execute("INSERT INTO properties (listing_id, status, created_at, updated_at) VALUES ('ss1', 'taken', now(), now())")
-        self.assertEqual(sorted(i["id"] for i in core.published()), ["ss2", "tg1"])
+        self.assertEqual(sorted(i["id"] for i in core.published()), ["ss2"])   # tg1 lost its object above
         self.assertTrue(core.react(self.cl, "ss2", "like"))
         with db.tx() as c:
             c.execute("UPDATE properties SET status = 'rented' WHERE listing_id = 'ss2'")

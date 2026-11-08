@@ -75,3 +75,21 @@ def test_channel_post_is_not_similar_to_itself(db):
     post = make_client_listing(db, "tg7", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
     make_client_listing(db, "tg8", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
     assert properties.similar_in_channel(db, [post]) == {}
+
+
+def test_channel_import_makes_published_objects_with_agent_and_owner(db):
+    from app.importers import channel_objects
+    from app.models import ChannelPost, Owner, Property
+    ag = make_user(db, "agent")
+    db.add_all([ChannelPost(message_id="548267", agent_id=ag.id, is_exclusive=True),
+                Owner(name="Нана", phone="+995 599 11 22 33", phone_norm="599112233")])
+    db.commit()
+    make_listing(db, "tg548267", source="agency", text="Сдаю, 599 11 22 33",
+                 urls='["https://t.me/rent_tbilisi_ge/548267"]')
+    make_listing(db, "ss77")                                                   # an outside ad: stays an ad
+    assert channel_objects.run(db) == {"created": 1, "skipped": 0, "with_agent": 1, "with_owner": 1}
+    p = db.query(Property).one()
+    assert (p.status, p.post_message_id, p.agent_id, p.is_exclusive) == ("published", "548267", ag.id, True)
+    assert p.owner_id and p.verified_at and p.post_url == "https://t.me/rent_tbilisi_ge/548267"
+    assert channel_objects.run(db)["skipped"] == 1                            # idempotent
+    assert db.query(ChannelPost).one().property_id == p.id

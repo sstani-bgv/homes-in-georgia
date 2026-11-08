@@ -3,7 +3,7 @@ the owner's agent first in the lead hint; the full post fields of the old genera
 from app.models import Event, Owner, Property
 from app.services import inbound, leads, properties, settings, users
 from app.telegram.notify import post_html  # the real one: the `sent` fixture stubs notify.*
-from tests.conftest import auth, make_client, make_listing, make_user
+from tests.conftest import auth, make_client, make_client_listing, make_listing, make_user
 
 
 def test_agent_tag_suggestion_and_uniqueness(db, client):
@@ -90,7 +90,7 @@ def test_recommend_puts_owners_agent_first(db, client, sent):
     p = Property(status="published", agent_id=levan.id, owner_id=owner.id, district="Ваке")
     db.add(p)
     db.commit()
-    lead = leads.create_from_like(db, make_client(db).id, make_listing(db, "tg1", source="agency").id)
+    lead = leads.create_from_like(db, make_client(db).id, make_client_listing(db, "tg1").id)
     lead.property_id = p.id
     db.commit()
     rec = client.get(f"/api/leads/{lead.id}/recommend-agents", headers=auth(nino)).json()

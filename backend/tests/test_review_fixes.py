@@ -190,7 +190,7 @@ def test_listing_contacts_follow_active_lead_assignment(db, client):
     leads.assign_agent(db, lead.id, ag.id, op)
     url = f"/api/listings/{listing.id}"
     d = client.get(url, headers=auth(ag)).json()
-    assert d["property"] is None and d["contacts_visible"] and d["phones"] and d["urls"]
+    assert d["property"]["status"] == "published" and d["contacts_visible"] and d["phones"] and d["urls"]
     assert d["phones"] == ["557 686 983"] and d["telegram_contacts"] == ["contact_for_viewing"]
     hidden = client.get(url, headers=auth(other)).json()
     assert hidden["contacts_visible"] is False and "telegram_contacts" not in hidden

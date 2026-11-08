@@ -150,14 +150,15 @@ def test_like_is_a_callback_and_the_dm_link_still_makes_the_lead(db, monkeypatch
     monkeypatch.setattr(tg, "_client", lambda: http)
     monkeypatch.setenv("OPERATORS_CHAT_ID", "-100777")
     monkeypatch.setenv("OPERATOR_TG_USERNAME", "@op_nino")
-    cl, lst = make_client(db), make_listing(db)
+    cl, lst = make_client(db), make_listing(db, urls='["https://t.me/rent_tbilisi_ge/1001"]')   # a channel post
     cl.lang = "ka"                                                            # clients_lang_check allows ka (migration 0011)
     db.commit()
     assert notify.like_button({"id": cl.id, "lang": "ka"}, lst.id, "❤️") == {"text": "❤️", "callback_data": f"like:{lst.id}"}
     url = notify.operator_dm_link({"id": cl.id, "lang": "ka"}, lst.id)
     assert url.startswith("https://t.me/op_nino?text=")
     text = unquote(url.split("text=", 1)[1])
-    assert text == f"გამარჯობა! მომწონს ვარიანტი #{lst.id} · ვაკე, ул. Палиашвили 10 · $850"
+    prop = db.query(Property).filter_by(listing_id=lst.id).one()             # the channel post is a published object
+    assert text == f"გამარჯობა! მომწონს ეს ვარიანტი: {prop.post_url}"         # a published object: its post link
     from app.telegram import store
     store.remember("card", f"{cl.id}:{lst.id}", 5550001, 1)
     assert userbot.on_incoming(5550001, None, text) == "liked"
@@ -168,11 +169,8 @@ def test_like_is_a_callback_and_the_dm_link_still_makes_the_lead(db, monkeypatch
     assert (mark["chat_id"], mark["message_id"]) == ("5550001", "1") and "მომწონს ✅" in mark["reply_markup"]
 
     other = make_client(db, external_id=5550002)
-    prop = Property(listing_id=lst.id, status="published", address="x")
-    db.add(prop)
-    db.commit()
     url = notify.operator_dm_link({"id": other.id, "lang": "ru"}, lst.id)
-    assert unquote(url.split("text=", 1)[1]) == f"Здравствуйте! Мне нравится вариант #{prop.id} · Ваке, ул. Палиашвили 10 · $850"
+    assert unquote(url.split("text=", 1)[1]).endswith(prop.post_url)
     assert userbot.on_incoming(5550002, None, "Мне нравится вариант #999999 · …") == "no_lead"   # no such object: no lead
     assert userbot.on_incoming(5550002, None, f"Здравствуйте! Мне нравится вариант #{prop.id} · …") == "liked"
     assert db.query(Lead).filter_by(client_id=other.id, listing_id=lst.id).count() == 1
@@ -189,7 +187,7 @@ def test_like_sends_the_channel_post_link(db, monkeypatch):
     monkeypatch.undo()                                                        # the real notify (the autouse `sent` stubs it)
     monkeypatch.setattr(tg, "_client", lambda: FakeHttp())
     monkeypatch.setenv("OPERATOR_TG_USERNAME", "op_nino")
-    cl, lst = make_client(db, external_id=5550011), make_listing(db)
+    cl, lst = make_client(db, external_id=5550011), make_listing(db, obj=False)
     prop = Property(listing_id=lst.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/548723",
                     post_message_id="548723")
     db.add(prop)
@@ -211,8 +209,9 @@ def test_operator_intro_userbot_first_else_the_dm_link(db, monkeypatch):
     http = FakeHttp()
     monkeypatch.setattr(tg, "_client", lambda: http)
     monkeypatch.setenv("OPERATOR_TG_USERNAME", "op_nino")
-    cl, lst = make_client(db, external_id=5550021), make_listing(db)
-    db.add(Property(listing_id=lst.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/7"))
+    cl, lst = make_client(db, external_id=5550021), make_listing(db, obj=False)
+    db.add(Property(listing_id=lst.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/7",
+                    post_message_id="7"))
     db.commit()
     lead = leads.create_from_like(db, cl.id, lst.id)
     sent = []

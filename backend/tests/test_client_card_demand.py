@@ -5,7 +5,7 @@ from app.models import ClientView, Event, Lead, Property, Reaction, Search
 from app.services import clients as client_card
 from app.services import demand, leads
 from app.services.common import jdump, now, now_text
-from tests.conftest import auth, make_client, make_listing, make_user
+from tests.conftest import auth, make_client, make_client_listing, make_listing, make_user
 
 PROFILE = {"residents": "2", "budget_max": 900, "bedrooms": [2], "districts": ["Ваке"], "pets": ["cat"], "terms": ["6"]}
 FLAT = {"price_usd": 850, "bedrooms": 2, "district": "Ваке", "lat": 41.71, "lng": 44.76, "pets_allowed": None, "periods": None}
@@ -101,7 +101,7 @@ def test_timeline_merge_order_and_refusals(db, client):
     staff, agent = make_user(db, "operator", name="Нино"), make_user(db, "agent", agent_tag="Zaza")
     c = make_client(db, profile_done=1)
     c.created_at = "2026-11-01T10:00:00+00:00"
-    listing = make_listing(db, source="agency")
+    listing = make_client_listing(db)
     db.add(Event(entity="client", entity_id=str(c.id), action="profile_saved", actor_label="client",
                  data={"profile": PROFILE}, at=now() - timedelta(hours=3)))
     s = Search(client_id=c.id, results=1, at=(now() - timedelta(hours=2)).isoformat(timespec="seconds"))

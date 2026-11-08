@@ -201,8 +201,10 @@ def listing(lid):
 
 
 # Client access never depends on a setting: moderation of a scraped listing is not agency publication.
-# Fast track (stage 10): the owner agreed to show the object to our clients before the shoot (backend leads.client_listing_eligible).
-CLIENT_ELIGIBLE = "l.status = 'published' AND (l.source = 'agency' OR EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR (p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented')))))"
+# Clients get objects only (2026-11-08): published ones (the verified base, incl. agency channel posts imported by
+# app.importers.channel_objects) and fast-tracked ones (stage 10: the owner agreed to show it before the shoot).
+# Same rule as backend leads.client_listing_eligible.
+CLIENT_ELIGIBLE = "l.status = 'published' AND (EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR (p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented')))))"
 
 
 def client_listing(lid):
@@ -211,7 +213,7 @@ def client_listing(lid):
 
 
 def published():
-    """Agency channel listings and objects published through the validated property workflow only."""
+    """Listings of published (or fast-tracked) objects only."""
     with db.tx() as c:
         return [db.row(r) for r in c.execute(f"SELECT l.* FROM listings l WHERE {CLIENT_ELIGIBLE}")]
 

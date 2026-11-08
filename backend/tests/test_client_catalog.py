@@ -40,6 +40,7 @@ def test_old_reaction_or_lead_cannot_bypass_catalog(db, old_status):
     lead = leads.create_from_like(db, customer.id, listing.id)
     lead.status = old_status
     listing.source = "myhome.ge"  # old broad-catalog record, no validated property
+    db.query(Property).filter_by(listing_id=listing.id).delete()
     db.add(Setting(key="client_catalog", value="listings"))
     db.commit()
     with pytest.raises(DomainError) as error:

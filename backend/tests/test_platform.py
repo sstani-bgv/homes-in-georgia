@@ -231,10 +231,10 @@ def test_reports_counters_and_texts(db, sent):
 
 def test_ics_and_dashboard(db, client, sent):
     from app.services import ics, leads
-    from tests.conftest import make_client, make_listing
+    from tests.conftest import make_client, make_client_listing
     op, ag = make_user(db, "operator"), make_user(db, "agent")
     c = make_client(db)
-    lead = leads.create_from_like(db, c.id, make_listing(db, source="agency").id)
+    lead = leads.create_from_like(db, c.id, make_client_listing(db).id)
     leads.assign_agent(db, lead.id, ag.id, op)
     leads.add_slots(db, lead.id, [datetime(2030, 5, 1, 12, 0)], ag)
     from app.models import LeadSlot

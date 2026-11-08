@@ -122,8 +122,14 @@ def make_listing(db, lid="ss1001", **kw):
     return x
 
 
-def make_client_listing(db, lid="tg1001", **kw):
-    return make_listing(db, lid, **{"source": "agency", **kw})
+def make_client_listing(db, lid="tg1001", obj=True, **kw):
+    """An agency channel post imported as a published object (app.importers.channel_objects): what clients may get.
+    obj=False: the bare post (the test makes its own object)."""
+    from app.importers import channel_objects
+    x = make_listing(db, lid, **{"source": "agency", **kw})
+    if obj:
+        channel_objects.run(db)
+    return x
 
 
 @pytest.fixture

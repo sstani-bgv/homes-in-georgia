@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import update
 
 from app import worker
-from app.models import Deal, Job, Lead, LeadEvent, LeadSlot
+from app.models import Deal, Job, Lead, LeadEvent, LeadSlot, Property
 from app.services import jobs, leads
 from app.services.errors import DomainError
 from tests.conftest import auth, make_client, make_client_listing as make_listing, make_user
@@ -85,7 +85,9 @@ def test_lead_journey_end_to_end(db, client, sent):
     r = client.post(f"/api/leads/{lead.id}/outcome", json={"outcome": "rented"}, headers=auth(georgiy))
     assert r.json()["status"] == "deal_pending" and r.json()["client_outcome"] == "rented"
 
-    # C9b: deal form → pending; B6: operator confirms → rented, #Rented, T14 + contract jobs
+    # C9b: deal form → pending; B6: operator confirms → rented, T14 + contract jobs
+    db.get(Property, lead.property_id).is_exclusive = True  # the deal takes «exclusive» from the object
+    db.commit()
     rent_from = date.today() + timedelta(days=2)
     r = client.post("/api/deals", headers=auth(georgiy), json={
         "lead_id": lead.id, "price": 850, "commission_pct": 50, "is_exclusive": True, "cadastral": "01.14.12.003.045",
