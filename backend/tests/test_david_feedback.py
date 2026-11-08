@@ -144,3 +144,21 @@ def test_owner_scopes_media_room_and_picked_owner(db, client, sent):
     r = client.patch(f"/api/properties/{q.id}", json={"owner_id": old.id}, headers=auth(ag)).json()
     db.expire_all()
     assert db.get(Property, q.id).owner_id == old.id, r
+
+
+def test_take_prefills_the_generator_from_the_ad(db):
+    """David 2026-11-08: what the ad knows is already picked in the agent's generator; the agent's own picks stay."""
+    import json
+    ag = make_user(db, "agent")
+    make_listing(db, "mh77", lat=41.7036, lng=44.7898, details=json.dumps({
+        "floors": 12, "property": "apartment", "building": "new", "heating": "central", "pets": "not_allowed",
+        "yes": ["elevator", "wifi"], "terms": [12], "tenants": "1-3"}))
+    p = properties.take(db, "mh77", ag)
+    pf = p.post_fields
+    assert p.total_floors == 12 and pf["metro"] == "Rustaveli" and pf["building"] == "NewBuilding"
+    assert pf["amenities"] == ["WiFi", "Elevator"] and pf["periods"] == ["12Month"] and pf["tenants"] == 3
+    p.post_fields = {**pf, "pets": "Allowed", "metro": None}
+    from app.models import Listing
+    assert properties.prefill(p, db.get(Listing, "mh77"))
+    assert p.post_fields["pets"] == "Allowed" and p.post_fields["metro"] == "Rustaveli"
+    assert properties.nearest_metro(41.75, 44.87) is None  # 6 km from any station: no metro rather than a wrong one

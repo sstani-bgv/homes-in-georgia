@@ -316,6 +316,7 @@ def take(db: Session, listing_id: str | None, agent: User, manual_fields: dict |
                      source_external_id=listing.id, address=listing.address, district=listing.district,
                      price=listing.price_usd, bedrooms=listing.bedrooms, area=listing.area, floor=listing.floor,
                      description=listing.description_ru, ai_flags=listing_flags(listing))
+        prefill(p, listing)
     else:
         f = manual_fields or {}
         p = Property(source_type=f.get("source_type") or "direct")
@@ -952,6 +953,90 @@ def clean_post_fields(v) -> dict:
             raise DomainError("bad_post_fields", f"Поля поста: недопустимое значение {k}={x}")
         out[k] = x
     return out
+
+
+# ---------------------------------------------------------------- generator prefill from the parsed ad (David 2026-11-08)
+
+# Tbilisi metro stations (OpenStreetMap railway=station subway, 2026-11-08) -> the generator's metro tag
+METRO = {"LibertySquare": (41.69452, 44.80056), "Rustaveli": (41.7035, 44.78965), "Marjanishvili": (41.70959, 44.79687),
+         "StationSquare": (41.72256, 44.7971), "Tsereteli": (41.72641, 44.78766), "Gotsiridze": (41.74294, 44.78405),
+         "Nadzaladevi": (41.7334, 44.79643), "Didube": (41.74945, 44.77999), "Grmagele": (41.76497, 44.78996),
+         "Guramishvili": (41.77576, 44.79558), "Sarajishvili": (41.78406, 44.79992), "AhmeteliTheatre": (41.79106, 44.815),
+         "STUniversity": (41.72035, 44.77664), "VazhaPshavela": (41.72403, 44.73085), "Delisi": (41.72549, 44.74534),
+         "TCUniversity": (41.72283, 44.71851), "MCUniversity": (41.72728, 44.76384), "AvlabariMetro": (41.69226, 44.81584),
+         "IsaniMetro": (41.68663, 44.83996), "300Aragveli": (41.68799, 44.82623), "SamgoriMetro": (41.68552, 44.85448),
+         "Varketili": (41.6919, 44.87088)}
+METRO_NAME = {"Liberty Square": "LibertySquare", "Rustaveli": "Rustaveli", "Marjanishvili": "Marjanishvili",
+              "Station Square": "StationSquare", "Tsereteli": "Tsereteli", "Gotsiridze": "Gotsiridze",
+              "Nadzaladevi": "Nadzaladevi", "Didube": "Didube", "Grmagele": "Grmagele", "Ghrmaghele": "Grmagele",
+              "Guramishvili": "Guramishvili", "Sarajishvili": "Sarajishvili", "Akhmeteli Theatre": "AhmeteliTheatre",
+              "Technical University": "STUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
+              "State University": "TCUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
+              "Isani": "IsaniMetro", "300 Aragveli": "300Aragveli", "Samgori": "SamgoriMetro", "Varketili": "Varketili"}
+METRO_RADIUS_M = 1500  # farther than that the post says no metro rather than a wrong one
+_P_TYPE = {"apartment": "Apartment", "house": "House", "commercial": "Commercial"}
+_P_BUILDING = {"new": "NewBuilding", "old": "OldBuilding", "historical": "HistoricalBuilding"}
+_P_DESIGN = {"new": "New", "mixed": "Mixed", "old": "Old", "retro": "Retro", "needs_repair": "UnderRepair"}
+_P_HEATING = {"central": "CentralHeating", "gas": "GasHeating", "electric": "ElectricalHeating"}
+_P_PETS = {"allowed": "Allowed", "not_allowed": "NotAllowed", "by_agreement": "ByAgreement"}
+_P_AMENITY = {"balcony": "Balcony", "terrace": "Terrace", "courtyard": "Courtyard", "wifi": "WiFi", "tv": "TV",
+              "dishwasher": "Dishwasher", "stove": "Stove", "microwave": "Microwave", "washing_machine": "WashingMachine",
+              "vacuum": "VacuumCleaner", "fireplace": "Fireplace", "elevator": "Elevator", "oven": "Oven",
+              "parking": "ParkingPlace", "conditioner": "Conditioner"}
+
+
+def _int(v) -> int | None:
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def nearest_metro(lat: float | None, lng: float | None) -> str | None:
+    if lat is None or lng is None:
+        return None
+    d, tag = min((111_000 * math.hypot(lat - a, (lng - b) * 0.75), t) for t, (a, b) in METRO.items())
+    return tag if d <= METRO_RADIUS_M else None
+
+
+def listing_prefill(listing: Listing) -> tuple[dict, dict]:
+    """What the parsed ad already knows, as (card fields, post_fields) for the agent's generator: total floors, type,
+    building, design, bathrooms, heating, amenities, pets, tenants, terms, deposit, metro (named in the ad, else the
+    nearest station by the pin)."""
+    d = jload(listing.details, {}) or {}
+    card = {"total_floors": _int(d.get("floors"))}
+    yes = [_P_AMENITY[a] for a in d.get("yes") or [] if a in _P_AMENITY]
+    yes += {"bath": ["Bath"], "shower": ["Shower"], "both": ["Bath", "Shower"]}.get(d.get("bath"), [])
+    baths = _int(d.get("bathrooms"))
+    tenants = re.findall(r"\d+", str(d.get("tenants") or ""))
+    terms = [f"{m}Month" for m in d.get("terms") or [] if isinstance(m, int) and f"{m}Month" in POST_MANY["periods"]]
+    pf = {"prop_type": _P_TYPE.get(d.get("property")), "building": _P_BUILDING.get(d.get("building")),
+          "design": _P_DESIGN.get(d.get("condition")), "heating": _P_HEATING.get(d.get("heating")),
+          "pets": _P_PETS.get(d.get("pets")),
+          "bathrooms": f"{min(baths, 4)}Bathroom" if baths and baths >= 2 else None,
+          "metro": METRO_NAME.get(d.get("metro_en") or "") or nearest_metro(listing.lat, listing.lng),
+          "amenities": yes, "periods": terms,
+          "tenants": int(tenants[-1]) if tenants else None, "deposit": _int(d.get("deposit_usd"))}
+    return {k: v for k, v in card.items() if v}, clean_post_fields({k: v for k, v in pf.items() if v not in (None, [])})
+
+
+def prefill(p: Property, listing: Listing | None) -> bool:
+    """Fill the object's EMPTY generator fields from its ad; what the agent already picked is never touched."""
+    if listing is None:
+        return False
+    card, pf = listing_prefill(listing)
+    changed = False
+    for k, v in card.items():
+        if getattr(p, k) in (None, ""):
+            setattr(p, k, v)
+            changed = True
+    cur = dict(p.post_fields or {})
+    for k, v in pf.items():
+        if cur.get(k) in (None, "", []):
+            cur[k], changed = v, True
+    if changed:
+        p.post_fields = cur
+    return changed
 
 
 def maps_url(db: Session, p: Property) -> str | None:

@@ -47,6 +47,7 @@ def run(db: Session) -> dict:
                      post_url=url, post_message_id=mid, published_at=t, verified_at=t,
                      agent_id=post.agent_id if post else None, owner_id=owner.id if owner else None,
                      is_exclusive=bool(post and post.is_exclusive))
+        P.prefill(p, l)
         db.add(p)
         db.flush()
         P.link_listing(db, p, l)
