@@ -47,6 +47,8 @@ else echo "instagram: fetched < ${IG_EVERY_MIN:-60} min ago, skipping Apify"; fi
 # cached for VIDEO_RETRY_DAYS and keep the "🎥 Видео" button (YouTube may block server IPs)
 "$PY" fetch_videos.py || echo "fetch_videos failed, listings keep their video links"
 "$PY" db.py sync || { echo "sync failed"; exit 1; }
+# new agency channel posts -> published objects: clients get objects only (backend app.importers.channel_objects)
+(cd ../backend && "$PY" -m app.importers.channel_objects) || echo "channel_objects failed, new posts wait for the next run"
 # local photo/text vectors for search_mode=hybrid (only new listings, ~0.1 s per photo); a failure keeps the old ones
 "$PY" embed.py || echo "embed failed, keeping old data/vectors.npz"
 echo "=== $(date) refresh done"
