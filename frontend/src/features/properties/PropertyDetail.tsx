@@ -190,6 +190,9 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
   const submit = useMutation({ mutationFn: () => api.properties.submit(p.id), onSuccess: (r) => { set(r); toast('Отправлено оператору'); }, onError: (e) => toast(errText(e), true) });
   const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
+  // mirrors backend properties.REQUIRED_FIELDS: the card goes to the operator only complete
+  const missing = ([['address', 'адрес'], ['price', 'цена'], ['bedrooms', 'спальни'], ['area', 'площадь'], ['floor', 'этаж']] as const)
+    .filter(([f]) => p[f] == null || p[f] === '').map(([, l]) => l);
 
   return (
     <div className="col">
@@ -221,7 +224,8 @@ function MediaStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
       {canEdit && (
         <>
           <div className="muted" style={{ fontSize: 12 }}>После отправки фото, видео и чек-лист закрываются: дальше объектом занимается оператор. Если нужно что-то переснять, он вернёт объект с комментарием.</div>
-          <Button size="lg" variant="ok" disabled={!media.length} loading={submit.isPending}
+          {missing.length > 0 && <div className="alert alert-warn">Заполните параметры объекта («Править» в блоке «Параметры»): {missing.join(', ')}</div>}
+          <Button size="lg" variant="ok" disabled={!media.length || missing.length > 0} loading={submit.isPending}
             onClick={() => { if (window.confirm('Отправить объект оператору? Фото, видео и чек-лист больше нельзя будет менять.')) submit.mutate(); }}>
             <Send size={18} />Готово — отправить оператору
           </Button>

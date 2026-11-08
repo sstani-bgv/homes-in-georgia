@@ -224,9 +224,12 @@ def _near(a: Listing, b: Listing) -> float:
     return 111_000 * math.hypot(a.lat - b.lat, (a.lng - b.lng) * 0.75)
 
 
-def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60) -> dict[str, list[dict]]:
+def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60,
+                       twin_radius: float = 1500) -> dict[str, list[dict]]:
     """Agency-channel flats in the same building with close parameters (bedrooms ±1, area ±35%), for the agent to
-    compare by eye. Not a dup verdict: two flats in one house look alike on paper (Uznadze 4: 1st vs 4th floor)."""
+    compare by eye. Not a dup verdict: two flats in one house look alike on paper (Uznadze 4: 1st vs 4th floor).
+    A «twin» (same bedrooms and floor, area ±10%) counts up to twin_radius and ranks first: channel pins can be off by a
+    kilometre (8/10 Shroshi geocoded 1 km away while 1 Shroshi, 5th floor, sat 51 m from the 11th-floor ad)."""
     rows = [r for r in rows if r.lat is not None and r.lng is not None and not listing_flags(r)["duplicate"]]
     if not rows:
         return {}
@@ -238,10 +241,15 @@ def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60) -> 
             return False
         return not (l.area and a.area and abs(l.area - a.area) > 0.35 * max(l.area, a.area))
 
+    def twin(l: Listing, a: Listing) -> bool:
+        return (l.bedrooms is not None and l.bedrooms == a.bedrooms and l.floor is not None and l.floor == a.floor
+                and bool(l.area and a.area) and abs(l.area - a.area) <= 0.10 * max(l.area, a.area))
+
     out = {}
     for l in rows:
-        near = sorted(((_near(l, a), a) for a in agency if close(l, a)), key=lambda x: x[0])
-        near = [(d, a) for d, a in near if d <= radius][:2]
+        cand = [(not twin(l, a), _near(l, a), a) for a in agency if close(l, a)]
+        near = sorted(((t, d, a) for t, d, a in cand if d <= (radius if t else twin_radius)), key=lambda x: x[:2])
+        near = [(d, a) for _, d, a in near[:2]]
         if near:
             out[l.id] = [{"id": a.id, "url": (jload(a.urls, []) or [None])[0], "address": a.address,
                           "photo": f"/api/listing-photos/{a.id}/0" if jload(a.photos, []) else None,
@@ -793,12 +801,45 @@ def set_checklist(db: Session, pid: int, checklist: dict, actor: User) -> Proper
     return p
 
 
+REQUIRED_FIELDS = {"address": "адрес", "price": "цена", "bedrooms": "спальни", "area": "площадь", "floor": "этаж"}
+
+
+def missing_fields(p: Property) -> list[str]:
+    """Card parameters the agent must fill before the operator sees the object (one pass, one moderation)."""
+    return [label for f, label in REQUIRED_FIELDS.items() if getattr(p, f) in (None, "")]
+
+
+def _same_object(db: Session, p: Property) -> Property | None:
+    """Another live object with the same cadastral code, source link, or owner phone + address. Address alone is not
+    enough: one building holds many flats (that case stays a duplicate_of hint for the operator)."""
+    q = select(Property).where(Property.id != p.id, Property.status != "archived")
+    if p.cadastral_code and p.cadastral_code.strip():
+        if hit := db.scalars(q.where(Property.cadastral_code == p.cadastral_code.strip())).first():
+            return hit
+    if p.source_url:
+        if hit := db.scalars(q.where(Property.source_url == p.source_url)).first():
+            return hit
+    owner = db.get(Owner, p.owner_id) if p.owner_id else None
+    if owner and owner.phone and p.address:
+        for other in db.scalars(q.where(Property.owner_id.isnot(None), Property.address.isnot(None))):
+            o = db.get(Owner, other.owner_id)
+            if p.cadastral_code and other.cadastral_code:
+                continue  # both have codes and they differ (checked above): the owner's second flat in the house
+            if o and phone_match(owner.phone, o.phone) and address_match(p.address, other.address):
+                return other
+    return None
+
+
 def submit_for_review(db: Session, pid: int, agent: User) -> Property:
     p = _prop(db, pid, lock=True)
     _require_owner(p, agent)
     _require_status(p, "media_uploaded", "returned", "shoot_scheduled")
     if not db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id)):
         raise DomainError("no_media", "upload photos or videos first")
+    if missing := missing_fields(p):
+        raise DomainError("missing_fields", "Заполните перед отправкой: " + ", ".join(missing))
+    if other := _same_object(db, p):
+        raise DomainError("object_exists", f"Этот объект уже есть в базе: #{other.id} {other.address or ''}".strip())
     _status(db, p, "review", agent)
     db.commit()
     _notify("property_review_request", p)
