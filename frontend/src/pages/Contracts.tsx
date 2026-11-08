@@ -128,6 +128,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     setType(type);
     const filled = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '')) as Partial<CxData>;
     if (filled.start_rent && filled.end_rent && !filled.rent_duration_months) filled.rent_duration_months = monthsBetween(filled.start_rent, filled.end_rent);
+    if (filled.with_pets && !filled.pet_deposit && Number(filled.deposit_usd) > 0) filled.pet_deposit = String(Math.round(Number(filled.deposit_usd) * 0.5));
     setD((cur) => ({ ...EMPTY, timestamp: cur.timestamp || todayStr(), ...filled }));
     setDepTouched(false);
     setPrefilled({ key, text });
@@ -263,7 +264,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         {prefilled && <div className="alert alert-info mt">{prefilled.text} Проверьте и дополните поля (личные номера сторон вводятся вручную).</div>}
         {deal.error && <div className="alert alert-warn mt">Не удалось загрузить сделку #{dealId}: {errText(deal.error)}</div>}
         {leadC.error && <div className="alert alert-warn mt">Не удалось загрузить заявку #{leadId}: {errText(leadC.error)}</div>}
-        {step < 4 && (
+        {prefilled && step < 4 && <Button size="sm" variant="ghost" className="no-print" onClick={() => setPrefilled(null)}>Подставить из другой заявки</Button>}
+        {step < 4 && !prefilled && (
           <Card label="Заявка или сделка" title="Подставить данные" className="mt">
             {itemsOf(pickable.data).length === 0 ? (
               <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра. Заполните договор вручную.'}</div>

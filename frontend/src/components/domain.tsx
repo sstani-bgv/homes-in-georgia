@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link, useLocation } from 'react-router-dom';
 import { Bot, Clock, Copy, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide-react';
 import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
@@ -113,11 +114,17 @@ export function SimilarInChannel({ listing, similar }: { listing: Listing & { fl
 
 export function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['listing', id], queryFn: () => api.listings.get(id) });
-  const l = data as (Listing & { urls?: string[]; dup_sources?: string[]; phones?: string[]; telegram_contacts?: string[]; floor?: number | null; description?: string | null; contacts_visible?: boolean; owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } }) | undefined;
+  const loc = useLocation();
+  const l = data as (Listing & { property?: { id: number; status?: string } | null; urls?: string[]; dup_sources?: string[]; phones?: string[]; telegram_contacts?: string[]; floor?: number | null; description?: string | null; contacts_visible?: boolean; owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } }) | undefined;
   return (
     <Modal open onClose={onClose} title={l?.address || 'Объявление'}>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : l && (
         <div className="col gap-lg">
+          {l.property && (
+            <Link className="btn btn-secondary" to={`${loc.pathname.startsWith('/m/') ? '/m/properties' : '/objects'}/${l.property.id}`} onClick={onClose}>
+              <ExternalLink size={16} />Открыть объект #{l.property.id}
+            </Link>
+          )}
           {!!l.photos?.length && (
             <div className="col gap-sm">
               <div className="row" style={{ overflowX: 'auto', gap: 8, scrollSnapType: 'x mandatory', scrollbarWidth: 'none', paddingBottom: 2 }}>

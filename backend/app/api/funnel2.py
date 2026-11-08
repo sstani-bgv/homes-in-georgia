@@ -88,6 +88,13 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
         "apartment_area": _num(src.area) if src and src.area else "",
         "sale_price" if sale else "price_usd": _num(price),
     }
+    # everything the deal form already has goes into the contract (David 2026-11-08)
+    for key, v in (("owner_birth_day", deal and deal.owner_birth), ("client_birth_day", deal and deal.client_birth)):
+        if v:
+            data[key] = v.isoformat()
+    pets = ((client.get("profile") or {}).get("pets") or "none") if isinstance(client, dict) else "none"
+    if not sale and pets not in ("none", "", None):
+        data["with_pets"] = True
     if not sale:
         data["deposit_usd"] = data["price_usd"]
         if deal and deal.rent_from:

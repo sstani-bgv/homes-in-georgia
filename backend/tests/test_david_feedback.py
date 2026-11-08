@@ -93,3 +93,25 @@ def test_channel_import_makes_published_objects_with_agent_and_owner(db):
     assert p.owner_id and p.verified_at and p.post_url == "https://t.me/rent_tbilisi_ge/548267"
     assert channel_objects.run(db)["skipped"] == 1                            # idempotent
     assert db.query(ChannelPost).one().property_id == p.id
+
+
+def test_deal_keeps_owner_and_cadastral_on_the_object_and_contract_gets_them(db, client):
+    from app.models import Property
+    from app.services import leads
+    from tests.conftest import auth, make_client
+    op, ag = make_user(db, "operator"), make_user(db, "agent")
+    lead = leads.create_from_like(db, make_client(db).id, make_client_listing(db).id)
+    leads.assign_agent(db, lead.id, ag.id, op)
+    lead.status = "time_chosen"
+    db.commit()
+    r = client.post("/api/deals", headers=auth(ag), json={
+        "lead_id": lead.id, "property_id": lead.property_id, "price": 850, "owner_name": "Гиорги",
+        "owner_phone": "+995 555 12 34 56", "cadastral": "01.14.12.003.045", "owner_birth": "1980-05-01",
+        "rent_from": "2026-12-01", "rent_to": "2027-12-01"})
+    assert r.status_code == 200, r.text
+    p = db.get(Property, lead.property_id)
+    db.refresh(p)
+    assert p.owner_id and p.cadastral_code == "01.14.12.003.045"                # kept for the next deal
+    c = client.get(f"/api/leads/{lead.id}/contract", headers=auth(ag)).json()
+    assert c["data"]["owner_full_name"] == "Гиорги" and c["data"]["cadastral_code"] == "01.14.12.003.045"
+    assert c["data"]["owner_birth_day"] == "1980-05-01" and c["data"]["start_rent"] == "2026-12-01"

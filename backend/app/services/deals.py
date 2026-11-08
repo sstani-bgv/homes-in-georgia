@@ -137,6 +137,11 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     if data.get("property_id"):
         p = db.get(Property, int(data["property_id"]))
         if p:  # stage 7: the object's data win over the form (read-only there; changed via the object's requests)
+            # what the object lacks (channel posts carry no owner or cadastral code) is kept from the deal form
+            if not p.owner_id and (actor or agent) and (data.get("owner_name") or data.get("owner_phone")):
+                properties._set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor or agent)
+            if not p.cadastral_code and (data.get("cadastral") or "").strip():
+                p.cadastral_code = data["cadastral"].strip()
             data.update(properties.deal_fields(db, p, actor, data.get("deal_type") or "rent"))
     if actor is not None and actor.role not in STAFF:  # payout inputs an agent must not set for themselves
         data.pop("agent_level", None)

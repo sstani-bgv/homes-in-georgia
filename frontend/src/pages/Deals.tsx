@@ -83,7 +83,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
         ['Аренда', d.rent_from ? `${fmtDate(d.rent_from)} — ${fmtDate(d.rent_to)}` : '—'], ['День 14', d.t14_date ? `${fmtDate(d.t14_date)} · ${d.t14_status || ''}` : '—'],
         ['Создана', fmtDateTime(d.created_at)], ['Заявка', d.lead_id ? `#${d.lead_id}` : '—'],
       ]} />
-      <Link to={`${loc.pathname.startsWith('/m/') ? '/m' : ''}/contracts?deal_id=${d.id}`} className="btn btn-secondary"><FileText size={16} />Подготовить договор</Link>
+      <Link to={`${loc.pathname.startsWith('/m/') ? '/m' : ''}/contracts?${d.lead_id ? `lead_id=${d.lead_id}` : `deal_id=${d.id}`}`} className="btn btn-secondary"><FileText size={16} />Подготовить договор</Link>
       {isStaff && d.status === 'pending' && (
         <div className="row row-wrap">
           <Button variant="ok" loading={confirm.isPending} disabled={!!d.property?.needs_check} onClick={() => confirm.mutate()}><CheckCircle2 size={16} />Подтвердить сделку</Button>
