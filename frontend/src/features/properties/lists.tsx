@@ -11,6 +11,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
+import { ListingsMap } from './ListingsMap';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, ago, bedroomsLabel, demandLabel, fmtDateTime, money } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
@@ -19,10 +20,12 @@ const sourceName = (s: string) => { const [k, ...rest] = s.split(':'); return PR
 const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
 
 const PAGE = 50;
+const MAP_LIMIT = 500;  // ponytail: the map loads the first 500 filtered ads; a bbox query when the feed grows past it
 
 export function NewListings({ base = '' }: { base?: string }) {
   const [f, setF0] = useState<ListingFilter>({ q: '', flag: '' });
   const [limit, setLimit] = useState(PAGE);
+  const [view, setView] = useState<'list' | 'map'>('list');
   const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
@@ -32,7 +35,7 @@ export function NewListings({ base = '' }: { base?: string }) {
   const toast = useToast();
   const navigate = useNavigate();
   const [peek, setPeek] = useState<{ id: number; listing: Listing; reasons?: string[] } | null>(null);
-  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, limit], queryFn: () => api.listings.new(f, limit), placeholderData: (p) => p });
+  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, view === 'map' ? MAP_LIMIT : limit], queryFn: () => api.listings.new(f, view === 'map' ? MAP_LIMIT : limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
   const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q' && k !== 'known');
@@ -64,49 +67,7 @@ export function NewListings({ base = '' }: { base?: string }) {
     onError: (e) => toast(errText(e), true),
   });
   const items = itemsOf(data);
-
-  return (
-    <>
-      {peek && <PropertyModal id={peek.id} listing={peek.listing} reasons={peek.reasons} base={base} onClose={() => setPeek(null)} />}
-      <Modal open={!!agentFor} onClose={() => setAgentFor(null)} title="Это агент">
-        <form className="col gap-lg" onSubmit={(e) => { e.preventDefault(); markAgent.mutate(); }}>
-          <Field label="Имя"><input className="input" value={agentC.owner_name} onChange={(e) => setAgentC((c) => ({ ...c, owner_name: e.target.value }))} autoFocus /></Field>
-          <Field label="Телефон" hint="Номер попадёт в базу агентов: его объявления дальше будут помечаться автоматически">
-            <input className="input" type="tel" value={agentC.owner_phone} onChange={(e) => setAgentC((c) => ({ ...c, owner_phone: e.target.value }))} />
-          </Field>
-          <Button type="submit" block loading={markAgent.isPending} disabled={!agentC.owner_name.trim() && !agentC.owner_phone.trim()}>Сохранить</Button>
-        </form>
-      </Modal>
-      <div className="row row-wrap" style={{ marginBottom: 14 }}>
-        <div className="input-icon grow" style={{ minWidth: 200, maxWidth: 380 }}>
-          <Search size={16} />
-          <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
-        </div>
-        <Seg value={f.flag || ''} onChange={set('flag')} options={[
-          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
-        ]} />
-      </div>
-      <div className="row row-wrap gap-sm" style={{ marginBottom: 14 }}>
-        <Select aria-label="Источник" value={f.source || ''} onChange={(e) => set('source')(e.target.value)} placeholder="Все источники" options={opts(facets?.sources, sourceName)} style={{ maxWidth: 260 }} />
-        <Select aria-label="Район" value={f.district || ''} onChange={(e) => set('district')(e.target.value)} placeholder="Все районы" options={opts(facets?.districts)} style={{ maxWidth: 200 }} />
-        <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое метро" options={opts(facets?.metros)} style={{ maxWidth: 200 }} />
-        <input className="input" type="number" inputMode="numeric" min={0} placeholder="Цена от $" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} style={{ width: 110 }} />
-        <input className="input" type="number" inputMode="numeric" min={0} placeholder="до $" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} style={{ width: 90 }} />
-        <div className="row gap-sm" role="group" aria-label="Спальни">
-          {BEDS.map((b) => <Button key={b.value} size="sm" variant={beds.has(b.value) ? 'primary' : 'secondary'} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</Button>)}
-        </div>
-        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить</Button>}
-        {(!!data?.known_total || f.known) && (
-          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
-            Уже в базе ({data?.known_total ?? 0})
-          </Button>
-        )}
-      </div>
-      {f.known && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{KNOWN_HINT}</div>}
-      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
-      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {items.map((l) => {
+  const card = (l: Listing) => {
             const lockedByOther = !!l.taken_by && l.taken_by.id !== user?.id;
             const chips = (l.known_object || !!l.matches?.length) && (
               <>
@@ -139,10 +100,56 @@ export function NewListings({ base = '' }: { base?: string }) {
                   </div>
                 } />
             );
-          })}
+  };
+
+  return (
+    <>
+      {peek && <PropertyModal id={peek.id} listing={peek.listing} reasons={peek.reasons} base={base} onClose={() => setPeek(null)} />}
+      <Modal open={!!agentFor} onClose={() => setAgentFor(null)} title="Это агент">
+        <form className="col gap-lg" onSubmit={(e) => { e.preventDefault(); markAgent.mutate(); }}>
+          <Field label="Имя"><input className="input" value={agentC.owner_name} onChange={(e) => setAgentC((c) => ({ ...c, owner_name: e.target.value }))} autoFocus /></Field>
+          <Field label="Телефон" hint="Номер попадёт в базу агентов: его объявления дальше будут помечаться автоматически">
+            <input className="input" type="tel" value={agentC.owner_phone} onChange={(e) => setAgentC((c) => ({ ...c, owner_phone: e.target.value }))} />
+          </Field>
+          <Button type="submit" block loading={markAgent.isPending} disabled={!agentC.owner_name.trim() && !agentC.owner_phone.trim()}>Сохранить</Button>
+        </form>
+      </Modal>
+      <div className="row row-wrap" style={{ marginBottom: 14 }}>
+        <div className="input-icon grow" style={{ minWidth: 200, maxWidth: 380 }}>
+          <Search size={16} />
+          <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
+        </div>
+        <Seg value={view} onChange={(v) => setView(v as 'list' | 'map')} options={[{ value: 'list', label: 'Список' }, { value: 'map', label: 'Карта' }]} />
+        <Seg value={f.flag || ''} onChange={set('flag')} options={[
+          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
+        ]} />
+      </div>
+      <div className="row row-wrap gap-sm" style={{ marginBottom: 14 }}>
+        <Select aria-label="Источник" value={f.source || ''} onChange={(e) => set('source')(e.target.value)} placeholder="Все источники" options={opts(facets?.sources, sourceName)} style={{ maxWidth: 260 }} />
+        <Select aria-label="Район" value={f.district || ''} onChange={(e) => set('district')(e.target.value)} placeholder="Все районы" options={opts(facets?.districts)} style={{ maxWidth: 200 }} />
+        <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое метро" options={opts(facets?.metros)} style={{ maxWidth: 200 }} />
+        <input className="input" type="number" inputMode="numeric" min={0} placeholder="Цена от $" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} style={{ width: 110 }} />
+        <input className="input" type="number" inputMode="numeric" min={0} placeholder="до $" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} style={{ width: 90 }} />
+        <div className="row gap-sm" role="group" aria-label="Спальни">
+          {BEDS.map((b) => <Button key={b.value} size="sm" variant={beds.has(b.value) ? 'primary' : 'secondary'} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</Button>)}
+        </div>
+        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить</Button>}
+        {(!!data?.known_total || f.known) && (
+          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
+            Уже в базе ({data?.known_total ?? 0})
+          </Button>
+        )}
+      </div>
+      {f.known && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{KNOWN_HINT}</div>}
+      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : view === 'map' ? (
+        <ListingsMap items={items} card={card} />
+      ) : (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {items.map(card)}
         </div>
       )}
-      {(data?.total ?? 0) > items.length && (
+      {view === 'list' && (data?.total ?? 0) > items.length && (
         <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
           <Button variant="secondary" loading={isFetching} onClick={() => setLimit((n) => n + PAGE)}>Показать ещё ({(data?.total ?? 0) - items.length})</Button>
         </div>

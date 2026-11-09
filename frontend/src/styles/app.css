@@ -521,3 +521,9 @@ html, body { overflow-x: clip; }
 .post-preview { white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.45; padding: 12px 14px; border-radius: 12px;
   background: var(--brand-soft); border: 1px solid var(--line); }
 .gen-title { font-weight: 800; font-size: 15px; color: var(--brand); }
+
+/* «Новые объявления» map: price pins (ListingsMap) */
+.price-pin-wrap { background: none; border: 0; }
+.price-pin { display: inline-block; transform: translate(-50%, -100%); white-space: nowrap; padding: 3px 7px; border-radius: 999px;
+  background: var(--brand, #14295c); color: #fff; font: 700 12px/1.2 inherit; box-shadow: 0 1px 4px rgba(0,0,0,.35); border: 2px solid #fff; }
+.price-pin.on { background: var(--accent, #e0303f); z-index: 1000; }

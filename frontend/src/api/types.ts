@@ -59,8 +59,10 @@ export interface Listing {
   taken_by?: UserRef | null;
   property_id?: number | null;
   status?: string | null;
-  /** agency-channel flats in the same building with close parameters: for a side-by-side check, not a dup verdict */
+  /** objects of our base at this address (archived included): for a side-by-side check, not a dup verdict */
   similar?: SimilarFlat[];
+  lat?: number | null;
+  lng?: number | null;
   /** the previous agent reached the owner, who won't work with the agency */
   refused?: { by?: string | null; at: string; comment?: string | null } | null;
   /** the matcher linked this ad to an object already in the base */
