@@ -1,7 +1,6 @@
 {
   "telegram_defaults": {"want": 100, "photos": 3, "scan": 2000},
   "telegram_channels": [
-    {"username": "rent_tbilisi_ge", "kind": "agency", "caption_marker": "💰"},
     {"username": "flats_in_georgia", "kind": "competitor", "want": 40},
     {"username": "tbilisi_apartments", "kind": "competitor", "want": 40},
     {"username": "crescotbilisi", "kind": "competitor", "want": 40},

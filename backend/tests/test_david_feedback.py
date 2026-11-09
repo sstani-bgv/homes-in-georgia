@@ -5,12 +5,20 @@ from app.services.errors import DomainError
 from tests.conftest import fill_required, make_client_listing, make_listing, make_user
 
 
-def test_channel_twin_ranks_over_nearer_flat(db):
+def _obj_listing(db, rows):
+    return [db.get(Property, x["id"]).listing_id for x in rows]
+
+
+def test_base_twin_ranks_over_nearer_flat_and_whole_house_is_shown(db):
     ad = make_listing(db, "lv1", source="livo.ge", bedrooms=2, area=120, floor=11, lat=41.70614, lng=44.77521)
     make_client_listing(db, "tg1", bedrooms=2, area=110, floor=5, lat=41.70639, lng=44.77573)      # 51 m, 5th floor
     make_client_listing(db, "tg2", bedrooms=2, area=115, floor=11, lat=41.70929, lng=44.76366)     # 1 km, mis-geocoded
     make_client_listing(db, "tg3", bedrooms=2, area=115, floor=11, lat=41.75, lng=44.80)           # 5 km: too far
-    assert [x["id"] for x in properties.similar_in_channel(db, [ad])["lv1"]] == ["tg2", "tg1"]
+    make_client_listing(db, "tg4", bedrooms=5, area=300, floor=2, lat=41.70614, lng=44.77521)      # same house, other flat
+    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg4", "tg1"]
+    db.get(Property, properties.similar_in_base(db, [ad])["lv1"][1]["id"]).status = "archived"
+    db.commit()
+    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg1"]  # archived ones are not the base
 
 
 def _ready(db, agent, lid, **kw):
@@ -71,10 +79,9 @@ def test_lead_archive_hides_from_board_and_finds_by_search(db, client):
     assert [x["id"] for x in client.get("/api/leads/board", headers=auth(op)).json()["refused"]] == [lead.id]
 
 
-def test_channel_post_is_not_similar_to_itself(db):
+def test_object_ad_is_not_similar_to_its_own_object(db):
     post = make_client_listing(db, "tg7", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
-    make_client_listing(db, "tg8", bedrooms=2, area=100, floor=21, lat=41.75, lng=44.77)
-    assert properties.similar_in_channel(db, [post]) == {}
+    assert properties.similar_in_base(db, [post]) == {}
 
 
 def test_channel_import_makes_published_objects_with_agent_and_owner(db):
@@ -175,3 +182,12 @@ def test_published_object_discount_pause_resume(db):
     assert (p.status, p.archive_reason) == ("archived", "paused")
     properties.resume(db, p.id, ag)
     assert (p.status, p.archive_reason) == ("published", None)
+
+
+def test_team_shows_only_active_agents(db):
+    from app.services import analytics
+    make_user(db, "agent", "Работает")
+    gone = make_user(db, "agent", "Ушёл")
+    gone.is_active = False
+    db.commit()
+    assert [a["name"] for a in analytics.agents(db)] == ["Работает"]

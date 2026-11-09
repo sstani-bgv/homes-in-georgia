@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app import worker
 from app.models import Job, Listing, Owner, Property, Report
 from app.services import jobs, properties
 from app.services.dedup import address_match, norm_phone
-from tests.conftest import auth, fill_required, make_listing, make_user
+from tests.conftest import auth, fill_required, make_client_listing, make_listing, make_user
 
 
 def test_property_funnel_end_to_end(db, client, sent):
@@ -153,17 +153,18 @@ def test_new_listing_filters(db, client):
 
 def test_feed_similar_dismiss_and_agent(db, client):
     georgiy = make_user(db, "agent", "Георгий")
-    # Uznadze 4: the channel has a 2-bed on the 1st floor 29 m away; the ss.ge 3-bed must be offered for comparison
-    make_listing(db, "tg547262", source="agency", lat=41.7046326, lng=44.7977643, bedrooms=2, area=100, floor=1,
-                 urls='["https://t.me/rent_tbilisi_ge/547262"]')
+    # Uznadze 4: the base has a 2-bed on the 1st floor 29 m away; the ss.ge 3-bed must be offered for comparison
+    make_client_listing(db, "tg547262", lat=41.7046326, lng=44.7977643, bedrooms=2, area=100, floor=1,
+                        urls='["https://t.me/rent_tbilisi_ge/547262"]')
+    obj = db.scalar(select(Property.id).where(Property.listing_id == "tg547262"))
     make_listing(db, "ss33213266", source="ss.ge", lat=41.70478285, lng=44.79748039, bedrooms=3, area=130)
     make_listing(db, "ss2", source="ss.ge", lat=41.7046326, lng=44.7977643, bedrooms=5, area=300)  # same house, other flat
     make_listing(db, "ss3", source="ss.ge", lat=41.72, lng=44.77)
     items = {i["id"]: i for i in client.get("/api/listings/new", headers=auth(georgiy)).json()["items"]}
     sim = items["ss33213266"]["similar"]
-    assert [s["id"] for s in sim] == ["tg547262"] and sim[0]["url"].endswith("/547262") and 20 < sim[0]["distance_m"] < 40
-    assert items["ss2"]["similar"] == [] and items["ss3"]["similar"] == []
-    assert client.get("/api/listings/ss33213266", headers=auth(georgiy)).json()["similar"][0]["id"] == "tg547262"
+    assert [s["id"] for s in sim] == [obj] and sim[0]["url"] == f"/properties/{obj}" and 20 < sim[0]["distance_m"] < 40
+    assert [s["id"] for s in items["ss2"]["similar"]] == [obj] and items["ss3"]["similar"] == []  # whole house shown
+    assert client.get("/api/listings/ss33213266", headers=auth(georgiy)).json()["similar"][0]["id"] == obj
 
     assert client.post("/api/listings/ss3/dismiss", headers=auth(georgiy)).status_code == 200
     r = client.post("/api/listings/ss2/agent", json={}, headers=auth(georgiy))

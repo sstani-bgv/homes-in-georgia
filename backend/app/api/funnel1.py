@@ -51,7 +51,7 @@ def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function")
         if owner:
             d["owner"] = {"name": owner.name, "phone": owner.phone, "is_agent": owner.is_agent}
     d["property"] = {"id": prop.id, "status": prop.status, "agent_id": prop.agent_id} if prop else None
-    d["similar"] = P.similar_in_channel(db, [listing]).get(listing.id, [])
+    d["similar"] = P.similar_in_base(db, [listing]).get(listing.id, [])
     d["refused"] = P.refusals_for(db, [listing.id]).get(listing.id)
     return d
 

@@ -196,7 +196,7 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
     ids = [r.id for r in rows]
-    sim, refused, objs = similar_in_channel(db, rows), refusals_for(db, ids), known_objects(db, ids)
+    sim, refused, objs = similar_in_base(db, rows), refusals_for(db, ids), known_objects(db, ids)
     from app.services import demand
     want = demand.listing_counts(db, rows)  # stage 10: «Под этот объект подходят N активных клиентов»
     return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id), "demand": want.get(r.id, 0),
@@ -226,40 +226,36 @@ def _near(a: Listing, b: Listing) -> float:
     return 111_000 * math.hypot(a.lat - b.lat, (a.lng - b.lng) * 0.75)
 
 
-def similar_in_channel(db: Session, rows: list[Listing], radius: float = 60,
-                       twin_radius: float = 1500) -> dict[str, list[dict]]:
-    """Agency-channel flats in the same building with close parameters (bedrooms ±1, area ±35%), for the agent to
-    compare by eye. Not a dup verdict: two flats in one house look alike on paper (Uznadze 4: 1st vs 4th floor).
-    A «twin» (same bedrooms and floor, area ±10%) counts up to twin_radius and ranks first: channel pins can be off by a
-    kilometre (8/10 Shroshi geocoded 1 km away while 1 Shroshi, 5th floor, sat 51 m from the 11th-floor ad)."""
-    # a post of the agency channel itself (client leads are made on them) is not compared with the channel: it would
-    # find itself at 0 m (David 2026-11-08, 30 Bob Walsh St)
-    rows = [r for r in rows if r.source != "agency" and r.lat is not None and r.lng is not None
-            and not listing_flags(r)["duplicate"]]
+def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
+                    twin_radius: float = 1500) -> dict[str, list[dict]]:
+    """Objects of our base at the ad's address, for the agent to compare by eye (David 2026-11-09: the agency channel
+    is no longer a source, the base is). Every object in the same building (radius) is shown, whatever its parameters:
+    the agent sees all flats we hold at this address. A «twin» (same bedrooms and floor, area ±10%) also counts up to
+    twin_radius and ranks first: pins can be off by a kilometre (8/10 Shroshi geocoded 1 km away). An object's pin is
+    the pin of its source ad (objects made by hand without an ad have none and are not compared)."""
+    rows = [r for r in rows if r.lat is not None and r.lng is not None]
     if not rows:
         return {}
-    agency = db.scalars(select(Listing).where(Listing.source == "agency", Listing.status == "published",
-                                              Listing.lat.isnot(None), Listing.lng.isnot(None))).all()
+    objs = db.execute(select(Property, Listing).join(Listing, Listing.id == Property.listing_id)
+                      .where(Property.status != "archived", Listing.lat.isnot(None), Listing.lng.isnot(None))).all()
 
-    def close(l: Listing, a: Listing) -> bool:
-        if l.bedrooms is not None and a.bedrooms is not None and abs(l.bedrooms - a.bedrooms) > 1:
-            return False
-        return not (l.area and a.area and abs(l.area - a.area) > 0.35 * max(l.area, a.area))
+    linked = set(db.execute(select(PropertyListing.listing_id, PropertyListing.property_id)
+                            .where(PropertyListing.listing_id.in_([r.id for r in rows]))).all())  # already «known_object»
 
-    def twin(l: Listing, a: Listing) -> bool:
-        return (l.bedrooms is not None and l.bedrooms == a.bedrooms and l.floor is not None and l.floor == a.floor
-                and bool(l.area and a.area) and abs(l.area - a.area) <= 0.10 * max(l.area, a.area))
+    def twin(l: Listing, p: Property) -> bool:
+        return (l.bedrooms is not None and l.bedrooms == p.bedrooms and l.floor is not None and l.floor == p.floor
+                and bool(l.area and p.area) and abs(float(l.area) - float(p.area)) <= 0.10 * max(float(l.area), float(p.area)))
 
     out = {}
     for l in rows:
-        cand = [(not twin(l, a), _near(l, a), a) for a in agency if a.id != l.id and close(l, a)]
-        near = sorted(((t, d, a) for t, d, a in cand if d <= (radius if t else twin_radius)), key=lambda x: x[:2])
-        near = [(d, a) for _, d, a in near[:2]]
-        if near:
-            out[l.id] = [{"id": a.id, "url": (jload(a.urls, []) or [None])[0], "address": a.address,
+        cand = [(not twin(l, p), _near(l, a), p, a) for p, a in objs if a.id != l.id and (l.id, p.id) not in linked]
+        near = sorted((c for c in cand if c[1] <= (radius if c[0] else twin_radius)), key=lambda x: x[:2])
+        if near:  # ponytail: a full scan of the base per ad; a PostGIS / bbox prefilter when the base passes ~10k
+            out[l.id] = [{"id": p.id, "url": f"/properties/{p.id}", "address": p.address or a.address, "status": p.status,
                           "photo": f"/api/listing-photos/{a.id}/0" if jload(a.photos, []) else None,
-                          "price_usd": a.price_usd, "bedrooms": a.bedrooms, "area": a.area, "floor": a.floor,
-                          "distance_m": round(d)} for d, a in near]
+                          "price_usd": float(p.price) if p.price is not None else a.price_usd, "bedrooms": p.bedrooms,
+                          "area": float(p.area) if p.area is not None else None, "floor": p.floor, "distance_m": round(d)}
+                         for _, d, p, a in near[:20]]
     return out
 
 

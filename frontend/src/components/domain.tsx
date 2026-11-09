@@ -78,23 +78,23 @@ export function ExclusiveConflictBadge({ p }: { p: Pick<Property, 'exclusive_con
 }
 
 /** Full listing: photos, text, all source links. A merged duplicate keeps every copy's link in `urls`. */
-/** The listing next to a similar flat from the agency channel, so the agent decides by eye whether it is the same one. */
+/** The listing next to the objects of our base at its address, so the agent decides by eye whether it is one of them. */
 export function SimilarInChannel({ listing, similar }: { listing: Listing & { floor?: number | null }; similar: SimilarFlat[] }) {
   return (
     <div className="col gap-sm">
-      <div className="alert alert-warn">Похожая квартира уже есть в канале агентства. Сравните фото и параметры: это одна квартира или разные в одном доме?</div>
+      <div className="alert alert-warn">По этому адресу уже есть объекты в нашей базе. Сравните фото и параметры: это одна из них или другая квартира в том же доме?</div>
       {similar.map((s) => (
         <div key={s.id} className="card col gap-sm" style={{ padding: 12 }}>
           <div className="row gap-sm" style={{ alignItems: 'flex-start' }}>
             {s.photo && <img src={thumbUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
             <div className="col" style={{ minWidth: 0 }}>
-              <strong className="ellipsis">{s.address || 'Пост в канале'}</strong>
+              <strong className="ellipsis">{s.address || `Объект #${s.id}`}</strong>
               <span className="faint" style={{ fontSize: 12 }}>в {s.distance_m} м от этого адреса</span>
-              {s.url && <a href={s.url} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть пост в канале</a>}
+              {s.url && <a href={s.url} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть объект #{s.id}</a>}
             </div>
           </div>
           <table style={{ fontSize: 13, width: '100%' }}>
-            <thead><tr><th /><th style={{ textAlign: 'left' }}>Это объявление</th><th style={{ textAlign: 'left' }}>В канале</th></tr></thead>
+            <thead><tr><th /><th style={{ textAlign: 'left' }}>Это объявление</th><th style={{ textAlign: 'left' }}>В базе</th></tr></thead>
             <tbody>
               {([
                 ['Цена', money(listing.price, 'USD'), money(s.price_usd ?? null, 'USD')],
@@ -217,20 +217,20 @@ export function ListingSide({ l }: { l: Listing & { floor?: number | null } }) {
   );
 }
 
-/** «Похож в канале»: the ad next to the agency channel post(s) it resembles. */
+/** «Есть в базе»: the ad next to the objects of our base at its address. */
 function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: number | null }; onClose: () => void }) {
   const similar = listing.similar || [];
   return (
-    <Modal open wide onClose={onClose} title="Похожая квартира в канале">
+    <Modal open wide onClose={onClose} title="По этому адресу в базе">
       <div className="col gap-lg">
-        <div className="alert alert-warn" style={{ fontSize: 13 }}>Похожая квартира уже есть в канале агентства. Сравните фото и параметры: это одна квартира или разные в одном доме?</div>
+        <div className="alert alert-warn" style={{ fontSize: 13 }}>По этому адресу уже есть объекты в нашей базе. Сравните фото и параметры: это одна из них или другая квартира в том же доме?</div>
         <div className="cmp">
           <ListingSide l={listing} />
           <div className="col gap-sm" style={{ minWidth: 0 }}>
             {similar.map((s) => (
-              <CompareSide key={s.id} label={`Пост в канале · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
+              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''} · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
                 rows={[['Цена', money(s.price_usd ?? null, 'USD')], ['Спальни', bedroomsLabel(s.bedrooms) || '—'], ['Площадь', s.area ? `${s.area} м²` : '—'], ['Этаж', s.floor ?? '—']]}
-                link={{ href: s.url, text: 'Открыть пост в канале' }} />
+                link={{ href: s.url, text: 'Открыть объект' }} />
             ))}
           </div>
         </div>
@@ -267,7 +267,7 @@ export function ListingCard({ listing, locked, footer, chips, onOpen }: { listin
         {(chips || !!similar.length) && (
           <div className="row row-wrap gap-sm" style={{ minWidth: 0 }}>
             {!!similar.length && (
-              <ChipButton tone="redsoft" onClick={() => setCmp(true)}>Похож в канале{similar[0].address ? ` · ${similar[0].address}` : ''}</ChipButton>
+              <ChipButton tone="redsoft" onClick={() => setCmp(true)}>{similar.length > 1 ? `В базе ${similar.length} объекта по адресу` : `Есть в базе${similar[0].address ? ` · ${similar[0].address}` : ''}`}</ChipButton>
             )}
             {chips}
           </div>
