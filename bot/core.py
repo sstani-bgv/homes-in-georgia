@@ -204,7 +204,10 @@ def listing(lid):
 # Clients get objects only (2026-11-08): published ones (the verified base, incl. agency channel posts imported by
 # app.importers.channel_objects) and fast-tracked ones (stage 10: the owner agreed to show it before the shoot).
 # Same rule as backend leads.client_listing_eligible.
-CLIENT_ELIGIBLE = "l.status = 'published' AND (EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR (p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented')))))"
+# a published object with its own post counts even if its source ad is gone; a fast-tracked one needs the live ad
+CLIENT_ELIGIBLE = ("l.status != 'rejected' AND EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND "
+                   "NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR "
+                   "(l.status = 'published' AND p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented'))))")
 
 
 def client_listing(lid):

@@ -529,6 +529,27 @@ async def on_like(update: Update, ctx, cl, lid):
             pass
 
 
+async def on_post_start(update: Update, ctx, cl, pid: int):
+    """/start p<object id>: «❤️ I like it» / «💬 Contact» under a channel rich post (Irakli 2026-11-09) -> the same lead
+    as ❤️ on a card in the bot (B1 card for operators, the operator's intro), then «передал агенту»."""
+    from app.models import Property
+    from app.services import leads
+    lid = await th(_run, lambda s: (s.get(Property, pid) or Property()).listing_id, (), {})
+    if not lid:
+        await ctx.bot.send_message(update.effective_chat.id, core.t(cl["lang"], "gone"))
+        return
+    async with lock_for(("like", cl["id"], lid)):
+        knew = await th(notify.knows_operator, cl["id"])
+        lead, err = await svc(leads.create_from_like, cl["id"], lid, request_of(cl))
+    if err:
+        log.warning("post start %s/%s: %s", cl["id"], lid, err)
+        await ctx.bot.send_message(update.effective_chat.id, core.t(cl["lang"], "gone"))
+        return
+    await ctx.bot.send_message(update.effective_chat.id, core.t(cl["lang"], "lead_sent"))
+    if not knew:
+        await th(notify.operator_intro, lead)
+
+
 # ---------- B1/B3: the operators group ----------
 
 async def on_group(update: Update, ctx):

@@ -97,9 +97,12 @@ def client_listing_eligible(db: Session, listing_id: str) -> bool:
     published = and_(Property.status == "published", func.trim(func.coalesce(Property.post_url, "")) != "",
                      func.trim(func.coalesce(Property.post_message_id, "")) != "")
     fast = and_(Property.fast_track_at.isnot(None), Property.status.not_in(("archived", "rented")))
-    published_property = select(Property.id).where(Property.listing_id == Listing.id, or_(published, fast)).exists()
-    return db.scalar(select(Listing.id).where(Listing.id == listing_id, Listing.status == "published",
-                                              published_property)) is not None
+    # a published object with its own post is ours: the source ad may be gone (the owner took it down after signing)
+    ours = select(Property.id).where(Property.listing_id == Listing.id, published).exists()
+    fast_live = and_(Listing.status == "published",
+                     select(Property.id).where(Property.listing_id == Listing.id, fast).exists())
+    return db.scalar(select(Listing.id).where(Listing.id == listing_id, Listing.status != "rejected",
+                                              or_(ours, fast_live))) is not None
 
 
 def create_from_like(db: Session, client_id: int, listing_id: str, request: str | None = None) -> Lead:

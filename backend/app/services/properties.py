@@ -1194,7 +1194,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
     out.append("<tg-button-row>" + (btn("📍 On the map", url) if url else "")
                + btn("📍 All listings on map", "https://t.me/RentInTbilisi_bot/MAP?startapp=source=sale_in_tbilisi") + "</tg-button-row>")
-    out.append("<tg-button-row>" + btn("💬 Contact", "https://t.me/David_Tibelashvili", ' style="primary"') + "</tg-button-row>")
+    bot = f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}"  # bot.on_start -> journey.on_post_start: a lead
+    out.append("<tg-button-row>" + btn("❤️ I like it", bot) + btn("💬 Contact", bot, ' style="primary"') + "</tg-button-row>")
     out.append(f"<p>📲 +995 599 20 67 16 {h(users_svc.tag_of(agent))}<br>"
                '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | <a href="https://t.me/reviews_rent_tbilisi">Reviews</a><br>'
                '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '

@@ -320,6 +320,9 @@ async def on_start(update: Update, ctx):
     await sync_menu(ctx.bot, update.effective_chat.id)
     cl = await asyncio.to_thread(client_of, update.effective_user, update.effective_chat.id)
     await asyncio.to_thread(core.reset, cl, lang_hint=update.effective_user.language_code)
+    if ctx.args and re.fullmatch(r"p\d+", ctx.args[0]):  # a button under a channel post: straight to a lead
+        await journey.on_post_start(update, ctx, cl, int(ctx.args[0][1:]))
+        return
     if not cl["state"].get("lang_set"):  # first contact: the language first, then the questionnaire (on_lang_button)
         await on_lang(update, ctx)
         return

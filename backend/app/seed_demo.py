@@ -121,6 +121,11 @@ def seed():
         properties.schedule_shoot(db, p.id, ag, future)
         properties.upload_media(db, p.id, [("living.jpg", _tiny_jpeg())], "living_room", ag)
         properties.set_checklist(db, p.id, {"living_room": True, "kitchen": True, "bedroom": lid != "ss5009"}, ag)
+        p.total_floors = p.total_floors or max(9, p.floor or 0)  # the generator fields submit_for_review requires (stage «полные параметры»)
+        p.post_fields = {"prop_type": "Apartment", "building": "NewBuilding", "design": "New", "heating": "CentralHeating",
+                         "pets": "ByAgreement", "periods": ["6Month", "12Month"], "amenities": ["Balcony", "WiFi", "Elevator"],
+                         "tenants": 3, **(p.post_fields or {})}
+        db.commit()
         properties.submit_for_review(db, p.id, ag)
         if final == "returned":
             properties.review(db, p.id, nino, False, "Нет фото спальни")

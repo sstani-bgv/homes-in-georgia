@@ -28,10 +28,13 @@ def test_client_catalog_requires_agency_or_confirmed_publication(db):
         assert not leads.client_listing_eligible(db, raw.id)
     agency = make_client_listing(db)
     assert leads.client_listing_eligible(db, agency.id)
-    for status in ("pending_review", "rejected", "gone"):
+    agency.status = "rejected"  # dismissed by a person
+    db.commit()
+    assert not leads.client_listing_eligible(db, agency.id)
+    for status in ("pending_review", "gone"):  # the source ad changed, the published object and its post are ours
         agency.status = status
         db.commit()
-        assert not leads.client_listing_eligible(db, agency.id)
+        assert leads.client_listing_eligible(db, agency.id)
 
 
 @pytest.mark.parametrize("old_status", ["new", "refused"])
