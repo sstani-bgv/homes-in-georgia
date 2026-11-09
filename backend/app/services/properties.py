@@ -2,6 +2,7 @@
 import logging
 import math
 import os
+import html as html_
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -237,7 +238,7 @@ def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
     if not rows:
         return {}
     objs = db.execute(select(Property, Listing).join(Listing, Listing.id == Property.listing_id)
-                      .where(Property.status != "archived", Listing.lat.isnot(None), Listing.lng.isnot(None))).all()
+                      .where(Listing.lat.isnot(None), Listing.lng.isnot(None))).all()  # archived count too (David 11-09)
 
     linked = set(db.execute(select(PropertyListing.listing_id, PropertyListing.property_id)
                             .where(PropertyListing.listing_id.in_([r.id for r in rows]))).all())  # already «known_object»
@@ -252,6 +253,7 @@ def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
         near = sorted((c for c in cand if c[1] <= (radius if c[0] else twin_radius)), key=lambda x: x[:2])
         if near:  # ponytail: a full scan of the base per ad; a PostGIS / bbox prefilter when the base passes ~10k
             out[l.id] = [{"id": p.id, "url": f"/properties/{p.id}", "address": p.address or a.address, "status": p.status,
+                          "archive_reason": p.archive_reason,
                           "photo": f"/api/listing-photos/{a.id}/0" if jload(a.photos, []) else None,
                           "price_usd": float(p.price) if p.price is not None else a.price_usd, "bedrooms": p.bedrooms,
                           "area": float(p.area) if p.area is not None else None, "floor": p.floor, "distance_m": round(d)}
@@ -1124,6 +1126,83 @@ def post_text(db: Session, p: Property) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def _split(tag: str) -> str:
+    """VazhaPshavela → Vazha Pshavela, 6Month → 6 Month."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=\d)(?=[A-Za-z])", " ", tag)
+
+
+def _human(tag: str) -> str:
+    """Generator tag → words: CentralHeating → Central heating, 6Month → 6 month, SmartTV → Smart TV."""
+    if tag in ("WiFi", "TV", "SmartTV"):
+        return {"SmartTV": "Smart TV"}.get(tag, tag)
+    w = _split(tag).split()
+    return " ".join([w[0]] + [x if x.isupper() else x.lower() for x in w[1:]]) if w else tag
+
+
+def post_rich(db: Session, p: Property, media: list[str]) -> str:
+    """The post as a Telegram rich message (Bot API sendRichMessage, Irakli 2026-11-09: as @tbilisi_rent does): photo
+    slideshow, price/beds/district headline, address + metro, the description, «Parameters and amenities» and «Tags»
+    as collapsible blocks, the pin on a map, buttons. Built from the same fields as post_text (English, as the channel).
+    media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
+    f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
+    sale = f.get("deal") == "Sale"
+    district = DISTRICT_TAG.get((p.district or "").strip(), "#" + (p.district or "Tbilisi").replace(" ", "")).lstrip("#")
+    beds = "Studio" if p.bedrooms == 0 else (f"{p.bedrooms} bedroom{'s' if p.bedrooms != 1 else ''}" if p.bedrooms else None)
+    price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
+    head = " · ".join(x for x in ((f"${price:,}".replace(",", " ") + ("" if sale else "/mo")) if price else None, beds,
+                                  _human(district)) if x)
+    sub = " · ".join(x for x in (f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
+                                 p.floor and (f"{p.floor}/{p.total_floors} floor" if p.total_floors else f"{p.floor} floor"),
+                                 f"ID {p.id}") if x)
+    out = []
+    if media:
+        out.append("<tg-slideshow>" + "".join(f'<video src="{m}"/>' if "video" in m else f'<img src="{m}"/>' for m in media)
+                   + "</tg-slideshow>")
+    marks = [x for x, on in (("❗️ Exclusive", p.is_exclusive), ("❗️ Discount", f.get("discount"))) if on]
+    out.append(f"<h2>{h(head)}</h2>")
+    if marks:
+        out.append(f"<p><b>{h(' · '.join(marks))}</b></p>")
+    out.append(f"<p>{h(sub)}</p>")
+    url = maps_url(db, p) if p.address else None
+    where = [f'📍 <a href="{h(url)}">{h(p.address)}</a>' if url else (p.address and f"📍 {h(p.address)}"),
+             f.get("metro") and f"Ⓜ️ {h(_split(f['metro']))}"]
+    if any(where):
+        out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
+    if f.get("headline"):
+        out.append(f"<p><b>⭐️ {h(f['headline'])}</b></p>")
+    if p.description:
+        out.append("<p>" + h(p.description.strip()).replace("\n", "<br>") + "</p>")
+    rows = [("Bedrooms", beds), ("Area", p.area and f"{float(p.area):g} m²"),
+            ("Floor", p.floor and (f"{p.floor} of {p.total_floors}" if p.total_floors else str(p.floor))),
+            ("Type", f.get("prop_type") and _human(f["prop_type"])), ("Building", f.get("building") and _human(f["building"])),
+            ("Design", f.get("design") and _human(f["design"])), ("Condition", sale and f.get("condition") and _human(f["condition"])),
+            ("Bathrooms", (f.get("bathrooms") or "")[:1] or None), ("Heating", f.get("heating") and _human(f["heating"])),
+            ("Pets", f.get("pets") and _human(f["pets"])), ("Tenants", f.get("tenants") and f"up to {f['tenants']}"),
+            ("Lease term", f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
+            ("Deposit", not sale and price and (f"${f.get('deposit', price)}" if f.get("deposit", price) else "none")),
+            ("Commission", "0%")]
+    table = "".join(f"<tr><td>{h(k)}</td><td>{h(v)}</td></tr>" for k, v in rows if v)
+    am = f.get("amenities") or []
+    params = f"<table striped compact>{table}</table>" + (f"<p>✅ {h(' · '.join(_human(a) for a in am))}</p>" if am else "")
+    out.append(f"<details open><summary>Parameters and amenities</summary>{params}</details>")
+    tags = " ".join(hashtags(post_text(db, p)))
+    out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p></details>")
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    if listing is not None and listing.lat is not None and listing.lng is not None:
+        out.append(f'<tg-map lat="{listing.lat}" long="{listing.lng}" zoom="15"/>')
+    agent = db.get(User, p.agent_id) if p.agent_id else None
+    btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
+    out.append("<tg-button-row>" + (btn("📍 On the map", url) if url else "")
+               + btn("📍 All listings on map", "https://t.me/RentInTbilisi_bot/MAP?startapp=source=sale_in_tbilisi") + "</tg-button-row>")
+    out.append("<tg-button-row>" + btn("💬 Contact", "https://t.me/David_Tibelashvili", ' style="primary"') + "</tg-button-row>")
+    out.append(f"<p>📲 +995 599 20 67 16 {h(users_svc.tag_of(agent))}<br>"
+               '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | <a href="https://t.me/reviews_rent_tbilisi">Reviews</a><br>'
+               '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '
+               '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">🗳 FB</a> '
+               '<a href="https://youtube.com/@rentintbilisi">🎥 YouTube</a></p>')
+    return "".join(out)
+
+
 def record_publication(db: Session, p: Property, channel: str, url: str | None, message_id: str | None) -> PropertyPublication:
     """One row per post: the same post (by message id or link) reported again updates it, a new post adds a row.
     Links a matching agency channel post (channel_posts) to the object. No commit."""
@@ -1161,7 +1240,10 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         own = {m.id for m in media(db, p.id)}
         if not set(media_ids) <= own:
             raise DomainError("not_found", "media not found")
-    p.post_text = (text or "").strip() or post_text(db, p)  # transient attributes read by notify.publish_post
+    auto = post_text(db, p)
+    p.post_text = (text or "").strip() or auto  # transient attributes read by notify.publish_post
+    # the rich post is built from the fields: a caption the operator rewrote by hand goes out as the plain album
+    p.post_rich = (lambda ids: post_rich(db, p, ids)) if p.post_text == auto else None
     p.post_media_ids = media_ids
     ref = _notify("publish_post", p)
     dry_run = ref is None and not env.BOT_TOKEN and env.APP_ENV == "dev"

@@ -18,7 +18,7 @@ def test_base_twin_ranks_over_nearer_flat_and_whole_house_is_shown(db):
     assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg4", "tg1"]
     db.get(Property, properties.similar_in_base(db, [ad])["lv1"][1]["id"]).status = "archived"
     db.commit()
-    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg1"]  # archived ones are not the base
+    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg4", "tg1"]  # archived count too
 
 
 def _ready(db, agent, lid, **kw):
@@ -191,3 +191,18 @@ def test_team_shows_only_active_agents(db):
     gone.is_active = False
     db.commit()
     assert [a["name"] for a in analytics.agents(db)] == ["Работает"]
+
+
+def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
+    ag = make_user(db, "agent")
+    make_listing(db, "ss77", lat=41.70, lng=44.76)
+    p = properties.take(db, "ss77", ag)
+    p.bedrooms, p.area, p.floor, p.total_floors, p.price, p.address = 3, 140, 4, 9, 1500, "ул. Чавчавадзе 33"
+    p.post_fields = {"heating": "ACHeating", "periods": ["1Month", "12Month"], "amenities": ["WiFi", "SmartTV"], "discount": True}
+    db.commit()
+    h = properties.post_rich(db, p, ["tg://photo?id=m0", "tg://video?id=m1"])
+    assert '<tg-slideshow><img src="tg://photo?id=m0"/><video src="tg://video?id=m1"/></tg-slideshow>' in h
+    assert "<h2>$1 500/mo · 3 bedrooms · Vake</h2>" in h and "❗️ Discount" in h
+    assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h and "WiFi · Smart TV" in h
+    assert "<summary>Tags</summary>" in h and "#Discount" in h and '<tg-map lat="41.7" long="44.76"' in h
+    assert h.count("<tg-button ") == 3

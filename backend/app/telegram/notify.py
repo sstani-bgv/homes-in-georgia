@@ -961,6 +961,16 @@ def send_group(chat, thread, media, caption=None):
     return tg.call("sendMediaGroup", files=files, chat_id=chat, message_thread_id=thread, media=items)
 
 
+def send_rich(chat, thread, prop, media):
+    """The post as one rich message (sendRichMessage): the files go as its media, the slideshow links them by id.
+    -> the message or None (the caller falls back to the album)."""
+    ids = [f"tg://{'video' if k == 'video' else 'photo'}?id=m{n}" for n, (k, _) in enumerate(media)]
+    rich = {"html": prop.post_rich(ids), "media": [{"id": f"m{n}", "media": {"type": k if k == "video" else "photo", "media": f"attach://f{n}"}}
+                                    for n, (k, _) in enumerate(media)]}
+    return tg.call("sendRichMessage", files={f"f{n}": p for n, (_, p) in enumerate(media)} or None, chat_id=chat,
+                   message_thread_id=thread, rich_message=rich)
+
+
 @safe
 def publish_post(prop):
     """Posts the property to PUBLISH_CHAT_ID (else the agency channel), as the old HTML generator did: an album
@@ -977,7 +987,14 @@ def publish_post(prop):
         media = media_paths(g(prop, "id"), tmp, g(prop, "post_media_ids"))
         if media and originals_topic:
             send_group(chat, originals_topic, [("document", p) for _, p in media])
-        if media:
+        m = None
+        # RICH_POSTS=1: the post as a rich message (Irakli 2026-11-09), unless the operator rewrote the caption by hand;
+        # Telegram refusing it falls back to the album below
+        if conf("RICH_POSTS").strip() in ("1", "true") and callable(getattr(prop, "post_rich", None)):
+            m = send_rich(chat, album_topic, prop, [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media])
+        if m:
+            pass  # the rich post went out
+        elif media:
             res = send_group(chat, album_topic, [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media], caption)
             m = res[0] if res else None
         else:

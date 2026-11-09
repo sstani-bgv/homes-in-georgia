@@ -228,7 +228,7 @@ function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: num
           <ListingSide l={listing} />
           <div className="col gap-sm" style={{ minWidth: 0 }}>
             {similar.map((s) => (
-              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''} · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
+              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''}${s.archive_reason ? ` (${ARCHIVE_REASON[s.archive_reason] || s.archive_reason})` : ''} · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
                 rows={[['Цена', money(s.price_usd ?? null, 'USD')], ['Спальни', bedroomsLabel(s.bedrooms) || '—'], ['Площадь', s.area ? `${s.area} м²` : '—'], ['Этаж', s.floor ?? '—']]}
                 link={{ href: s.url, text: 'Открыть объект' }} />
             ))}
