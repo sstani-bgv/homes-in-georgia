@@ -731,7 +731,50 @@ function ReviewStep({ p }: { p: Property }) {
 function Republish({ p }: { p: Property }) {
   const [open, setOpen] = useState(false);
   return open ? <div className="col"><div className="divider" /><PostComposer p={p} /></div>
-    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />Опубликовать повторно</Button>;
+    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />Обновить пост</Button>;
+}
+
+/** «Скидка»: the new price and ❗️#Discount in the post; staff then posts it again («Обновить пост»). */
+function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
+  const { toast, set } = useProp(p.id);
+  const [price, setPrice] = useState('');
+  const m = useMutation({
+    mutationFn: () => api.properties.update(p.id, { price: Number(price), post_fields: { ...(p.post_fields || {}), discount: true } }),
+    onSuccess: (r) => { set(r); toast(r.change_request ? 'Новая цена ушла оператору на проверку' : 'Цена снижена · в посте будет #Discount'); onClose(); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const ok = Number(price) > 0 && Number(price) < Number(p.price || Infinity);
+  return (
+    <Modal open={open} onClose={onClose} title="Скидка">
+      <div className="col gap-lg">
+        <Field label="Новая цена, $" hint={`Сейчас ${money(p.price, p.currency || 'USD')}. В посте появится ❗️#Discount`}><Input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))} /></Field>
+        {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>Объект проверен оператором: новая цена уйдёт оператору, он обновит пост в канале.</div>}
+        <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}>Снизить цену</Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** A published object's actions: discount, pause, rented (by us / by the owner). The last three are the archive with a reason. */
+function PublishedActions({ p, onArchive }: { p: Property; onArchive: (reason: string) => void }) {
+  const [discount, setDiscount] = useState(false);
+  return (
+    <>
+      <div className="row row-wrap gap-sm">
+        <Button variant="secondary" size="sm" onClick={() => setDiscount(true)}>% Скидка</Button>
+        <Button variant="secondary" size="sm" onClick={() => onArchive('paused')}><Clock size={14} />Приостановить</Button>
+        <Button variant="secondary" size="sm" onClick={() => onArchive('rented_by_us')}><CheckCircle2 size={14} />Сдали мы</Button>
+        <Button variant="secondary" size="sm" onClick={() => onArchive('rented_by_owner')}><Home size={14} />Собственник сдал</Button>
+      </div>
+      <DiscountModal p={p} open={discount} onClose={() => setDiscount(false)} />
+    </>
+  );
+}
+
+function Resume({ p }: { p: Property }) {
+  const { toast, set } = useProp(p.id);
+  const m = useMutation({ mutationFn: () => api.properties.resume(p.id), onSuccess: (r) => { set(r); toast('Объект снова в базе'); }, onError: (e) => toast(errText(e), true) });
+  return <Button size="sm" loading={m.isPending} onClick={() => m.mutate()}><RotateCcw size={14} />Снять с паузы</Button>;
 }
 
 const agentLabel = (a?: { name: string; agent_tag?: string | null } | null) => (a ? `${a.name}${a.agent_tag ? ` · #${a.agent_tag}` : ''}` : '—');
@@ -905,9 +948,9 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
 }
 
 /** «В архив» with a mandatory reason; objects are never deleted. After verification the agent's archive is a request. */
-function ArchiveModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
+function ArchiveModal({ p, open, onClose, preset = '' }: { p: Property; open: boolean; onClose: () => void; preset?: string }) {
   const { toast, set } = useProp(p.id);
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(preset);
   const [comment, setComment] = useState('');
   const [dup, setDup] = useState('');
   const m = useMutation({
@@ -917,13 +960,13 @@ function ArchiveModal({ p, open, onClose }: { p: Property; open: boolean; onClos
   });
   const ok = !!reason && (reason !== 'other' || !!comment.trim()) && (reason !== 'duplicate' || !!dup.trim());
   return (
-    <Modal open={open} onClose={onClose} title="В архив">
+    <Modal open={open} onClose={onClose} title={preset ? ARCHIVE_REASON[preset] : 'В архив'}>
       <div className="col gap-lg">
         <Field label="Причина"><Select value={reason} placeholder="—" onChange={(e) => setReason(e.target.value)} options={Object.entries(ARCHIVE_REASON).map(([value, label]) => ({ value, label }))} /></Field>
         {reason === 'duplicate' && <Field label="Дубль объекта №" hint="Номер объекта, который остаётся в базе"><Input inputMode="numeric" value={dup} placeholder="#123" onChange={(e) => setDup(e.target.value)} /></Field>}
         <Field label={reason === 'other' ? 'Комментарий (обязательно)' : 'Комментарий'}><Input value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
         {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>Объект проверен оператором: архивация уйдёт оператору на проверку.</div>}
-        <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}><Archive size={16} />{(p.locked_fields || []).length ? 'Отправить запрос' : 'В архив'}</Button>
+        <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}><Archive size={16} />{(p.locked_fields || []).length ? 'Отправить запрос' : preset ? 'Подтвердить' : 'В архив'}</Button>
       </div>
     </Modal>
   );
@@ -934,7 +977,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id) });
   const hist = useQuery({ queryKey: ['property-history', id], queryFn: () => api.properties.history(id) });
   const [edit, setEdit] = useState(false);
-  const [archiving, setArchiving] = useState(false);
+  const [archiving, setArchiving] = useState<string | false>(false);
   const step = useMemo(() => (p ? stepOf(p) : 0), [p]);
 
   if (isLoading) return <Loading />;
@@ -954,6 +997,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
       <div className="row row-wrap">
         {p.post_url && <a className="btn" href={p.post_url} target="_blank" rel="noreferrer"><ExternalLink size={16} />Пост в канале</a>}
       </div>
+      {canWork && p.status === 'published' && <PublishedActions p={p} onArchive={setArchiving} />}
       {isStaff && p.status === 'published' && <Republish p={p} />}
     </div>
   );
@@ -1002,6 +1046,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
                 {p.archive_reason === 'duplicate' && p.duplicate_of ? <> объекта <Link to={objLink(p.duplicate_of)}>#{p.duplicate_of}</Link></> : null}
                 {p.archive_comment ? ` · ${p.archive_comment}` : ''}
               </span>
+              {canWork && p.archive_reason === 'paused' && <Resume p={p} />}
             </div>
           )}
           {!!p.change_requests?.length && (
@@ -1049,14 +1094,14 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
             ]} />
             {p.description && <p className="muted mt" style={{ fontSize: 13 }}>{p.description}</p>}
             {canWork && !['archived', 'rented'].includes(p.status) && (
-              <Button variant="ghost" size="sm" className="mt" onClick={() => setArchiving(true)}><Archive size={14} />В архив</Button>
+              <Button variant="ghost" size="sm" className="mt" onClick={() => setArchiving('')}><Archive size={14} />В архив</Button>
             )}
           </Card>
           {compact && <Card label="История" title="События"><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>
       </div>
       <EditModal p={p} open={edit} onClose={() => setEdit(false)} />
-      <ArchiveModal p={p} open={archiving} onClose={() => setArchiving(false)} />
+      {archiving !== false && <ArchiveModal key={archiving} p={p} preset={archiving} open onClose={() => setArchiving(false)} />}
     </div>
   );
 }

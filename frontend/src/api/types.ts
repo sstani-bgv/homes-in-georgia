@@ -92,7 +92,7 @@ export interface OwnerRef { id: number; name?: string | null; phone?: string | n
 export interface PostFields {
   deal?: 'Rent' | 'Sale'; prop_type?: string; metro?: string; building?: string; design?: string; condition?: string;
   heating?: string; bathrooms?: string; pets?: string; amenities?: string[]; periods?: string[];
-  tenants?: number; deposit?: number; sale_price?: number; headline?: string;
+  tenants?: number; deposit?: number; sale_price?: number; headline?: string; discount?: boolean;
 }
 
 export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?: string; room?: string | null; position?: number }

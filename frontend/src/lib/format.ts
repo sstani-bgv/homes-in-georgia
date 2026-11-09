@@ -31,7 +31,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
 export const REFUSAL_LABEL: Record<string, string> = { price: 'Цена', location: 'Расположение', condition: 'Состояние', other: 'Другое' };
 /** why an object is in the archive (backend models.ARCHIVE_REASONS) */
 export const ARCHIVE_REASON: Record<string, string> = {
-  owner_refused: 'Собственник отказался', rented_by_us: 'Сдали мы', rented_by_owner: 'Сдал сам', not_actual: 'Неактуально', duplicate: 'Дубль', other: 'Другое',
+  owner_refused: 'Собственник отказался', rented_by_us: 'Сдали мы', rented_by_owner: 'Сдал сам', not_actual: 'Неактуально', duplicate: 'Дубль', other: 'Другое', paused: 'На паузе',
 };
 /** «Запрос оператору» (stage 6): kinds and field names (backend services/change_requests.py, properties.LOCKED_AFTER_VERIFY) */
 export const CR_KIND: Record<string, string> = { edit: 'Изменение полей', archive: 'В архив', transfer_owner: 'Передать собственника', delete: 'Удаление → архив' };

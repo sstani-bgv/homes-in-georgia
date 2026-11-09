@@ -947,6 +947,10 @@ def clean_post_fields(v) -> dict:
             ok, x = n is not None and 0 <= n < 10 ** 9, int(n or 0)
         elif k == "headline":
             ok, x = True, str(x).strip()[:120]
+        elif k == "discount":  # «Скидка»: the post gets ❗️#Discount, as the agency marks a lowered price
+            if not x:
+                continue
+            ok, x = True, True
         else:
             ok = False
         if not ok:
@@ -1067,6 +1071,8 @@ def post_text(db: Session, p: Property) -> str:
     lines.append("")
     if p.is_exclusive:
         lines += ["❗️#Exclusive", ""]
+    if f.get("discount"):
+        lines += ["❗️#Discount", ""]
     beds = "#Studio " if p.bedrooms == 0 else (f"#{p.bedrooms}Bed " if p.bedrooms else "")
     lines.append(f"🏢 {beds}{tag('prop_type') or '#Apartment'} for {'#Sale' if sale else '#Rent'}")
     style = [x for x in (tag("building"), tag("design"), sale and tag("condition")) if x]
@@ -1177,6 +1183,18 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
             **({"dry_run": True} if dry_run else {}))
     db.commit()
     _notify("property_published", p)
+    return p
+
+
+def resume(db: Session, pid: int, actor: User) -> Property:
+    """«Снять с паузы»: a paused object goes back to the base as it was before (published, if it ever was)."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, actor)
+    if p.status != "archived" or p.archive_reason != "paused":
+        raise DomainError("bad_status", "Объект не на паузе")
+    p.archive_reason, p.archive_comment, p.archived_at = None, None, None
+    _status(db, p, "published" if p.published_at else "media_uploaded", actor, "resumed")
+    db.commit()
     return p
 
 

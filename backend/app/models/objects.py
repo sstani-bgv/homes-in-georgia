@@ -11,7 +11,8 @@ PUBLICATION_CHANNELS = ("tg",)
 PUBLICATION_STATUSES = ("draft", "published", "removed")
 # why an object is in the archive (stage 6); duplicate → properties.duplicate_of, other → archive_comment is required
 ARCHIVE_REASONS = {"owner_refused": "Собственник отказался", "rented_by_us": "Сдали мы", "rented_by_owner": "Сдал сам",
-                   "not_actual": "Неактуально", "duplicate": "Дубль", "other": "Другое"}
+                   "not_actual": "Неактуально", "duplicate": "Дубль", "other": "Другое",
+                   "paused": "На паузе"}  # paused → «Снять с паузы» (properties.resume) puts it back
 
 
 class Owner(Base):

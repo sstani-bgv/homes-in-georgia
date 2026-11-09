@@ -162,3 +162,16 @@ def test_take_prefills_the_generator_from_the_ad(db):
     assert properties.prefill(p, db.get(Listing, "mh77"))
     assert p.post_fields["pets"] == "Allowed" and p.post_fields["metro"] == "Rustaveli"
     assert properties.nearest_metro(41.75, 44.87) is None  # 6 km from any station: no metro rather than a wrong one
+
+
+def test_published_object_discount_pause_resume(db):
+    staff, ag = make_user(db, "operator"), make_user(db, "agent")
+    p = _ready(db, ag, "ss9")
+    p.status, p.published_at, p.price = "published", p.updated_at, 900
+    db.commit()
+    properties.update(db, p.id, {"price": 800, "post_fields": {**(p.post_fields or {}), "discount": True}}, staff)
+    assert "❗️#Discount" in properties.post_text(db, p) and p.price == 800
+    properties.archive(db, p.id, staff, "paused")
+    assert (p.status, p.archive_reason) == ("archived", "paused")
+    properties.resume(db, p.id, ag)
+    assert (p.status, p.archive_reason) == ("published", None)
