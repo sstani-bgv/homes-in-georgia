@@ -78,3 +78,18 @@ def test_base_search_words_order_and_counts(db, client):
     assert ids("", limit=1, offset=1) == [a.id]
     counts = client.get("/api/properties/counts", headers=auth(nino)).json()
     assert counts == {"published": 1, "rented": 1, "archived": 1}
+
+
+def test_published_photos_fit_telegram(tmp_path):
+    """A 48 MP iPhone original (8064x6048, 11 MB) is refused by Telegram (PHOTO_INVALID_DIMENSIONS): the post gets a
+    watermarked JPEG of at most 2560 px."""
+    import importlib.util
+    from PIL import Image
+    from app.telegram import notify
+    spec = importlib.util.spec_from_file_location("notify_real", notify.__file__)  # conftest stubs notify.*
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    src = tmp_path / "big.jpg"
+    Image.new("RGB", (8064, 6048), "white").save(src)
+    with Image.open(real.watermarked(str(src), str(tmp_path))) as out:
+        assert (out.format, out.size) == ("JPEG", (2560, 1920))

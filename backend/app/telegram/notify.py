@@ -923,12 +923,22 @@ def post_html(text):
     return out
 
 
+PHOTO_PX = 2560  # Telegram: a photo's width + height at most 10000 and 10 MB (a 48 MP iPhone original is 8064x6048)
+
+
 def watermarked(path, tmp):
-    """The agency watermark over a photo (40 %, stretched like the old generator did) -> a new JPEG; the original
-    on any failure (no Pillow, odd format)."""
+    """The agency watermark over a photo (40 %, stretched like the old generator did) -> a new JPEG of at most
+    PHOTO_PX, upright by its EXIF, HEIC read too; the original on any failure (no Pillow, odd format)."""
     try:
-        from PIL import Image
-        with Image.open(path) as im, Image.open(WATERMARK) as wm:
+        from PIL import Image, ImageOps
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
+        with Image.open(path) as src, Image.open(WATERMARK) as wm:
+            im = ImageOps.exif_transpose(src)
+            im.thumbnail((PHOTO_PX, PHOTO_PX))
             im = im.convert("RGBA")
             mark = wm.convert("RGBA").resize(im.size)
             mark.putalpha(mark.getchannel("A").point(lambda a: a * 2 // 5))
