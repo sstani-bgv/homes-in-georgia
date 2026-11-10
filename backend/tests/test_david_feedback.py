@@ -205,7 +205,7 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert "<h2>$1 500/mo · 3 bedrooms · Vake</h2>" in h and "❗️ Discount" in h
     assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h and "WiFi · Smart TV" in h
     assert "<summary>Tags</summary>" in h and "#Discount" in h and '<tg-map lat="41.7" long="44.76"' in h
-    assert h.count("<tg-button ") == 4 and h.count(f"?start=p{p.id}") == 2
+    assert h.count("<tg-button ") == 2 and h.count(f"?start=p{p.id}") == 1 and "RentInTbilisi_bot" not in h and "Contact" not in h
 
 
 def test_published_object_takes_leads_when_its_source_ad_is_gone(db):
