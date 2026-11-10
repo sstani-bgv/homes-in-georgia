@@ -225,6 +225,12 @@ p { margin: 0; }
   outline: none; transition: border-color .15s, box-shadow .15s; font-size: 14px;
 }
 .textarea { height: auto; min-height: 84px; padding: 10px 12px; resize: vertical; }
+/* iOS Safari: a date / time input keeps its own min width and height (ignores width: 100%), so it spilled under the
+   button next to it («Своё время» + «Добавить» in a lead's slots). appearance: none makes it a plain sized box. */
+.input[type="date"], .input[type="time"], .input[type="datetime-local"] {
+  -webkit-appearance: none; appearance: none; min-width: 0; display: block; line-height: 40px;
+}
+.input::-webkit-date-and-time-value { text-align: left; }
 .input:focus, .select:focus, .textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(3,45,106,.12); }
 .input-icon { position: relative; }
 .input-icon svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--faint); }
