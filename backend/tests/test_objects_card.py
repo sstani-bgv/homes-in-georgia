@@ -93,3 +93,30 @@ def test_published_photos_fit_telegram(tmp_path):
     Image.new("RGB", (8064, 6048), "white").save(src)
     with Image.open(real.watermarked(str(src), str(tmp_path))) as out:
         assert (out.format, out.size) == ("JPEG", (2560, 1920))
+
+
+def test_previews_are_served_from_the_server_disk(db, client, tmp_path, monkeypatch):
+    """S3 media: a preview is fetched from the bucket once, then served from MEDIA_DIR/cache with a long browser cache
+    (no redirect to a fresh presigned link per card); a file without a preview still redirects to its original."""
+    from app import storage
+    calls = []
+
+    class FakeS3:
+        def get_object(self, Bucket, Key):
+            calls.append(Key)
+            if Key != "previews/legacy/a.jpg.webp":
+                raise KeyError(Key)
+            import io
+            return {"Body": io.BytesIO(b"RIFFwebp")}
+
+    monkeypatch.setattr(storage.env, "MEDIA_STORAGE", "s3")
+    monkeypatch.setattr(storage.env, "MEDIA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "s3", lambda: FakeS3())
+    monkeypatch.setattr(storage, "url", lambda key: f"https://bucket.example/{key}")
+    h = auth(make_user(db, "operator", "Нино"))
+    for _ in range(2):
+        r = client.get("/api/media/legacy/a.jpg", params={"p": 1}, headers=h, follow_redirects=False)
+        assert (r.status_code, r.content, r.headers["cache-control"]) == (200, b"RIFFwebp", "private, max-age=2592000, immutable")
+    assert calls == ["previews/legacy/a.jpg.webp"]  # the second request came from the disk
+    r = client.get("/api/media/legacy/b.heic", params={"p": 1}, headers=h, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (307, "https://bucket.example/legacy/b.heic")

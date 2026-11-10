@@ -18,6 +18,7 @@ import logging
 import mimetypes
 import os
 import sys
+import threading
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -134,6 +135,25 @@ def s3_has(key: str) -> bool:
         return False
     _have.add(key)
     return True
+
+
+def cached(key: str) -> Path | None:
+    """s3: a local copy of a small stored file (a preview) under MEDIA_DIR/cache, fetched once and then served from
+    the disk (a phone loading 50 cards made 50 redirects to the bucket, each a new, uncacheable presigned link).
+    None when the storage has no such file."""
+    dest = Path(env.MEDIA_DIR) / "cache" / key
+    if dest.is_file():
+        return dest
+    try:
+        data = s3().get_object(Bucket=env.S3_BUCKET, Key=key)["Body"].read()
+    except Exception:  # NoSuchKey and the like: the caller falls back to the original
+        return None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, dest)  # atomic: two requests for the same preview never serve half a file
+    _have.add(key)
+    return dest
 
 
 def fetch(key: str, tmp: str) -> str | None:

@@ -329,8 +329,9 @@ def media_file(path: str, preview: bool = Query(False, alias="p"), user: User = 
     if storage.is_s3():
         if path.startswith("/") or ".." in path.split("/"):
             raise DomainError("not_found", "file not found")
-        pk = storage.preview_key(path)
-        return RedirectResponse(storage.url(pk if preview and storage.s3_has(pk) else path), status_code=307)
+        if preview and (f := storage.cached(storage.preview_key(path))):  # from the server's disk, cached by the browser
+            return FileResponse(f, media_type="image/webp", headers=PREVIEW_HEADERS)
+        return RedirectResponse(storage.url(path), status_code=307)
     src = _safe(media_root(), path)
     if not src.is_file():
         raise DomainError("not_found", "file not found")
@@ -344,6 +345,8 @@ def media_file(path: str, preview: bool = Query(False, alias="p"), user: User = 
 
 
 PHOTO_ROOTS = [REPO_ROOT / "bot", REPO_ROOT, Path(env.MEDIA_DIR)]
+# a preview never changes under its key (a new file is a new key): the browser keeps it a month
+PREVIEW_HEADERS = {"Cache-Control": "private, max-age=2592000, immutable", "X-Content-Type-Options": "nosniff"}
 
 
 @public.get("/config")
@@ -363,8 +366,9 @@ def listing_photo(listing_id: str, n: int, preview: bool = Query(False, alias="p
     if ref.startswith("s3:"):  # a CRM object's catalog row (services/catalog.py): the object's own file in the storage
         key = ref[3:]
         if storage.is_s3():
-            pk = storage.preview_key(key)
-            return RedirectResponse(storage.url(pk if preview and storage.s3_has(pk) else key), status_code=307)
+            if preview and (f := storage.cached(storage.preview_key(key))):
+                return FileResponse(f, media_type="image/webp", headers=PREVIEW_HEADERS)
+            return RedirectResponse(storage.url(key), status_code=307)
         f = storage.local_path(key)
         if not f.is_file():
             raise DomainError("not_found", "photo file missing")
