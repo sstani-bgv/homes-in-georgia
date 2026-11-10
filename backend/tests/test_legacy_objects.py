@@ -1,4 +1,5 @@
 from app.importers.legacy_objects import Registry, address_of, area_of, bedrooms_of, floor_of, phones_of, price_of
+from app.importers import legacy_objects as L
 
 POST = """#Saburtalo 🚇 #STUniversity
 📍[3 Ana Politkovskaia St](https://maps.app.goo.gl/x)
@@ -39,3 +40,20 @@ def test_media_follows_its_post_into_the_merged_object(tmp_path):
     done.write_text("".join(__import__("json").dumps(r) + "\n" for r in rows))
     keys = [d["key"] for d in media_by_object(data, done)["ch:1"]]
     assert keys == ["channel/9.jpg", "channel/8.jpg", "team-chat/7.mov"]  # newest photos first, videos last
+
+
+def test_post_hashtags_fill_the_generator_fields():
+    post = """#Chugureti 🚇 #LibertySquare 📍 3 Tsinamdzghvrishvili St
+🏢 #Studio #Apartment for #Rent
+✨ #OldBuilding | #New #White
+🏠30Sq.m |3/9 Floor | #ElectricalHeating | #ShowerCabin
+✅#Stove ✅#WiFi ✖️#Dishwasher
+👬Tenants: 1-2|
+🐕Pets: #Byagreemnt
+🕐 #6month #12Months
+💰 400$ + Deposit 400$"""
+    assert L.total_floors_of(post) == 9 and L.total_floors_of("2 floor") is None
+    assert L.post_fields_of(post) == {
+        "metro": "LibertySquare", "prop_type": "Apartment", "deal": "Rent", "building": "OldBuilding", "design": "New",
+        "heating": "ElectricalHeating", "amenities": ["WiFi", "Shower", "Stove"], "periods": ["6Month", "12Month"],
+        "pets": "ByAgreement", "tenants": 2, "deposit": 400}

@@ -2,6 +2,7 @@
 
     python -m app.importers.legacy_objects build --groups DIR --channel DIR --sheets DIR --out DIR
     python -m app.importers.legacy_objects load --out DIR      # after sheets_csv, into DATABASE_URL
+    python -m app.importers.legacy_objects prefill             # generator fields from the post hashtags (loaded before)
 
 Offline (no DB, no Telegram): reads the raw exports and writes out/registry.json (objects with sources, owner, agent,
 status history, deals, media to download), out/review.csv (doubtful merges) and out/summary.json.
@@ -110,6 +111,49 @@ def floor_of(t: str) -> int | None:
     m = (re.search(r"(\d{1,2})\s*/\s*\d{1,2}\s*floor", t, re.I) or re.search(r"(\d{1,2})\s*floor", t, re.I)
          or re.search(r"#(\d{1,2})floor", t, re.I))
     return int(m.group(1)) if m else None
+
+
+def total_floors_of(t: str) -> int | None:
+    m = re.search(r"\b\d{1,2}\s*/\s*(\d{1,2})\s*(?:-?th\s*)?floor", t, re.I)
+    return int(m.group(1)) if m and 0 < int(m.group(1)) < 80 else None
+
+
+# old post hashtags -> the generator's values (properties.POST_ONE / POST_MANY); case and the agents' typos folded
+_TAG_FIX = {"smeshed": "Mixed", "showercabin": "Shower", "byagreemnt": "ByAgreement", "ac": "Conditioner",
+            "parking": "ParkingPlace", "washer": "WashingMachine"}
+_PETS = {"byagreement": "ByAgreement", "byagreemnt": "ByAgreement", "notallowed": "NotAllowed", "allowed": "Allowed"}
+
+
+def post_fields_of(t: str) -> dict:
+    """The generator fields an old agency post already states by its hashtags (#OldBuilding #White #CentralHeating
+    #6Month, Pets: #ByAgreement, Tenants: 1-2, Deposit 400$). Only what the text says; the rest stays empty."""
+    from app.services.properties import POST_MANY, POST_ONE, clean_post_fields
+    one = {k: {v.lower(): v for v in vals} for k, vals in POST_ONE.items() if k != "pets"}
+    many = {k: {v.lower(): v for v in vals} for k, vals in POST_MANY.items()}
+    pf: dict = {}
+    for tag in re.findall(r"#(\w+)", re.sub(r"(?:✖️|❌|✖)\s*#\w+", "", t)):  # «✖️#Dishwasher» = there is none
+        low = tag.lower()
+        low = _TAG_FIX.get(low, tag).lower()
+        if m := re.fullmatch(r"(\d{1,2})months?", low):
+            low = f"{int(m.group(1))}month"
+        for k, vals in one.items():
+            if low in vals and k not in pf:
+                pf[k] = vals[low]
+        for k, vals in many.items():
+            if low in vals and vals[low] not in pf.setdefault(k, []):
+                pf[k].append(vals[low])
+    if m := re.search(r"pets?\s*:?\s*#?([a-z\- ]{5,16})", t, re.I):
+        if pet := _PETS.get(re.sub(r"[^a-z]", "", m.group(1).lower())):
+            pf["pets"] = pet
+    if "prop_type" not in pf and re.search(r"#?studio\b|\d\s*-?\s*bed", t, re.I):
+        pf["prop_type"] = "Apartment"  # «#Studio», «1Bed», «2 bedroom»: a flat unless the post says otherwise
+    if m := re.search(r"tenants?\s*:?\s*(?:\d+\s*-\s*)?(\d{1,2})\b", t, re.I):
+        pf["tenants"] = int(m.group(1))
+    if m := re.search(r"deposit\s*:?\s*\$?\s*(\d{2,6})", t, re.I):
+        pf["deposit"] = int(m.group(1))
+    if pf.get("deal") == "Sale" and pf.get("prop_type") is None:
+        pf.pop("prop_type", None)
+    return clean_post_fields({k: v for k, v in pf.items() if v not in (None, [], "")})
 
 
 def price_of(t: str) -> int | None:
@@ -808,6 +852,7 @@ def load(registry: Path, db, media: Path | None = None, media_prefix: str = "leg
                      address=o["address"], district=o["district"], cadastral_code=o.get("cadastral"),
                      price=o["price"] if str(o["price"] or "").isdigit() else None, bedrooms=o["bedrooms"],
                      area=o["area"], floor=o["floor"], description=o["text"], is_exclusive=o["exclusive"],
+                     total_floors=total_floors_of(o["text"] or ""), post_fields=post_fields_of(o["text"] or ""),
                      agent_id=a.id, owner_id=owner_by_phone[o["owner_phones"][0]].id if o["owner_phones"] else None,
                      post_url=f"https://t.me/rent_tbilisi_ge/{last_post}" if last_post else None,
                      post_message_id=str(last_post) if last_post else None,
@@ -863,17 +908,43 @@ def load(registry: Path, db, media: Path | None = None, media_prefix: str = "leg
     return n
 
 
+def prefill(db) -> Counter:
+    """Old-base objects loaded before the hashtag parsing: fill their EMPTY total floors and generator fields from the
+    post text; an agent's own picks stay."""
+    from sqlalchemy import select
+    from app.models import Property
+    n = Counter()
+    for p in db.scalars(select(Property).where(Property.source_type == "legacy")):
+        t = p.description or ""
+        if p.total_floors is None and (tf := total_floors_of(t)):
+            p.total_floors, n["total_floors"] = tf, n["total_floors"] + 1
+        cur, new = dict(p.post_fields or {}), post_fields_of(t)
+        add = {k: v for k, v in new.items() if cur.get(k) in (None, "", [])}
+        if add:
+            p.post_fields, n["post_fields"] = {**cur, **add}, n["post_fields"] + 1
+        n["objects"] += 1
+    db.commit()
+    return n
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "load"])
+    ap.add_argument("cmd", choices=["build", "load", "prefill"])
     ap.add_argument("--groups", type=Path)
     ap.add_argument("--channel", type=Path)
     ap.add_argument("--sheets", type=Path)
     ap.add_argument("--media", type=Path, help="load: legacy_media done.jsonl (files already in the bucket)")
     ap.add_argument("--media-prefix", default="legacy/", help="load: bucket key prefix of those files")
     ap.add_argument("--photo-merges", type=Path, help="JSON [[key_a, key_b], ...] from photo matching")
-    ap.add_argument("--out", required=True, type=Path, help="build: output dir; load: the dir with registry.json")
+    ap.add_argument("--out", type=Path, help="build: output dir; load: the dir with registry.json")
     a = ap.parse_args(argv)
+    if a.cmd == "prefill":
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            print(json.dumps(prefill(db), ensure_ascii=False, indent=1))
+        return
+    if a.out is None:
+        ap.error("--out is required for build / load")
     if a.cmd == "load":
         from app.db import SessionLocal
         with SessionLocal() as db:
