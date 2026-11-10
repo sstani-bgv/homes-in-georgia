@@ -314,7 +314,6 @@ function SettingsAdmin() {
     const next = { ...metrics, [k]: on };
     setK('dashboard_metrics', JSON.stringify(Object.keys(next).filter((x) => next[x])));
   };
-  const flag = (k: string) => ['1', 'true', 'on', 'yes'].includes(str(k).toLowerCase());
   return (
     <div className="grid g2">
       <OperatorAccount />
@@ -324,10 +323,8 @@ function SettingsAdmin() {
           <Field label="Агент вводит время"><Input type="number" value={str('sla_agent_slots_min')} onChange={(e) => setK('sla_agent_slots_min', e.target.value)} /></Field>
           <Field label="Время клиенту"><Input type="number" value={str('sla_slots_to_client_min')} onChange={(e) => setK('sla_slots_to_client_min', e.target.value)} /></Field>
           <Field label="Обещание клиенту"><Input type="number" value={str('client_promise_min')} onChange={(e) => setK('client_promise_min', e.target.value)} /></Field>
-          <Field label="Куда идут заявки (lead_target)"><Input value={str('lead_target')} onChange={(e) => setK('lead_target', e.target.value)} placeholder="group" /></Field>
           <Field label="План сделок в месяц"><Input type="number" value={str('deals_plan')} onChange={(e) => setK('deals_plan', e.target.value)} /></Field>
         </div>
-        <div className="mt-lg"><Switch checked={flag('moderate_all')} onChange={(v) => setK('moderate_all', v ? '1' : '0')} label="Проверять вручную все новые объявления" /></div>
       </Card>
       <Card label="Главная" title="Метрики дашборда">
         <div className="col">
