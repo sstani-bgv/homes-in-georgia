@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings as env
 from app.db import SessionLocal
 from app.models import Deal, Job, Lead, Property
-from app.services import jobs, leads
+from app.services import catalog, jobs, leads
 from app.services.common import log_event, now
 from app.telegram import notify
 
@@ -181,6 +181,12 @@ def main():
                 log.info("jobs: %s", st)
         except Exception:  # noqa: BLE001
             log.exception("tick failed")
+        try:  # the bot's catalog follows the objects (services/catalog.py)
+            with SessionLocal() as db:
+                if n := catalog.sync_all(db):
+                    log.info("catalog: %s rows changed", n)
+        except Exception:  # noqa: BLE001
+            log.exception("catalog sync failed")
         time.sleep(args.interval)
 
 

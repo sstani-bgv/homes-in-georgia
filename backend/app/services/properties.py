@@ -153,7 +153,7 @@ def _metro():
 
 def _untaken():
     taken = select(Property.listing_id).where(Property.listing_id.isnot(None), Property.status != "archived")
-    return (Listing.status.in_(("published", "pending_review")), Listing.source != "agency", Listing.id.not_in(taken))
+    return (Listing.status.in_(("published", "pending_review")), Listing.source.not_in(("agency", "object")), Listing.id.not_in(taken))
 
 
 def new_listings(db: Session, q: str | None = None, source: str | None = None, flag: str | None = None,
@@ -1260,6 +1260,9 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
     _status(db, p, "published", actor, post_url=p.post_url if ref else None, channel=channel,
             **({"dry_run": True} if dry_run else {}))
     db.commit()
+    from app.services import catalog
+    if catalog.sync(db, p):  # clients find it in the bot at once
+        db.commit()
     _notify("property_published", p)
     return p
 
@@ -1303,7 +1306,7 @@ def external_ads(db: Session, pids: list[int]) -> dict[int, list[dict]]:
             select(PropertyListing.property_id, PropertyListing.listing_id, PropertyListing.source, PropertyListing.url)
             .join(Listing, Listing.id == PropertyListing.listing_id)
             .where(PropertyListing.property_id.in_(pids), PropertyListing.removed_checked_at.is_(None),
-                   Listing.status != "gone", Listing.source != "agency").order_by(PropertyListing.id)):
+                   Listing.status != "gone", Listing.source.not_in(("agency", "object"))).order_by(PropertyListing.id)):
         out.setdefault(pid, []).append({"listing_id": lid, "source": src, "url": url})
     return out
 

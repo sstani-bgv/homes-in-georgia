@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings as env
 from app.models import (FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
-from app.services import jobs, settings
+from app.services import catalog, jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import extract_phones
 from app.services.errors import DomainError, forbidden
@@ -92,12 +92,15 @@ def _require_status(lead: Lead, *allowed: str):
 # ---------------------------------------------------------------- client side (bot)
 
 def client_listing_eligible(db: Session, listing_id: str) -> bool:
-    """Clients can request only listings of published objects (the agency channel is imported as objects) or fast-tracked ones
-    (stage 10: the owner agreed to show them before the publication). Same rule as bot/core.py CLIENT_ELIGIBLE."""
+    """A card the client may act on: a published object (its catalog row, services/catalog.py, or the ad it was taken
+    from: the same object) or the live ad of a fast-tracked one (stage 10: the agent pushed it to the matching clients
+    before the shoot). The bot SEARCHES catalog rows only. Same rule as bot/core.py CLIENT_ELIGIBLE."""
+    if (pid := catalog.property_id_of(listing_id)) is not None:
+        p = db.get(Property, pid)
+        return p is not None and catalog.visible(p) and db.get(Listing, listing_id) is not None
     published = and_(Property.status == "published", func.trim(func.coalesce(Property.post_url, "")) != "",
                      func.trim(func.coalesce(Property.post_message_id, "")) != "")
     fast = and_(Property.fast_track_at.isnot(None), Property.status.not_in(("archived", "rented")))
-    # a published object with its own post is ours: the source ad may be gone (the owner took it down after signing)
     ours = select(Property.id).where(Property.listing_id == Listing.id, published).exists()
     fast_live = and_(Listing.status == "published",
                      select(Property.id).where(Property.listing_id == Listing.id, fast).exists())
@@ -120,7 +123,7 @@ def create_from_like(db: Session, client_id: int, listing_id: str, request: str 
     db.execute(insert(Reaction).values(client_id=client_id, listing_id=listing_id, reaction="like", created_at=t)
                .on_conflict_do_update(index_elements=["client_id", "listing_id"],
                                       set_={"reaction": "like", "created_at": t}))
-    prop = db.scalar(select(Property).where(Property.listing_id == listing_id))
+    prop = catalog.property_for(db, listing_id)
     stmt = (insert(Lead).values(client_id=client_id, listing_id=listing_id, property_id=prop.id if prop else None,
                                 status="new", request=request, created_at=t, updated_at=t)
             .on_conflict_do_nothing(index_elements=["client_id", "listing_id"]).returning(Lead.id))
@@ -665,7 +668,7 @@ def owner_contact(db: Session, lead: Lead, user: User, prop: Property | None) ->
 def detail(db: Session, lead: Lead, user: User) -> dict:
     d = card(db, lead, user)
     prop = db.get(Property, lead.property_id) if lead.property_id else (
-        db.scalar(select(Property).where(Property.listing_id == lead.listing_id)) if lead.listing_id else None)
+        catalog.property_for(db, lead.listing_id))
     d["property_id"] = prop.id if prop else None
     d["owner"] = owner_contact(db, lead, user, prop)
     d["slots"] = [{"id": s.id, "starts_at": s.starts_at.isoformat(), "chosen": s.chosen}

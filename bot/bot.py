@@ -247,7 +247,7 @@ async def backfill_videos(bot, pause=1.0, limit=None):
 async def send_album(bot, chat_id, i, photos=core.ALBUM_PHOTOS):
     """A listing's photos + video as one album (no captions: the buttons go on the text card after it).
     The agency channel's own video (file_id) wins over a local file."""
-    items = core.album(i, photos)
+    items = await asyncio.to_thread(core.album, i, photos)  # a CRM object's files may come from the storage first
     if fid := await asyncio.to_thread(channel_video, i):
         items = [x for x in items if x["type"] == "photo"] + [{"type": "video", "file_id": fid}]
     if not items:

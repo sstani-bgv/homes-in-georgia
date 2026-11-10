@@ -169,7 +169,7 @@ def attach(db: Session, p: Property, l: Listing, actor: User | None, reasons: li
         raise DomainError("conflict", f"listing {l.id} is already linked to object #{link.property_id}")
     log_event(db, "property", p.id, "listing_linked", actor, listing_id=l.id, source=link.source, url=link.url,
               reasons=reasons, via=via)
-    if p.is_exclusive and l.source != "agency" and l.status != "gone":
+    if p.is_exclusive and l.source not in ("agency", "object") and l.status != "gone":
         log_event(db, "property", p.id, "exclusive_conflict", actor, listing_id=l.id, source=link.source, url=link.url)
         return [(p, SOURCE_NAME.get(link.source or "", link.source or "другом сайте"), link.url)]
     return []
@@ -245,7 +245,7 @@ def elsewhere(db: Session, p: Property) -> list[dict]:
     o = _objects(db, [p.id])[p.id]
     linked = select(PropertyListing.listing_id)
     for l in db.scalars(select(Listing).where(Listing.status.in_(("published", "pending_review")),
-                                              Listing.source != "agency", Listing.id.not_in(linked))):
+                                              Listing.source.not_in(("agency", "object")), Listing.id.not_in(linked))):
         v, _, why = verdict(_feat(l), o)
         if v != NONE:
             out.append({"listing_id": l.id, "source": P.source_type_of(l), "url": (jload(l.urls, []) or [None])[0],
@@ -275,5 +275,6 @@ if __name__ == "__main__":
             print(f"photo hashes: {backfill_hashes(s)} listings")
         else:
             ids = list(s.scalars(select(Listing.id).where(Listing.status.in_(("published", "pending_review")),
+                                                          Listing.source != "object",
                                                           Listing.id.not_in(select(PropertyListing.listing_id)))))
             print("matched:", process(s, ids))

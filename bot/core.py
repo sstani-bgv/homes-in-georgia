@@ -200,14 +200,18 @@ def listing(lid):
         return db.row(c.execute("SELECT * FROM listings WHERE id = ?", (lid,)).fetchone())
 
 
-# Client access never depends on a setting: moderation of a scraped listing is not agency publication.
-# Clients get objects only (2026-11-08): published ones (the verified base, incl. agency channel posts imported by
-# app.importers.channel_objects) and fast-tracked ones (stage 10: the owner agreed to show it before the shoot).
-# Same rule as backend leads.client_listing_eligible.
-# a published object with its own post counts even if its source ad is gone; a fast-tracked one needs the live ad
-CLIENT_ELIGIBLE = ("l.status != 'rejected' AND EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id AND ((p.status = 'published' AND "
-                   "NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR "
-                   "(l.status = 'published' AND p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented'))))")
+# The client catalog = CRM objects (2026-11-10): the search pool is the catalog rows of published objects (source
+# 'object', id obj<property id>, kept in sync by backend app/services/catalog.py) — never a scraped ad. A client gets an
+# ad only when the agent fast-tracks its object and the CRM pushes it to the matching clients (stage 10), so a card,
+# a like and the reactions also accept a live fast-tracked ad, and the ad a published object was taken from (the same
+# object: a card sent before the catalog row existed). Same rule as backend leads.client_listing_eligible.
+CLIENT_SEARCH = ("l.source = 'object' AND l.status = 'published' AND EXISTS (SELECT 1 FROM properties p WHERE "
+                 "'obj' || p.id = l.id AND p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND "
+                 "NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL)")
+CLIENT_ELIGIBLE = (f"(({CLIENT_SEARCH}) OR (l.status != 'rejected' AND EXISTS (SELECT 1 FROM properties p WHERE p.listing_id = l.id "
+                   "AND ((p.status = 'published' AND NULLIF(BTRIM(p.post_url), '') IS NOT NULL AND "
+                   "NULLIF(BTRIM(p.post_message_id), '') IS NOT NULL) OR (l.status = 'published' AND "
+                   "p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented'))))))")
 
 
 def client_listing(lid):
@@ -216,9 +220,9 @@ def client_listing(lid):
 
 
 def published():
-    """Listings of published (or fast-tracked) objects only."""
+    """The search pool: catalog rows of published CRM objects only."""
     with db.tx() as c:
-        return [db.row(r) for r in c.execute(f"SELECT l.* FROM listings l WHERE {CLIENT_ELIGIBLE}")]
+        return [db.row(r) for r in c.execute(f"SELECT l.* FROM listings l WHERE {CLIENT_SEARCH} ORDER BY l.first_seen DESC, l.id")]
 
 
 def reactions(cl, kind):
@@ -436,7 +440,7 @@ def understand(cl):
     if key:
         if not st.get("query") or st["query"][0] != key:
             with db.tx() as c:
-                ds = [r[0] for r in c.execute(f"SELECT l.district FROM listings l WHERE {CLIENT_ELIGIBLE} AND l.district != '' "
+                ds = [r[0] for r in c.execute(f"SELECT l.district FROM listings l WHERE {CLIENT_SEARCH} AND l.district != '' "
                                               "GROUP BY l.district ORDER BY COUNT(*) DESC LIMIT 40")]
             res = ask(QUERY_PROMPT.format(msgs=key, lang=LANG_NAME[lang], districts=", ".join(ds)), QUERY, timeout=120)
             p = res.get("place") and geocode(res["place"])
@@ -664,13 +668,71 @@ def card(i, reason, near=None, lang="ru"):
 ALBUM_PHOTOS, ALBUM_MAX = 4, 10  # Telegram albums take 2-10 items
 
 
+OBJECT_MEDIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw", "objects")  # bot/raw: the botraw volume
+PHOTO_PX = 2560  # Telegram: a photo's width + height at most 10000, 10 MB
+
+
+def media_file(ref, max_bytes=None):
+    """A catalog media ref -> a local file to upload, or None. A path stays as is; 's3:<key>' (a CRM object's file,
+    backend app/services/catalog.py) is fetched from the storage once into raw/objects: a photo as a JPEG of at most
+    PHOTO_PX (Telegram takes no HEIC), a video as is when it fits max_bytes."""
+    if not str(ref).startswith("s3:"):
+        return ref if os.path.exists(ref) else None
+    key = ref[3:]
+    video = max_bytes is not None
+    dest = os.path.join(OBJECT_MEDIA, re.sub(r"[^\w.-]", "_", key) + ("" if video else ".jpg"))
+    if os.path.exists(dest):
+        return dest
+    try:
+        from app import storage  # the backend's storage (the bot image has backend/ on PYTHONPATH)
+        if video and storage.is_s3():
+            size = storage.s3().head_object(Bucket=storage.env.S3_BUCKET, Key=key)["ContentLength"]
+            if size > max_bytes:
+                return None
+        os.makedirs(OBJECT_MEDIA, exist_ok=True)
+        tmp = dest + f".{os.getpid()}.tmp"
+        if storage.is_s3():
+            storage.s3().download_file(storage.env.S3_BUCKET, key, tmp)
+        else:
+            src = storage.local_path(key)
+            if not src.is_file() or (video and src.stat().st_size > max_bytes):
+                return None
+            with open(src, "rb") as a, open(tmp, "wb") as b:
+                b.write(a.read())
+        if not video:
+            from PIL import Image, ImageOps
+            try:
+                import pillow_heif
+                pillow_heif.register_heif_opener()
+            except ImportError:
+                pass
+            with Image.open(tmp) as im:
+                im = ImageOps.exif_transpose(im)
+                im.thumbnail((PHOTO_PX, PHOTO_PX))
+                im.convert("RGB").save(tmp + ".jpg", "JPEG", quality=85)
+            os.replace(tmp + ".jpg", tmp)
+        os.replace(tmp, dest)
+        return dest
+    except Exception as e:  # a missing or unreadable file: the card goes without it
+        print(f"media {key}: {e}")
+        return None
+
+
 def album(i, photos=ALBUM_PHOTOS):
     """What goes into a listing's album: up to `photos` photos, then at most one video (files that exist, video under
     the size cap: VIDEO_MAX_MB). -> [{"type": "photo"|"video", "path", ...video meta}]"""
     from imgutil import video_max
-    out = [{"type": "photo", "path": p} for p in i.get("photos") or [] if os.path.exists(p)][:photos]
+    out = []
+    for ref in i.get("photos") or []:
+        if len(out) >= photos:
+            break
+        if f := media_file(ref):
+            out.append({"type": "photo", "path": f})
     for v in ((i.get("details") or {}).get("videos") or [])[:1]:
-        if os.path.exists(v.get("path") or "") and os.path.getsize(v["path"]) <= video_max():
+        if v.get("key"):  # a CRM object's video in the storage
+            if f := media_file("s3:" + v["key"], max_bytes=video_max()):
+                out.append({"type": "video", **{k: x for k, x in v.items() if k != "key"}, "path": f})
+        elif os.path.exists(v.get("path") or "") and os.path.getsize(v["path"]) <= video_max():
             out.append({"type": "video", **v})
     return out[:ALBUM_MAX]
 

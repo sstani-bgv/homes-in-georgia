@@ -141,7 +141,7 @@ class SwitchTest(Base):
         self.assertEqual(db.get_setting("search_mode"), "llm")
         core.add_input(self.cl, text="2 спальни в Ваке до 1000$")
         core.search(self.cl)
-        self.assertIn("ss5 |", self.calls[-1])  # whole catalog went to the model
+        self.assertIn(f"{self.o('ss5')} |", self.calls[-1])  # whole catalog went to the model
         self.assertNotIn("bedrooms_min", "".join(self.calls))
 
     def test_hybrid_final_llm(self):
@@ -151,16 +151,16 @@ class SwitchTest(Base):
         self.assertEqual(len(self.calls), 2)  # constraints + final pick
         self.assertIn("Сабуртало", self.calls[0])  # known districts are listed for the model
         final = self.calls[1]
-        self.assertIn("ss1 |", final)
-        self.assertNotIn("ss3 |", final)  # over budget never reaches the model, even relaxed
+        self.assertIn(f"{self.o('ss1')} |", final)
+        self.assertNotIn(f"{self.o('ss3')} |", final)  # over budget never reaches the model, even relaxed
         self.assertIn("ослабленными условиями (район, число спален)", final)  # 3 strict < 5: ss5, then ss4 added
         # the model's picks first; topped up only with listings meeting every condition (tg1), not the relaxed ss4/ss5
-        self.assertEqual([x["listing"]["id"] for x in res["items"]], ["ss2", "ss1", "tg1"])
+        self.assertEqual(self.ids(res), ["ss2", "ss1", "tg1"])
         self.assertNotIn("@", res["items"][0]["reason"])
         self.assertEqual(res["total"], 3)  # ss1, ss2, tg1 fit strictly
         core.search(core.client("tg", 42))  # "more": cached constraints, no new extraction call
         self.assertEqual(sum("bedrooms_min" in c for c in self.calls), 1)
-        self.assertEqual(core.client("tg", 42)["state"]["shown"][:3], ["ss2", "ss1", "tg1"])
+        self.assertEqual([self.ad(x) for x in core.client("tg", 42)["state"]["shown"][:3]], ["ss2", "ss1", "tg1"])
 
     def test_hybrid_no_final_llm(self):
         db.set_setting("search_mode", "hybrid")
@@ -168,8 +168,8 @@ class SwitchTest(Base):
         core.add_input(self.cl, text="2 спальни в Ваке до 1000$")
         res = core.search(self.cl)
         self.assertEqual(len(self.calls), 1)  # only the constraints call
-        self.assertEqual([x["listing"]["id"] for x in res["items"]][:1], ["ss1"])  # best impression first (no vectors)
-        self.assertEqual(set(x["listing"]["id"] for x in res["items"]), {"ss1", "ss2", "tg1", "ss4", "ss5"})
+        self.assertEqual(self.ids(res)[:1], ["ss1"])  # best impression first (no vectors)
+        self.assertEqual(set(self.ids(res)), {"ss1", "ss2", "tg1", "ss4", "ss5"})
         self.assertEqual(res["understood"], "2 спальни в Ваке до $1000")
         en = core.template_reason({"style": "сканди", "light": "светлая", "renovation": "новый", "furniture": "новая"}, "en")
         self.assertEqual(en, "Scandinavian style, bright, new renovation, new furniture")

@@ -28,6 +28,7 @@ class Base(unittest.TestCase):
         self.listings = os.path.join(self.tmp.name, "listings.json")
         self.dropped = os.path.join(self.tmp.name, "dropped.json")
         self.calls = []
+        self.obj = {}  # ad id -> the catalog row id of the object published from it (publish_objects)
         core.ask = self.fake_ask
         core.geocode = lambda q: (41.7151, 44.8271)
 
@@ -45,10 +46,28 @@ class Base(unittest.TestCase):
         return r
 
     def publish_objects(self, *ids):
-        """Parser search fixtures become client-visible only after agency publication."""
+        """An object published from each ad (its own channel post) and its catalog row: what the bot searches. The
+        backend (app/services/catalog.py) builds the row from the object; here it is the ad's copy under the catalog id
+        obj<property id>. self.o(ad id) -> that id, self.ad(catalog id) -> the ad id back."""
         with db.tx() as c:
+            cols = [r["column_name"] for r in c.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'listings'")]
             for lid in ids:
-                c.execute("INSERT INTO properties (listing_id, status, post_url, post_message_id, created_at, updated_at) VALUES (?, 'published', 'https://t.me/rent_tbilisi_ge/10', '10', now(), now())", (lid,))
+                pid = c.execute("INSERT INTO properties (listing_id, status, post_url, post_message_id, created_at, updated_at) VALUES (?, 'published', 'https://t.me/rent_tbilisi_ge/10', '10', now(), now()) RETURNING id", (lid,)).fetchone()["id"]
+                own = {"id": f"obj{pid}", "source": "object"}
+                c.execute(f"INSERT INTO listings ({', '.join(cols)}) SELECT {', '.join('?' if k in own else k for k in cols)} "
+                          "FROM listings WHERE id = ?", (*[own[k] for k in cols if k in own], lid))
+                self.obj[lid] = own["id"]
+
+    def o(self, lid):
+        return self.obj.get(lid, lid)
+
+    def ad(self, cid):
+        return next((a for a, x in self.obj.items() if x == cid), cid)
+
+    def ids(self, res):
+        """Result items -> the ad ids the fixtures are named by."""
+        return [self.ad(x["listing"]["id"]) for x in res["items"]]
 
     def status(self, lid):
         return core.listing(lid)["status"]
@@ -58,7 +77,7 @@ class Base(unittest.TestCase):
         props = schema["properties"]
         if "top" in props:
             return {"understood": "2 спальни в Ваке", "matches_total": 3, "max_price_usd": 1000,
-                    "top": [{"id": x, "reason": f"подходит, см. @agency_{x}"} for x in self.pick]}
+                    "top": [{"id": self.o(x), "reason": f"подходит, см. @agency_{x}"} for x in self.pick]}
         if "place" in props:
             return {"place": None, "label": None, "radius_km": None}
         return {"items": [{"id": i, "district": "Vake", "description": f"Flat {i}"} for i in self.ids_in(prompt)]}
@@ -119,14 +138,30 @@ class CoreTest(Base):
         self.pick = ["ss9", "ss3", "ss1", "nope", "ss2"]
         core.add_input(self.cl, text="2 спальни в Ваке до 1000$")
         res = core.search(self.cl)
-        self.assertEqual([x["listing"]["id"] for x in res["items"]], ["ss1", "ss2"])  # pending, over budget, unknown dropped
+        self.assertEqual(self.ids(res), ["ss1", "ss2"])  # pending, over budget, unknown dropped
         self.assertEqual(res["base"], 4)
         self.assertNotIn("@", res["items"][0]["reason"])
         self.assertNotIn("ss9", self.calls[-1])  # pending listings never reach the catalog
         # state persists in the DB: a fresh client object sees the shown ids
-        self.assertEqual(core.client("tg", 42)["state"]["shown"], ["ss1", "ss2"])
+        self.assertEqual(core.client("tg", 42)["state"]["shown"], [self.o("ss1"), self.o("ss2")])
         res = core.search(core.client("tg", 42))  # "more": already shown ones are skipped
-        self.assertEqual([x["listing"]["id"] for x in res["items"]], [])
+        self.assertEqual(self.ids(res), [])
+
+    def test_album_takes_object_photos_from_the_storage(self):
+        """A CRM object's catalog row lists its files as s3:<key>: the bot fetches each once, a JPEG Telegram accepts."""
+        from unittest import mock
+        from PIL import Image
+        from app import storage
+        with mock.patch.object(storage.env, "MEDIA_DIR", self.tmp.name), mock.patch.object(storage.env, "MEDIA_STORAGE", "local"), \
+                mock.patch.object(core, "OBJECT_MEDIA", os.path.join(self.tmp.name, "objects")):
+            f = storage.local_path("legacy/team-chat/7.png")
+            f.parent.mkdir(parents=True)
+            Image.new("RGB", (4000, 1000), "white").save(f)
+            out = core.album({"photos": ["s3:legacy/team-chat/7.png", "s3:legacy/team-chat/gone.jpg"]})
+            self.assertEqual(len(out), 1)  # a missing file is skipped, the card still goes
+            with Image.open(out[0]["path"]) as im:
+                self.assertEqual((im.format, im.size), ("JPEG", (2560, 640)))
+            self.assertEqual(core.album({"photos": ["s3:legacy/team-chat/7.png"]})[0]["path"], out[0]["path"])  # cached
 
     def test_card_hides_source(self):
         text = core.card(core.listing("ss1"), "светлая", "~1.0 км от метро", "ru")
@@ -143,8 +178,8 @@ class CoreTest(Base):
         self.assertIn("English", self.calls[-2])  # pick prompt asks for the client's language
         text = core.card(res["items"][0]["listing"], res["items"][0]["reason"], None, "en")
         self.assertIn("Vake", text)
-        self.assertIn("Flat ss1", text)
-        self.assertEqual(core.listing("ss1")["description_en"], "Flat ss1")  # stored, translated once
+        self.assertIn(f"Flat {self.o('ss1')}", text)
+        self.assertEqual(core.listing(self.o("ss1"))["description_en"], f"Flat {self.o('ss1')}")  # stored, translated once
         self.assertEqual(core.detect_lang("хочу в Ваке", "en"), "ru")
 
     def test_reactions(self):
@@ -158,7 +193,7 @@ class CoreTest(Base):
     def test_client_catalog_requires_agency_publication(self):
         with db.tx() as c:
             c.execute("DELETE FROM properties WHERE listing_id != 'tg1'")
-        self.assertEqual([i["id"] for i in core.published()], ["tg1"])   # the channel post, imported as an object
+        self.assertEqual([i["id"] for i in core.published()], [self.o("tg1")])   # the channel post, imported as an object
         with db.tx() as c:
             c.execute("DELETE FROM properties")
         self.assertEqual(core.published(), [])   # a channel post without an object is not a catalog entry
@@ -175,7 +210,8 @@ class CoreTest(Base):
         self.publish_objects("ss2")
         with db.tx() as c:
             c.execute("INSERT INTO properties (listing_id, status, created_at, updated_at) VALUES ('ss1', 'taken', now(), now())")
-        self.assertEqual(sorted(i["id"] for i in core.published()), ["ss2"])   # tg1 lost its object above
+        self.assertEqual(sorted(self.ad(i["id"]) for i in core.published()), ["ss2"])   # tg1 lost its object above
+        self.assertNotIn("ss2", [i["id"] for i in core.published()])  # the bot searches the object's row, not the ad
         self.assertTrue(core.react(self.cl, "ss2", "like"))
         with db.tx() as c:
             c.execute("UPDATE properties SET status = 'rented' WHERE listing_id = 'ss2'")

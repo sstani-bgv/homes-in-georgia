@@ -169,7 +169,7 @@ def now_hm():
     return datetime.now(timezone.utc).astimezone(texts.tz()).strftime("%H:%M")
 
 
-SOURCE_RU = {"agency": "канал агентства", "ss.ge": "ss.ge", "myhome.ge": "myhome.ge", "livo.ge": "livo.ge",
+SOURCE_RU = {"agency": "канал агентства", "object": "база объектов", "ss.ge": "ss.ge", "myhome.ge": "myhome.ge", "livo.ge": "livo.ge",
              "korter.ge": "korter.ge"}
 
 
@@ -296,15 +296,16 @@ LIKE_DM_POST = {"ru": "Здравствуйте! Мне нравится это�
 
 
 def channel_post_of(listing_id):
-    """Our channel post of this listing's object (properties.post_url, else an agency listing's own t.me url) or None."""
-    r = store.q("SELECT post_url FROM properties WHERE listing_id = %s AND NULLIF(BTRIM(post_url), '') IS NOT NULL "
-                "ORDER BY id LIMIT 1", (listing_id,), one=True)
+    """Our channel post of this listing's object (properties.post_url, else an agency listing's own t.me url) or None.
+    A catalog row (obj<property id>, services/catalog.py) is its object."""
+    r = store.q("SELECT post_url FROM properties WHERE (listing_id = %s OR 'obj' || id = %s) AND "
+                "NULLIF(BTRIM(post_url), '') IS NOT NULL ORDER BY id LIMIT 1", (listing_id, listing_id), one=True)
     if r:
         return r["post_url"]
     i = store.listing(listing_id) or {}
     urls = i.get("urls") or []
     urls = json.loads(urls) if isinstance(urls, str) else urls
-    return next((u for u in urls if "t.me/" in u), None) if i.get("source") == "agency" else None
+    return next((u for u in urls if "t.me/" in u), None) if i.get("source") in ("agency", "object") else None
 
 
 def operator_username():
@@ -412,7 +413,7 @@ USERBOT_FAILED = "Userbot оператора не смог отправить с
 
 def listing_link(i):
     """«Открыть объявление»: only our own channel's post (never a competitor source)."""
-    u = next((u for u in i.get("urls") or [] if i.get("source") == "agency" and u.startswith("https://t.me/")), None)
+    u = next((u for u in i.get("urls") or [] if i.get("source") in ("agency", "object") and u.startswith("https://t.me/")), None)
     return u
 
 

@@ -360,6 +360,16 @@ def listing_photo(listing_id: str, n: int, preview: bool = Query(False, alias="p
     if not 0 <= n < len(photos):
         raise DomainError("not_found", "photo not found")
     ref = str(photos[n])
+    if ref.startswith("s3:"):  # a CRM object's catalog row (services/catalog.py): the object's own file in the storage
+        key = ref[3:]
+        if storage.is_s3():
+            pk = storage.preview_key(key)
+            return RedirectResponse(storage.url(pk if preview and storage.s3_has(pk) else key), status_code=307)
+        f = storage.local_path(key)
+        if not f.is_file():
+            raise DomainError("not_found", "photo file missing")
+        f = (storage.local_preview(f, key) if preview else None) or f
+        return FileResponse(f, media_type=mimetypes.guess_type(f.name)[0] or "image/jpeg")
     if ref.startswith(("http://", "https://")):
         return RedirectResponse(ref)
     for root in PHOTO_ROOTS:

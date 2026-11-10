@@ -276,12 +276,12 @@ class CommercialLlm(Base):
     def test_excluded_unless_asked(self):
         core.add_input(self.cl, text="2 спальни в Ваке")
         res = core.search(self.cl)
-        self.assertNotIn("tg2 |", self.calls[-1])
-        self.assertEqual([x["listing"]["id"] for x in res["items"]], ["ss1", "tg3"])
+        self.assertNotIn(f"{self.o('tg2')} |", self.calls[-1])
+        self.assertEqual(self.ids(res), ["ss1", "tg3"])
         core.add_input(core.client("tg", 42), text="а ещё нужен офис под студию")
         res = core.search(core.client("tg", 42))
-        self.assertIn("tg2 |", self.calls[-1])
-        self.assertEqual([x["listing"]["id"] for x in res["items"]], ["tg2", "ss1", "tg3"])  # a new request: all again
+        self.assertIn(f"{self.o('tg2')} |", self.calls[-1])
+        self.assertEqual(self.ids(res), ["tg2", "ss1", "tg3"])  # a new request: all again
 
     def test_keywords(self):
         for t in ("ищу офис", "коммерческое помещение", "помещение под кафе", "need an office in Vake",
@@ -311,11 +311,11 @@ class CommercialHybrid(Base):
 
     def test_hybrid_excludes_unless_asked(self):
         core.add_input(self.cl, text="2 спальни в Ваке до 1000$")
-        ids = [x["listing"]["id"] for x in core.search(self.cl)["items"]]
+        ids = self.ids(core.search(self.cl))
         self.assertEqual(sorted(ids), ["ss1", "ss2"])
         cl = core.client("tg", 43, lang_hint="ru")
         core.add_input(cl, text="commercial space in Vake up to 1000$")
-        ids = [x["listing"]["id"] for x in core.search(cl)["items"]]
+        ids = self.ids(core.search(cl))
         self.assertIn("tg2", ids)
 
 

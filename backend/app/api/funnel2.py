@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, require_roles
 from app.db import get_db
 from app.models import Client, Deal, Lead, Listing, Property, User
+from app.services import catalog
 from app.services import leads as L
 from app.services.common import get_or_404
 from app.services.errors import forbidden
@@ -71,7 +72,7 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
     lead = _visible(db, lead_id, user)
     d = L.card(db, lead, user)
     prop = db.get(Property, lead.property_id) if lead.property_id else (
-        db.scalar(select(Property).where(Property.listing_id == lead.listing_id)) if lead.listing_id else None)
+        catalog.property_for(db, lead.listing_id))
     listing = db.get(Listing, lead.listing_id) if lead.listing_id else None
     owner = L.owner_contact(db, lead, user, prop) or {}
     deal = db.get(Deal, lead.deal_id) if lead.deal_id else None

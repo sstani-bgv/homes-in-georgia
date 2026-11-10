@@ -92,6 +92,17 @@ class JourneyE2E(unittest.TestCase):
         lst.write_text(json.dumps([listing("tg1", "Ваке", 850, 2, details={"exclusive": True}), listing("tg2", "Сабуртало", 700, 1),
                                    listing("tg3", "Глдани", 400, 1), listing("tg4", "Ваке", 3000, 4)]))
         db.sync(str(lst), str(cls.tmp / "none.json"))
+        # the agency's posts are published CRM objects; the bot searches their catalog rows (backend services/catalog.py)
+        with db.tx() as c:
+            for n in range(1, 5):
+                c.execute("INSERT INTO properties (listing_id, status, post_url, post_message_id, district, price, bedrooms, "
+                          "address, created_at, updated_at) SELECT id, 'published', 'https://t.me/rent_tbilisi_ge/' || ?, ?, "
+                          "district, price_usd, bedrooms, address, now(), now() FROM listings WHERE id = ?", (n, str(n), f"tg{n}"))
+        from app.db import SessionLocal
+        from app.services import catalog
+        with SessionLocal() as s:
+            catalog.sync_all(s)
+            cls.obj = {p.listing_id: catalog.catalog_id(p.id) for p in s.query(catalog.Property)}
         with db.tx() as c:
             c.execute("INSERT INTO users (tg_id, name, username, role) VALUES (?, 'Нино', 'nino_e2e', 'operator')", (OPERATOR["id"],))
             c.execute("INSERT INTO users (tg_id, name, username, role) VALUES (?, 'Тамара', 'tamara_e2e', 'operator')", (OPERATOR2["id"],))
@@ -137,7 +148,7 @@ class JourneyE2E(unittest.TestCase):
         cls.prompts.append(prompt)
         props = schema["properties"]
         if "top" in props:
-            ids = [ln.split(" | ")[0] for ln in prompt.split("Каталог")[-1].splitlines() if ln.startswith("tg")]
+            ids = [ln.split(" | ")[0] for ln in prompt.split("Каталог")[-1].splitlines() if ln.startswith("obj")]
             return {"understood": "2 спальни в Ваке до $900", "matches_total": len(ids), "max_price_usd": None,
                     "top": [{"id": x, "reason": "подходит по анкете"} for x in ids]}
         return {"place": None, "label": None, "radius_km": None}
@@ -254,7 +265,7 @@ class JourneyE2E(unittest.TestCase):
         card = self.with_button(cid, "❤️ Нравится", m)
         cat = self.prompts[-1].split("Каталог")[-1]
         self.assertIn("Анкета клиента:", self.prompts[-1])
-        self.assertNotIn("tg4", cat)  # $3000: over the questionnaire budget (districts may be relaxed when < 5 fit, budget never)
+        self.assertNotIn(self.obj["tg4"], cat)  # $3000: over the questionnaire budget (districts may be relaxed when < 5 fit, budget never)
         self.assertIn("💡 подходит по анкете", card["text"])
         self.assertNotIn("t.me", card["text"])  # no sources on client cards
         with db.tx() as c:  # stage 8: the shown cards and the saved questionnaire outlive the next request
@@ -532,7 +543,7 @@ class JourneyE2E(unittest.TestCase):
                   and "Учёл" not in (c.get("text") or ""), mark, "search after «Ещё»")
         self.assertGreater(len(self.prompts), before)
         card = self.find(u["id"], lambda c: any(b["text"] == "❤️ Нравится" and (b.get("callback_data") or "").startswith("like:")
-                                                and b["callback_data"] != "like:tg1" for row in f.markup(c) for b in row), mark, "❤️ as the callback: Лера has a lead")
+                                                and b["callback_data"] not in ("like:tg1", f"like:{self.obj['tg1']}") for row in f.markup(c) for b in row), mark, "❤️ as the callback: Лера has a lead")
         like = next(b["callback_data"] for row in f.markup(card) for b in row if b["text"] == "❤️ Нравится")
         m = self.press(u, u["id"], "❤️ Нравится", since=mark)
         ack = self.find(u["id"], lambda c: c["method"] == "editMessageReplyMarkup" and c.get("message_id") == card["message_id"], m)
@@ -570,7 +581,9 @@ class JourneyE2E(unittest.TestCase):
             c.execute("INSERT INTO users (name, username, role) VALUES ('Зураб', '@Zura_e2e', 'operator')")
         cl = core.client("tg", u["id"], chat_id=u["id"], username="keti_e2e", name="Кети", lang_hint="ru")
         m = f.mark()
-        lead = self.svc(leads.create_from_like, cl["id"], "tg3", "1 спальня")
+        with db.tx() as c:  # an object still on the market (the journey above rented one through a deal)
+            free = c.execute("SELECT listing_id FROM properties WHERE status = 'published' ORDER BY id DESC LIMIT 1").fetchone()[0]
+        lead = self.svc(leads.create_from_like, cl["id"], free, "1 спальня")
         self.with_text(GROUP["id"], f"Заявка #{lead.id}", m)
         m = self.press(zura, GROUP["id"], "✋ Взять заявку", group=GROUP, since=m)
         ans = f.wait(lambda calls: next((c for c in calls if c["method"] == "answerCallbackQuery"), None), since=m)

@@ -403,7 +403,7 @@ def sync(listings_path="listings.json", dropped_path="raw/dropped_agents.json", 
             counts[status] = counts.get(status, 0) + 1
         if full:
             # the agency channel is no longer parsed (2026-11-09): its ads are the frozen source of the base objects
-            live = c.execute("SELECT id FROM listings WHERE status != 'gone' AND source != 'agency'").fetchall()
+            live = c.execute("SELECT id FROM listings WHERE status != 'gone' AND source NOT IN ('agency', 'object')").fetchall()
             missing = [r["id"] for r in live if r["id"] not in ids]
             if len(ids) < 0.5 * len(live):  # half the base vanished: the ingest is broken, not the market
                 print(f"sync: fresh ingest has {len(ids)} vs {len(live)} live, not marking gone (use a good ingest)")
