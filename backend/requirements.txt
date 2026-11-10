@@ -13,6 +13,7 @@ boto3==1.43.125   # app/storage.py: MEDIA_STORAGE=s3 (R2 / Hetzner / MinIO)
 pillow==13.0.0   # app/storage.py: photo previews (same as bot/requirements.txt)
 pillow-heif==1.8.1   # app/storage.py: previews of HEIC originals
 telethon==1.44.0   # app/telegram/userbot.py (operator userbot); imported only there
+segno==1.6.6   # app/api/content.py: the operator login QR (SVG), pure Python
 tzdata
 # tests
 pytest==9.2.0

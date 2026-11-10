@@ -237,6 +237,56 @@ def schedule_put(body: dict[str, int], db: Session = Depends(get_db, scope="func
     return _schedule(db)
 
 
+# ---------------------------------------------------------------- operator account (userbot QR login)
+
+def _userbot(method: str, path: str, body: dict | None = None) -> dict:
+    """The userbot process (USERBOT_URL) owns the operator's Telegram session; the CRM only asks it. The QR url is
+    rendered here as SVG, the 2FA password passes through and is never stored."""
+    import httpx
+    import segno
+    url = (env.USERBOT_URL or "").strip().rstrip("/")
+    if not url:
+        return {"configured": False}
+    try:
+        r = httpx.request(method, f"{url}{path}", json=body, headers={"X-Userbot-Token": env.SECRET_KEY}, timeout=35)
+        st = r.json()
+    except Exception:  # noqa: BLE001 — the service is down or restarting
+        return {"configured": True, "reachable": False}
+    if r.status_code != 200:
+        return {"configured": True, "reachable": False}
+    login = st.get("login") or {}
+    if login.get("url"):
+        login["qr_svg"] = segno.make(login["url"], error="m").svg_inline(scale=5, border=2)
+    return {"configured": True, "reachable": True, **st}
+
+
+@router.get("/userbot")
+def userbot_status(user: User = Depends(require_roles(*ADMIN_ROLES))):
+    return _userbot("GET", "/status")
+
+
+class UserbotPassword(BaseModel):
+    password: str
+
+
+@router.post("/userbot/login")
+def userbot_login(user: User = Depends(require_roles(*ADMIN_ROLES))):
+    return _userbot("POST", "/login", {})
+
+
+@router.post("/userbot/password")
+def userbot_password(body: UserbotPassword, user: User = Depends(require_roles(*ADMIN_ROLES))):
+    return _userbot("POST", "/password", {"password": body.password})
+
+
+@router.post("/userbot/logout")
+def userbot_logout(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+    out = _userbot("POST", "/logout", {})
+    log_event(db, "settings", "-", "userbot_logout", user)
+    db.commit()
+    return out
+
+
 # ---------------------------------------------------------------- moderation (bot "Проверка")
 
 class ModerationIn(BaseModel):

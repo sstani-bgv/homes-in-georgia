@@ -1,7 +1,10 @@
 """Operator userbot: the operator's own Telegram account (Telethon). The dialogue lives in the operator's DMs: a client
 who never contacted the operator gets ❤️ as a t.me/<operator>?text=«…вариант #<obj> · …» link (notify.like_button), and
-that first DM makes the lead here; the operator talks to clients there, and the CRM keeps the history. Enabled only when OPERATOR_USERBOT_SESSION (a Telethon
-StringSession) + API_ID + API_HASH are set.
+that first DM makes the lead here; the operator talks to clients there, and the CRM keeps the history. Needs API_ID +
+API_HASH; the login itself is a QR code in the CRM (Управление → Настройки → «Аккаунт оператора»): without a login the
+process waits for the admin's «Подключить», shows the QR (+ the 2FA password if the account has one), saves the
+Telethon StringSession into settings.userbot_session and starts working. OPERATOR_USERBOT_SESSION (.env) is the old way
+and is used only while no QR login is saved.
 
 Run: `cd backend && python -m app.telegram.userbot` (compose: the commented `userbot` service). One process owns the
 session (two clients on one session get it revoked), so the CRM/bot reach it over HTTP: USERBOT_URL (e.g.
@@ -22,7 +25,10 @@ http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id
   time; {own} after «Другое время» -> leads.client_own_time; {comment} after the refusal reason «Другое» ->
   leads.client_comment; {kind: t14, deal} -> «3 2 3» = the three T14 scores; {problem: deal} -> a T14 complaint.
 
-Creating the StringSession (the operator logs in THEMSELVES, on their own computer; nobody else sees the code):
+HTTP (compose network only, X-Userbot-Token = SECRET_KEY): POST /send; GET /status; POST /login (start the QR),
+/password {password} (2FA, never stored), /logout (log the session out in Telegram and forget it).
+
+Creating a StringSession by hand instead (the operator logs in THEMSELVES, on their own computer):
     pip install telethon
     python -c "from telethon.sync import TelegramClient; from telethon.sessions import StringSession; \
 import os; c = TelegramClient(StringSession(), int(os.environ['API_ID']), os.environ['API_HASH']); c.start(); \
@@ -36,6 +42,7 @@ import json
 import logging
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.telegram import store, texts
@@ -57,7 +64,78 @@ TIME_HINT = re.compile(r"\d{1,2}[:.]\d{2}|\d\s*(?:ч|h|am|pm)\b|после|after
 
 
 def enabled():
-    return all(conf(k).strip() for k in ("OPERATOR_USERBOT_SESSION", "API_ID", "API_HASH"))
+    return all(conf(k).strip() for k in ("API_ID", "API_HASH"))
+
+
+# the running process: the Telethon client, who is logged in, and the QR login in progress (shown in the CRM)
+STATE = {"client": None, "me": None, "login": {"status": "idle"}, "start": None, "password": None, "loop": None}
+LOGIN_WINDOW_S = 300  # a QR (refreshed every ~30 s) or a 2FA prompt waits this long, then the admin presses again
+
+
+def stored_session():
+    """The QR login saved by this process wins; OPERATOR_USERBOT_SESSION (.env) is the old manual way."""
+    r = store.q("SELECT value FROM settings WHERE key = 'userbot_session'", one=True)
+    v = (r and r["value"] or "").strip()
+    return "" if v == "-" else v or conf("OPERATOR_USERBOT_SESSION").strip()
+
+
+def save_session(value):
+    """value: a StringSession; "" = logged out from the CRM ("-": the .env session is not used either)."""
+    store.q("INSERT INTO settings (key, value) VALUES ('userbot_session', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (value or "-",))
+    if not value:
+        store.q("DELETE FROM settings WHERE key = 'userbot_tg_id'")
+
+
+def status():
+    me = STATE["me"]
+    return {"enabled": enabled(), "authorized": bool(me),
+            "me": me and {"id": me.id, "username": me.username, "name": " ".join(filter(None, [me.first_name, me.last_name]))},
+            "login": {k: v for k, v in STATE["login"].items() if k in ("status", "url", "error", "expires")}}
+
+
+async def login(client):
+    """QR login on a connected, not authorized client -> True once logged in (session saved). STATE["login"]: status
+    qr (url = tg://login?token=…, scan in Telegram → Settings → Devices) -> password (2FA) -> done | expired | error."""
+    from telethon.errors import PasswordHashInvalidError, SessionPasswordNeededError
+    L = STATE["login"] = {"status": "starting"}
+    deadline = time.time() + LOGIN_WINDOW_S
+    try:
+        try:
+            qr = await client.qr_login()
+            while True:
+                L.update(status="qr", url=qr.url, expires=qr.expires.timestamp())
+                try:
+                    await qr.wait()
+                    break
+                except asyncio.TimeoutError:  # this token expired: a new one, until the window closes
+                    if time.time() > deadline:
+                        STATE["login"] = {"status": "expired"}
+                        return False
+                    await qr.recreate()
+        except SessionPasswordNeededError:
+            L.update(status="password", url=None, error=None)
+            while True:
+                STATE["password"] = asyncio.get_running_loop().create_future()
+                try:
+                    pw = await asyncio.wait_for(STATE["password"], max(1, deadline - time.time()))
+                except asyncio.TimeoutError:
+                    STATE["login"] = {"status": "expired"}
+                    return False
+                try:
+                    await client.sign_in(password=pw)
+                    break
+                except PasswordHashInvalidError:
+                    L.update(error="wrong_password")
+    except Exception as e:  # noqa: BLE001 — shown in the CRM, the admin presses again
+        log.warning("userbot login failed: %r", e)
+        STATE["login"] = {"status": "error", "error": type(e).__name__}
+        return False
+    finally:
+        STATE["password"] = None
+    save_session(client.session.save())
+    STATE["login"] = {"status": "done"}
+    return True
 
 
 def set_state(client_id, **kv):
@@ -280,24 +358,58 @@ def match_client_by_id(client_id):
 # ---------- the process ----------
 
 def serve_http(client, loop, port):
-    """POST /send for the CRM/bot (the compose network only; X-Userbot-Token = SECRET_KEY)."""
+    """POST /send, GET /status, POST /login /password /logout for the CRM/bot (the compose network only;
+    X-Userbot-Token = SECRET_KEY). client: the logged-in client (tests); the process sets STATE["client"] itself."""
+    if client is not None:
+        STATE["client"] = client
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
+        def reply(self, code, body):
+            raw = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def allowed(self):
+            return hmac.compare_digest(self.headers.get("X-Userbot-Token", ""), conf("SECRET_KEY"))
+
+        def do_GET(self):
+            if self.path != "/status" or not self.allowed():
+                return self.reply(403, {"ok": False})
+            self.reply(200, status())
+
         def do_POST(self):
-            def reply(code, body):
-                raw = json.dumps(body).encode()
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(raw)))
-                self.end_headers()
-                self.wfile.write(raw)
-            if self.path != "/send" or not hmac.compare_digest(self.headers.get("X-Userbot-Token", ""), conf("SECRET_KEY")):
+            reply = self.reply
+            if self.path not in ("/send", "/login", "/password", "/logout") or not self.allowed():
                 return reply(403, {"ok": False})
+            p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            if self.path == "/login":
+                if not STATE["me"] and STATE["start"] and STATE["login"].get("status") not in ("qr", "password", "starting"):
+                    loop.call_soon_threadsafe(STATE["start"].set)
+                    STATE["login"] = {"status": "starting"}
+                return reply(200, status())
+            if self.path == "/password":
+                fut = STATE["password"]
+                if fut and not fut.done() and p.get("password"):
+                    loop.call_soon_threadsafe(fut.set_result, str(p["password"]))
+                    STATE["login"].update(error=None)
+                return reply(200, status())
+            if self.path == "/logout":
+                if STATE["me"] and STATE["client"]:
+                    asyncio.run_coroutine_threadsafe(STATE["client"].log_out(), loop).result(30)
+                save_session("")
+                STATE["me"] = None
+                return reply(200, status())
+            c = STATE["client"]
+            if not STATE["me"] and client is None:
+                return reply(503, {"ok": False, "error": "operator account is not logged in"})
             try:
-                p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-                mid = asyncio.run_coroutine_threadsafe(send(client, int(p["client_id"]), p["text"], p.get("options"), p.get("choice"),
+                mid = asyncio.run_coroutine_threadsafe(send(c, int(p["client_id"]), p["text"], p.get("options"), p.get("choice"),
                                                             p.get("inline")), loop).result(30)
                 reply(200, {"ok": True, "message_id": mid})
             except Exception as e:  # noqa: BLE001
@@ -308,16 +420,12 @@ def serve_http(client, loop, port):
     return srv
 
 
-async def run(client=None):
-    """client: an already connected Telethon client (a local stand passes its own session); else OPERATOR_USERBOT_SESSION."""
-    from telethon import TelegramClient, events
-    from telethon.sessions import StringSession
-    if client is None:
-        client = TelegramClient(StringSession(conf("OPERATOR_USERBOT_SESSION").strip()), int(conf("API_ID")), conf("API_HASH"))
-        await client.connect()
-    if not await client.is_user_authorized():  # never an interactive login on the server
-        raise SystemExit("userbot: OPERATOR_USERBOT_SESSION is not a valid login; the operator must create a new one")
-    me = await client.get_me()
+async def run(client, http=True):
+    """Work as a connected, logged-in client until it disconnects (logged out in Telegram, session revoked, network).
+    http: also start the HTTP server (a local stand with its own session; the process starts it once in amain)."""
+    from telethon import events
+    me = STATE["me"] = await client.get_me()
+    STATE["client"] = client
     store.q("INSERT INTO settings (key, value) VALUES ('userbot_tg_id', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             (str(me.id),))  # the bot answers «slots:» inline queries from this account only
     await client.get_dialogs(limit=300)  # fills the entity cache (access hashes) for clients who already wrote
@@ -334,17 +442,50 @@ async def run(client=None):
     async def outgoing(ev):
         await asyncio.to_thread(on_outgoing, ev.chat_id, ev.raw_text, me.id)
 
+    if http:
+        serve_http(client, asyncio.get_running_loop(), int(conf("USERBOT_PORT", "8091")))
+    log.info("userbot up as @%s", me.username)
+    try:
+        await client.run_until_disconnected()
+    finally:
+        STATE["me"] = None
+
+
+async def amain():
+    """Forever: log in from the saved session and work; without a login wait for the CRM's «Подключить» (QR)."""
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+    loop = STATE["loop"] = asyncio.get_running_loop()
+    STATE["start"] = asyncio.Event()
     port = int(conf("USERBOT_PORT", "8091"))
-    serve_http(client, asyncio.get_running_loop(), port)
-    log.info("userbot up as @%s, /send on :%s", me.username, port)
-    await client.run_until_disconnected()
+    serve_http(None, loop, port)
+    log.info("userbot HTTP on :%s", port)
+    while True:
+        client = TelegramClient(StringSession(stored_session()), int(conf("API_ID")), conf("API_HASH"))
+        STATE["client"] = client
+        try:
+            await client.connect()
+            if await client.is_user_authorized():
+                await run(client, http=False)
+            else:
+                log.info("userbot: no login, waiting for the QR login from the CRM")
+                STATE["start"].clear()
+                if STATE["login"].get("status") == "starting":
+                    STATE["start"].set()
+                await STATE["start"].wait()
+                await login(client)
+        except Exception as e:  # noqa: BLE001 — network or a revoked session: next round
+            log.warning("userbot: %r", e)
+            await asyncio.sleep(10)
+        finally:
+            await client.disconnect()
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     if not enabled():
-        raise SystemExit("userbot disabled: set OPERATOR_USERBOT_SESSION, API_ID and API_HASH")
-    asyncio.run(run())
+        raise SystemExit("userbot disabled: set API_ID and API_HASH (https://my.telegram.org)")
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

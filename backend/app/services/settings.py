@@ -15,7 +15,8 @@ DEFAULTS = {
 }
 
 
-HIDDEN = ("client_catalog", "userbot_tg_id", "source_runs", "source_every_min")
+# userbot_session: the operator's Telegram login (a full account access), never leaves the server
+HIDDEN = ("client_catalog", "userbot_tg_id", "userbot_session", "source_runs", "source_every_min")
 NUMERIC_MINUTES = ("sla_operator_take_min", "sla_agent_slots_min", "sla_slots_to_client_min", "client_promise_min")
 _MISS = object()
 

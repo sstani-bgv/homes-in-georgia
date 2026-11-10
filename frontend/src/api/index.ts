@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, SourceSchedule, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
+  Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -167,6 +167,12 @@ export const api = {
     put: (b: Settings) => http.put<Settings>('/settings', b),
   },
 
+  userbot: {
+    status: () => http.get<UserbotStatus>('/userbot'),
+    login: () => http.post<UserbotStatus>('/userbot/login', {}),
+    password: (password: string) => http.post<UserbotStatus>('/userbot/password', { password }),
+    logout: () => http.post<UserbotStatus>('/userbot/logout', {}),
+  },
   sources: {
     list: () => http.get<L<Source>>('/sources'),
     create: (b: Partial<Source>) => http.post<Source>('/sources', b),

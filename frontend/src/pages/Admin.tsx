@@ -235,6 +235,62 @@ function TickerAdmin() {
 const METRICS: [string, string][] = [['deals', 'Сделки'], ['platform', 'Комиссия платформы'], ['active_objects', 'Активные объекты'], ['reposts', 'Репосты'],
   ['leaderboard', 'Топ-5 агентов'], ['telegram_top', 'Telegram топ-10'], ['funnel', 'Объекты и заявки по этапам'], ['response_times', 'Время реакции']];
 
+/** The operator's Telegram account for the userbot (DMs with clients, slot cards): log in by a QR code from here. */
+function OperatorAccount() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [pw, setPw] = useState('');
+  const { data: st } = useQuery({
+    queryKey: ['userbot'], queryFn: api.userbot.status,
+    refetchInterval: (q) => (['starting', 'qr', 'password'].includes(q.state.data?.login?.status || '') ? 2000 : false),
+  });
+  const set = (d: unknown) => qc.setQueryData(['userbot'], d);
+  const login = useMutation({ mutationFn: api.userbot.login, onSuccess: set, onError: (e) => toast(errText(e), true) });
+  const send = useMutation({ mutationFn: () => api.userbot.password(pw), onSuccess: (d) => { setPw(''); set(d); }, onError: (e) => toast(errText(e), true) });
+  const logout = useMutation({ mutationFn: api.userbot.logout, onSuccess: (d) => { set(d); toast('Аккаунт оператора отключён'); }, onError: (e) => toast(errText(e), true) });
+  if (!st) return <Card label="Telegram" title="Аккаунт оператора"><Loading /></Card>;
+  const l = st.login?.status;
+  let body;
+  if (!st.configured) body = <div className="muted">Сервис userbot не настроен: на сервере нужен USERBOT_URL и сервис userbot (docs/DEPLOY.md).</div>;
+  else if (!st.reachable) body = <div className="muted">Сервис userbot не отвечает. Если он только что перезапустился, обновите страницу через минуту.</div>;
+  else if (!st.enabled) body = <div className="muted">На сервере не заданы API_ID и API_HASH (my.telegram.org).</div>;
+  else if (st.authorized && st.me) body = (
+    <div className="col gap-sm">
+      <div>Подключён: <b>{st.me.name}</b>{st.me.username && <span className="muted"> @{st.me.username}</span>}</div>
+      <div className="muted" style={{ fontSize: 12 }}>С этого аккаунта уходят сообщения клиентам и карточки времени просмотра, его входящие попадают в заявки.</div>
+      <div><Button variant="secondary" loading={logout.isPending} onClick={() => { if (confirm('Отключить аккаунт оператора? Сеанс завершится в Telegram, сообщения клиентам перестанут уходить.')) logout.mutate(); }}>Отключить</Button></div>
+    </div>
+  );
+  else if (l === 'qr' && st.login?.qr_svg) body = (
+    <div className="col gap-sm">
+      <div style={{ width: 220, background: '#fff', borderRadius: 8 }} dangerouslySetInnerHTML={{ __html: st.login.qr_svg }} />
+      <div className="muted" style={{ fontSize: 13 }}>На телефоне оператора: Telegram → Настройки → Устройства → Подключить устройство, наведите камеру на код. Код обновляется сам.</div>
+    </div>
+  );
+  else if (l === 'password') body = (
+    <div className="col gap-sm">
+      <div>У аккаунта включён облачный пароль. Пусть оператор введёт его сам:</div>
+      <div className="row">
+        <Input type="password" autoComplete="off" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Облачный пароль Telegram" onKeyDown={(e) => { if (e.key === 'Enter' && pw) send.mutate(); }} />
+        <Button disabled={!pw} loading={send.isPending} onClick={() => send.mutate()}>Войти</Button>
+      </div>
+      {st.login?.error === 'wrong_password' && <div style={{ color: 'var(--danger, #c00)', fontSize: 13 }}>Неверный пароль</div>}
+      <div className="faint" style={{ fontSize: 12 }}>Пароль сразу уходит в Telegram и нигде не сохраняется.</div>
+    </div>
+  );
+  else body = (
+    <div className="col gap-sm">
+      {l === 'expired' && <div className="muted">Время на вход вышло (5 минут), начните заново.</div>}
+      {l === 'error' && <div className="muted">Не получилось войти ({st.login?.error}), попробуйте ещё раз.</div>}
+      {l === 'done' || l === 'starting' ? <Loading /> : <>
+        <div className="muted" style={{ fontSize: 13 }}>Аккаунт не подключён: клиентам не уходят сообщения от оператора. Подключите аккаунт оператора по QR-коду.</div>
+        <div><Button loading={login.isPending} onClick={() => login.mutate()}>Подключить по QR-коду</Button></div>
+      </>}
+    </div>
+  );
+  return <Card label="Telegram" title="Аккаунт оператора">{body}</Card>;
+}
+
 function SettingsAdmin() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -261,6 +317,7 @@ function SettingsAdmin() {
   const flag = (k: string) => ['1', 'true', 'on', 'yes'].includes(str(k).toLowerCase());
   return (
     <div className="grid g2">
+      <OperatorAccount />
       <Card label="Заявки" title="Сроки (SLA), минуты">
         <div className="form-grid">
           <Field label="Оператор берёт заявку"><Input type="number" value={str('sla_operator_take_min')} onChange={(e) => setK('sla_operator_take_min', e.target.value)} /></Field>

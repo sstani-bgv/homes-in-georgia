@@ -414,3 +414,67 @@ def test_bot_api_calls_are_paced_and_retry_after_429(monkeypatch):
     monkeypatch.setattr(tg, "_client", lambda: type("C", (), {"post": lambda self, url, data=None, files=None:
                                                               type("R", (), {"json": lambda s: replies.pop(0)})()})())
     assert tg.call("sendMessage", chat_id=1, text="x") == {"message_id": 7}
+
+
+def test_qr_login_with_2fa_then_logout(db):
+    """«Аккаунт оператора»: the QR is shown, the account wants its 2FA password (a wrong one first), the session is
+    saved into settings (hidden from the settings API) and wins over .env; logout forgets it, .env included."""
+    import threading
+    import time
+    from datetime import datetime as dt
+
+    import httpx
+    from telethon.errors import PasswordHashInvalidError, SessionPasswordNeededError
+
+    from app.services import settings as settings_svc
+
+    class QR:
+        url, expires = "tg://login?token=abc", dt.now(timezone.utc) + timedelta(seconds=30)
+
+        async def wait(self):
+            raise SessionPasswordNeededError(None)
+
+    class Fake:
+        session = type("S", (), {"save": lambda self: "SESSION-STRING"})()
+        logged_out = False
+
+        async def qr_login(self):
+            return QR()
+
+        async def sign_in(self, password):
+            if password != "right":
+                raise PasswordHashInvalidError(None)
+
+        async def log_out(self):
+            Fake.logged_out = True
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    srv = userbot.serve_http(None, loop, 0)
+    url, hdr = f"http://127.0.0.1:{srv.server_port}", {"X-Userbot-Token": userbot.conf("SECRET_KEY")}
+    try:
+        assert httpx.get(f"{url}/status").status_code == 403
+        done = asyncio.run_coroutine_threadsafe(userbot.login(Fake()), loop)
+
+        def wait_for(status, error=None):
+            for _ in range(100):
+                st = httpx.get(f"{url}/status", headers=hdr).json()["login"]
+                if st["status"] == status and st.get("error") == error:
+                    return st
+                time.sleep(0.02)
+            raise AssertionError(st)
+        wait_for("password")
+        httpx.post(f"{url}/password", headers=hdr, json={"password": "wrong"})
+        wait_for("password", "wrong_password")
+        httpx.post(f"{url}/password", headers=hdr, json={"password": "right"})
+        assert done.result(5) is True and wait_for("done")
+        assert userbot.stored_session() == "SESSION-STRING"
+        assert "userbot_session" not in settings_svc.all(db)
+
+        userbot.STATE.update(me=type("Me", (), {"id": 1})(), client=Fake())
+        httpx.post(f"{url}/logout", headers=hdr, json={})
+        assert Fake.logged_out and userbot.STATE["me"] is None and userbot.stored_session() == ""
+    finally:
+        srv.shutdown()
+        loop.call_soon_threadsafe(loop.stop)
+        userbot.STATE.update(me=None, client=None, login={"status": "idle"})

@@ -44,8 +44,8 @@ services:
     depends_on: { api: { condition: service_started } }
 
   # Operator userbot (Telethon, the operator's own account; backend/app/telegram/userbot.py): sends viewing slots to
-  # clients. Set OPERATOR_USERBOT_SESSION, API_ID, API_HASH and USERBOT_URL=http://userbot:8091 in .env, then uncomment
-  # (docs/DEPLOY.md «Один бот и userbot оператора»). Never publish its port. Exits (and restarts) without the session: comment it out there.
+  # clients. Needs API_ID, API_HASH and USERBOT_URL=http://userbot:8091 in .env; the operator logs in by a QR code in the
+  # CRM (Управление → Настройки → «Аккаунт оператора»), no session in .env needed. Never publish its port.
   userbot:
     <<: *app
     command: ["sh", "-c", "cd backend && python -m app.telegram.userbot"]
