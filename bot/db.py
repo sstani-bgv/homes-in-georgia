@@ -433,6 +433,9 @@ def match_new(ids):
         return {"error": len(ids)}
 
 
+SECRET_SETTING = re.compile(r"session|token|secret|password", re.I)
+
+
 def stats():
     with tx() as c:
         return {
@@ -441,7 +444,9 @@ def stats():
             "clients": c.execute("SELECT COUNT(*) FROM clients").fetchone()[0],
             "staff": c.execute(f"SELECT COUNT(*) FROM users WHERE {STAFF_SQL}").fetchone()[0],
             "sources": c.execute("SELECT COUNT(*) FROM sources WHERE enabled = 1").fetchone()[0],
-            "settings": dict(c.execute("SELECT key, value FROM settings WHERE key NOT LIKE '%_defaults'").fetchall()),
+            # printed by refresh.sh / run.py --check into logs: never the operator's Telegram login or other secrets
+            "settings": {k: v for k, v in c.execute("SELECT key, value FROM settings WHERE key NOT LIKE '%_defaults'").fetchall()
+                         if not SECRET_SETTING.search(k)},
         }
 
 
