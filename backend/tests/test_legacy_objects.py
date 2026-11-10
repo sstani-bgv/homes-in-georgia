@@ -72,3 +72,9 @@ def test_prefill_takes_empty_fields_from_older_posts(db):
     assert (p.address, p.total_floors, p.floor, p.price) == ("5 Abashidze St", 12, 4, 700)  # the newer price stays
     assert p.post_fields["building"] == "NewBuilding" and p.post_fields["heating"] == "CentralHeating"
     assert n["total_floors"] == 1 and n["objects"] == 1
+
+
+def test_channel_announcements_are_not_objects():
+    assert not L.is_object_text("❗️#Rented Commercial space in 📍Vera has found a business 🤝💰🎉")
+    assert not L.is_object_text("❗️#FlatRented Nice House in 📍Saburtalo found a tenant 🤝👏🎉")
+    assert L.is_object_text("#Vake 📍 5 Abashidze St\n🏢 #2Bed #Apartment for #Rent | 80 Sq.m")

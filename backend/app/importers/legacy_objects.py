@@ -182,8 +182,13 @@ def body_key(t: str) -> str | None:
     return hashlib.sha1(s[:600].encode()).hexdigest() if len(s) > 80 else None
 
 
+# channel announcements, not flats: «❗️#Rented Commercial space in 📍Vera has found a business», «#FlatRented ... found a
+# tenant», «Daily Actual Listing», «#NewUpdate Hi, Friends!»
+ANNOUNCEMENT = re.compile(r"found (?:a |new )*(?:tenant|business)|daily actual listing|#newupdate", re.I)
+
+
 def is_object_text(t: str | None) -> bool:
-    return bool(t) and "📍" in t and (bedrooms_of(t) is not None or area_of(t) or re.search(r"commercial|house|office",
+    return bool(t) and "📍" in t and not ANNOUNCEMENT.search(t) and (bedrooms_of(t) is not None or area_of(t) or re.search(r"commercial|house|office",
                                                                                             t, re.I))
 
 
