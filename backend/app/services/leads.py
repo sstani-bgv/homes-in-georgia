@@ -96,8 +96,8 @@ def client_listing_eligible(db: Session, listing_id: str) -> bool:
     from: the same object) or the live ad of a fast-tracked one (stage 10: the agent pushed it to the matching clients
     before the shoot). The bot SEARCHES catalog rows only. Same rule as bot/core.py CLIENT_ELIGIBLE."""
     if (pid := catalog.property_id_of(listing_id)) is not None:
-        p = db.get(Property, pid)
-        return p is not None and catalog.visible(p) and db.get(Listing, listing_id) is not None
+        p, row = db.get(Property, pid), db.get(Listing, listing_id)
+        return p is not None and catalog.visible(p) and row is not None and row.status == "published"
     published = and_(Property.status == "published", func.trim(func.coalesce(Property.post_url, "")) != "",
                      func.trim(func.coalesce(Property.post_message_id, "")) != "")
     fast = and_(Property.fast_track_at.isnot(None), Property.status.not_in(("archived", "rented")))

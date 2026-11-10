@@ -100,6 +100,11 @@ def test_bot_catalog_is_the_crm_objects(db):
     assert not leads.client_listing_eligible(db, row.id)  # at once, before the sync
     assert catalog.sync_all(db) == 1 and db.get(Listing, row.id).status == "gone"
     assert not db.execute(text("SELECT l.id FROM listings l WHERE " + _bot_rule("CLIENT_SEARCH"))).all()
+    p.status = "published"
+    db.query(PropertyMedia).filter_by(property_id=p.id, kind="photo").delete()
+    db.commit()
+    assert catalog.sync_all(db) == 1 and db.get(Listing, row.id).status == "gone"  # no photo: no client card
+    assert not leads.client_listing_eligible(db, row.id)
 
 
 def _bot_rule(name):

@@ -98,6 +98,8 @@ class JourneyE2E(unittest.TestCase):
                 c.execute("INSERT INTO properties (listing_id, status, post_url, post_message_id, district, price, bedrooms, "
                           "address, created_at, updated_at) SELECT id, 'published', 'https://t.me/rent_tbilisi_ge/' || ?, ?, "
                           "district, price_usd, bedrooms, address, now(), now() FROM listings WHERE id = ?", (n, str(n), f"tg{n}"))
+            c.execute("INSERT INTO property_media (property_id, path, kind, position) "  # a client card needs a photo
+                      "SELECT id, 'legacy/e2e/' || id || '.jpg', 'photo', 0 FROM properties")
         from app.db import SessionLocal
         from app.services import catalog
         with SessionLocal() as s:

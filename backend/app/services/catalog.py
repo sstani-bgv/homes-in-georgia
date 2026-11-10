@@ -71,8 +71,10 @@ def fields(db: Session, p: Property) -> dict:
     video = next((m for m in media if m.kind == "video"), None)
     if video:
         d["videos"] = [{"key": video.path}]
+    # a client card needs a price and a photo: an object without them stays in the CRM, out of the bot's search
+    shown = visible(p) and p.price is not None and bool(photos)
     return {
-        "status": "published" if visible(p) else "gone", "source": SOURCE, "owner_id": "agency",
+        "status": "published" if shown else "gone", "source": SOURCE, "owner_id": "agency",
         "urls": json.dumps([p.post_url] if p.post_url else []),
         "price_usd": int(p.price) if p.price is not None else None, "area": float(p.area) if p.area is not None else None,
         "floor": p.floor, "bedrooms": p.bedrooms, "address": p.address or "", "district": p.district or "",
