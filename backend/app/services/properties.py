@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote
 
-from sqlalchemy import Text, and_, cast, func, or_, select
+from sqlalchemy import Text, and_, case, cast, func, or_, select
 from sqlalchemy import update as update_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -284,7 +284,9 @@ def new_listing_facets(db: Session) -> dict:
         rows = db.execute(select(col, func.count()).where(*_untaken(), col.isnot(None), col != "")
                           .group_by(col).order_by(func.count().desc()))
         return [{"value": v, "count": n} for v, n in rows]
-    return {"sources": facet(Listing.source), "districts": facet(Listing.district), "metros": facet(_metro())}
+    # Threads is one search over every author (th:<author> per ad): one option, filtered by its type
+    source = case((Listing.source.like("th:%"), "threads"), else_=Listing.source)
+    return {"sources": facet(source), "districts": facet(Listing.district), "metros": facet(_metro())}
 
 
 # ---------------------------------------------------------------- take (C1 → C2)

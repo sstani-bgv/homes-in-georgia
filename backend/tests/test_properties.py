@@ -149,6 +149,11 @@ def test_new_listing_filters(db, client):
     f = client.get("/api/listings/new/facets", headers=auth(georgiy)).json()
     assert {"value": "Сабуртало", "count": 2} in f["districts"] and f["metros"] == [{"value": "Руставели", "count": 1}]
     assert len(f["sources"]) == 3
+    make_listing(db, "th4", source="th:ramal.realestate")
+    make_listing(db, "th5", source="th:gavroshka_esya")  # Threads: one search over every author, one option
+    f = client.get("/api/listings/new/facets", headers=auth(georgiy)).json()
+    assert {"value": "threads", "count": 2} in f["sources"] and not any(x["value"].startswith("th:") for x in f["sources"])
+    assert ids("source=threads") == ["th4", "th5"]
 
 
 def test_feed_similar_dismiss_and_agent(db, client):
