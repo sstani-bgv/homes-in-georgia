@@ -98,6 +98,9 @@ def _out_of_usage(r):
     return "usage" in kind or "limit" in kind
 
 
+LAST_USD = [0.0]  # what the last run_actor cost: the fetcher records it with db.record_run
+
+
 def run_actor(actor, inp):
     """One Apify run, waited for -> dataset items. The first key with usage left runs it (logged as key #n, never the key)."""
     keys = tokens()
@@ -114,6 +117,7 @@ def run_actor(actor, inp):
                 time.sleep(5)
                 run = c.get(f"{API}/actor-runs/{run['id']}").raise_for_status().json()["data"]
             print(f"apify: key #{n}", actor, run["status"], f"${run.get('usageTotalUsd') or 0:.3f}", run.get("chargedEventCounts"))
+            LAST_USD[0] = run.get("usageTotalUsd") or 0
             return c.get(f"{API}/datasets/{run['defaultDatasetId']}/items", params={"clean": "true"}).raise_for_status().json()
     raise NoUsage(f"all {len(keys)} Apify keys are out of usage this month")
 
@@ -192,6 +196,7 @@ def main():
         json.dump(data, open(RAW, "w"), ensure_ascii=False)
         json.dump({"last_run": started}, open(STATE, "w"))
         print(f"facebook: {len(new)} posts from the last {hours:.2f} h, {len(data)} kept for {days} days")
+        db.record_run("facebook", LAST_USD[0], len(new), hours)
     key_by_id = {}
     for g in cfg["facebook_groups"]:
         key_by_id[g.get("id") or g["url"].rstrip("/").split("/")[-1]] = g["key"]

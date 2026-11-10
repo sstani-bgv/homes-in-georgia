@@ -458,6 +458,12 @@ export interface Owner {
 export interface TickerMessage { id: number; text: string; status?: string; created_at?: string }
 export interface NewsItem { id: number; date?: string; text: string }
 
+/** GET /sources/schedule: how often the parser runs a source; paid ones: $ per run + $ per hour of new posts (measured). */
+export interface SourceSchedule {
+  key: string; label: string; every_min: number;
+  paid: { per_run: number; per_hour: number | null; spent_7d: number; runs_7d: number; posts_7d: number } | null;
+}
+
 export interface Source { id: number | string; name: string; kind?: string | null; url?: string | null; enabled: boolean; last_run_at?: string | null; count?: number }
 
 export interface AgentStat {

@@ -15,6 +15,7 @@ DEFAULTS = {
 }
 
 
+HIDDEN = ("client_catalog", "userbot_tg_id", "source_runs", "source_every_min")
 NUMERIC_MINUTES = ("sla_operator_take_min", "sla_agent_slots_min", "sla_slots_to_client_min", "client_promise_min")
 _MISS = object()
 
@@ -67,8 +68,9 @@ def set(db: Session, key: str, value, commit: bool = True) -> None:  # noqa: A00
 
 def all(db: Session) -> dict:  # noqa: A001
     out = dict(DEFAULTS)
-    # userbot_tg_id: written by the operator's userbot itself, not an admin setting
-    out.update({r.key: r.value for r in db.query(Setting).all() if r.key not in ("client_catalog", "userbot_tg_id")})
+    # userbot_tg_id: written by the operator's userbot itself; source_runs: by the parser; source_every_min: its own
+    # page (/sources/schedule). Not admin settings here: the settings form saves everything it got back.
+    out.update({r.key: r.value for r in db.query(Setting).all() if r.key not in HIDDEN})
     return out
 
 

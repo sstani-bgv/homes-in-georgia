@@ -4,7 +4,7 @@ Scraped through the Apify actor dacoder~threads-search-post-scraper (no login, s
 run, however many posts it returns (2026-11-10: 2 queries -> 40 posts, newest 2 h old). The official Graph API
 keyword_search finds only the token owner's own posts until Meta App Review, so it is not used.
 monitorMode: the actor remembers what it gave per query (per Apify account) and returns only new posts, so runs
-every TH_EVERY_MIN (refresh.sh) see fresh ads only; they are merged into raw/threads_apify.json for `days_back` days.
+by the admin schedule (refresh.sh) see fresh ads only; they are merged into raw/threads_apify.json for `days_back` days.
 Keys: the same Apify keys as Facebook (fetch_facebook.tokens). Rentals only: the same filter as Facebook.
 
 Usage: python fetch_threads.py [--days 7] [--reuse]
@@ -15,7 +15,8 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fetch_facebook import download, run_actor, skip_reason
+import db
+from fetch_facebook import LAST_USD, download, run_actor, skip_reason
 
 ACTOR = "dacoder~threads-search-post-scraper"
 RAW, STATE = "raw/threads_apify.json", "raw/threads_state.json"
@@ -46,8 +47,10 @@ def main():
         by_id = {str(x["pk"]): x for x in kept + new if x.get("pk")}  # the same post found by two queries counts once
         data = [x for x in by_id.values() if (x.get("taken_at") or started) >= cut]
         json.dump(data, open(RAW, "w"), ensure_ascii=False)
-        json.dump({"last_run": started}, open(STATE, "w"))
         print(f"threads: {len(new)} new posts for {len(queries)} queries, {len(data)} kept for {days} days")
+        last = json.load(open(STATE)).get("last_run") if os.path.exists(STATE) else None
+        db.record_run("threads", LAST_USD[0], len(new), (started - last) / 3600 if last else 0)
+        json.dump({"last_run": started}, open(STATE, "w"))
 
     out, skipped = [], {}
     for p in data:

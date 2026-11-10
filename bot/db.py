@@ -15,6 +15,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 import sys
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -275,6 +276,31 @@ def sources_config(c):
             "threads_defaults": json.loads(get_setting("threads_defaults", c) or "null") or THREADS_DEFAULTS}
 
 
+# how often refresh.sh runs each fetcher, minutes (admin: Управление → Источники → Расписание, setting source_every_min)
+SCHEDULE_DEFAULTS = {"ss": 360, "myhome": 360, "livo": 360, "korter": 360, "telegram": 360, "facebook": 360, "threads": 480}
+
+
+def schedule(c):
+    try:
+        saved = json.loads(get_setting("source_every_min", c) or "{}")
+    except ValueError:
+        saved = {}
+    return {k: max(15, int(saved.get(k) or v)) for k, v in SCHEDULE_DEFAULTS.items()}
+
+
+def record_run(source, usd, posts, hours):
+    """A paid (Apify) run -> setting source_runs {source: [[ts, usd, posts, hours], ...]} for 7 days: the admin sees the
+    real spend and the monthly price at the chosen frequency. Never fails the fetcher."""
+    try:
+        with tx() as c:
+            runs = json.loads(get_setting("source_runs", c) or "{}")
+            now = time.time()
+            runs[source] = [r for r in runs.get(source, []) if r[0] > now - 7 * 86400] + [[now, round(usd, 4), posts, round(hours, 3)]]
+            set_setting("source_runs", json.dumps(runs), c)
+    except Exception as e:  # noqa: BLE001
+        print(f"record_run {source}: {e}")
+
+
 def export_sources(path="sources.json"):
     with tx() as c:
         cfg = sources_config(c)
@@ -287,6 +313,9 @@ def export_sources(path="sources.json"):
              ",\n".join(f"    {j(x)}" for x in cfg["instagram_accounts"]), "  ],",
              f'  "threads_defaults": {j(cfg["threads_defaults"])}', "}"]
     Path(path).write_text("\n".join(lines) + "\n")
+    with tx() as c:  # refresh.sh sources it: EVERY_<fetcher>=<minutes>
+        Path("data").mkdir(exist_ok=True)
+        Path("data/schedule.sh").write_text("".join(f"EVERY_{k}={v}\n" for k, v in schedule(c).items()))
     return cfg
 
 

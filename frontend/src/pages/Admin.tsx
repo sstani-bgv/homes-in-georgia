@@ -128,6 +128,45 @@ function sourceFromUrl(url: string): { kind: string; key: string } | null {
   return ig ? { kind: 'ig_account', key: ig[1] } : null;
 }
 
+const EVERY = [15, 30, 60, 120, 180, 360, 480, 720, 1440].map((m) => ({ value: m, label: m < 60 ? `раз в ${m} мин` : m === 1440 ? 'раз в сутки' : `раз в ${m / 60} ч` }));
+const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+
+/** Per-source parser frequency; a paid (Apify) source shows its price a month at the chosen frequency. */
+function Schedule() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['sources-schedule'], queryFn: api.sources.schedule });
+  const save = useMutation({
+    mutationFn: (b: Record<string, number>) => api.sources.setSchedule(b),
+    onSuccess: (d) => { qc.setQueryData(['sources-schedule'], d); toast('Расписание сохранено, парсер подхватит его со следующего круга'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  if (!data) return null;
+  return (
+    <Card title="Как часто парсить">
+      {data.map((s) => {
+        const runs = (30 * 1440) / s.every_min;
+        const p = s.paid;
+        const month = p ? runs * p.per_run + (p.per_hour ?? 0) * 720 : 0;
+        const opts = EVERY.some((o) => o.value === s.every_min) ? EVERY : [...EVERY, { value: s.every_min, label: `раз в ${s.every_min} мин` }];
+        return (
+          <div key={s.key} className="list-row">
+            <span className="grow">{s.label}</span>
+            {p ? (
+              <span className="muted" style={{ fontSize: 12, textAlign: 'right' }}>
+                <b>≈ {usd(month)}/мес</b>{p.per_hour === null && ' + посты'}<br />
+                за 7 дней: {usd(p.spent_7d)}, {p.runs_7d} запусков, {p.posts_7d} постов
+              </span>
+            ) : <span className="faint" style={{ fontSize: 12 }}>бесплатно</span>}
+            <Select style={{ width: 150 }} value={s.every_min} onChange={(e) => save.mutate({ [s.key]: Number(e.target.value) })} options={opts} />
+          </div>
+        );
+      })}
+      <div className="faint mt" style={{ fontSize: 12 }}>Apify: Facebook $0.002 за запуск + $0.0007 за новый пост (посты приходят сами, частота меняет только число запусков), Threads $0.03 за поисковый запрос в каждом запуске.</div>
+    </Card>
+  );
+}
+
 function Sources() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -146,6 +185,7 @@ function Sources() {
   const items = itemsOf(data);
   return (
     <div className="col gap-lg">
+      <Schedule />
       <Card title="Добавить источник">
         <div className="row row-wrap" style={{ alignItems: 'flex-end' }}>
           <Field label="Ссылка на Telegram-канал, группу Facebook или Instagram-аккаунт" className="grow"><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://t.me/channel, https://facebook.com/groups/123 или https://instagram.com/user" /></Field>

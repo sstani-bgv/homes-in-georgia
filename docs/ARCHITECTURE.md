@@ -34,7 +34,7 @@ docs/
 ```
 
 Processes (docker-compose services): `db` (postgres), `api` (uvicorn app.main:app), `bot` (python -m bot.run —
-polling), `worker` (python -m app.worker), `refresh` (bot/refresh loop: fetchers + ingest every REFRESH_HOURS).
+polling), `worker` (python -m app.worker), `refresh` (bot/refresh loop: fetchers by the admin schedule «Как часто парсить», ticks every REFRESH_TICK_MIN).
 The frontend is built into `frontend/dist` and served by `api` (single domain, no CORS in prod).
 
 Python imports: `backend/` and repo root are on `PYTHONPATH`; the bot imports `app.services.*`, `app.models`,

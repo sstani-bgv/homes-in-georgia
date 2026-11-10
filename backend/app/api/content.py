@@ -129,6 +129,8 @@ def settings_get(db: Session = Depends(get_db, scope="function"), user: User = D
 def settings_put(body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
     settings.validate(body)
     for k, v in body.items():
+        if k in settings.HIDDEN:  # written by the parser / its own page, never by this form
+            continue
         settings.set(db, k, json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v, commit=False)
     log_event(db, "settings", "-", "updated", user, keys=sorted(body))
     db.commit()
@@ -185,6 +187,54 @@ def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db, scope=
     _apply_source(s, body.model_dump(exclude_unset=True))
     db.commit()
     return source_out(s)
+
+
+# How often the parser runs each source (bot/refresh.sh reads source_every_min through db.py export-sources) and what the
+# paid ones cost: per run (Apify start / per query) and per hour of new posts, measured from the runs the parser
+# recorded (source_runs, 7 days). The page multiplies them by the chosen frequency: $/month.
+SCHEDULE = [("ss", "ss.ge", None), ("myhome", "myhome.ge", None), ("livo", "livo.ge", None), ("korter", "korter.ge", None),
+            ("telegram", "Telegram-каналы", None), ("facebook", "Facebook-группы (Apify)", 0.002),
+            ("threads", "Threads (Apify)", None)]
+SCHEDULE_DEFAULTS = {"ss": 360, "myhome": 360, "livo": 360, "korter": 360, "telegram": 360, "facebook": 360, "threads": 480}
+THREADS_PER_QUERY = 0.03
+
+
+def _schedule(db: Session) -> list[dict]:
+    every = {**SCHEDULE_DEFAULTS, **jload(settings.get(db, "source_every_min"), {})}
+    runs = jload(settings.get(db, "source_runs"), {})
+    queries = len((jload(settings.get(db, "threads_defaults"), {}) or {}).get("queries") or []) or 4
+    out = []
+    for key, label, start in SCHEDULE:
+        paid = None
+        if key in ("facebook", "threads"):
+            rr = runs.get(key) or []
+            spent = sum(r[1] for r in rr)
+            if key == "threads":  # a flat price per query and run, new posts are free
+                per_run = spent / len(rr) if rr else THREADS_PER_QUERY * queries
+                paid = {"per_run": round(per_run, 4), "per_hour": 0}
+            else:  # $0.002 a start + $0.0007 a new post: posts come at their own pace, whatever the frequency
+                hours = sum(r[3] for r in rr if r[3])
+                var = sum(max(0, r[1] - start) for r in rr if r[3])
+                paid = {"per_run": start, "per_hour": round(var / hours, 5) if hours else None}
+            paid |= {"spent_7d": round(spent, 3), "runs_7d": len(rr), "posts_7d": sum(r[2] for r in rr)}
+        out.append({"key": key, "label": label, "every_min": int(every[key]), "paid": paid})
+    return out
+
+
+@router.get("/sources/schedule")
+def schedule_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+    return _schedule(db)
+
+
+@router.put("/sources/schedule")
+def schedule_put(body: dict[str, int], db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+    if any(k not in SCHEDULE_DEFAULTS or not isinstance(v, int) or not 15 <= v <= 7 * 1440 for k, v in body.items()):
+        raise DomainError("bad_setting", "every_min: a known source and 15..10080 minutes")
+    every = {**jload(settings.get(db, "source_every_min"), {}), **body}
+    settings.set(db, "source_every_min", json.dumps(every), commit=False)
+    log_event(db, "settings", "-", "updated", user, keys=["source_every_min"])
+    db.commit()
+    return _schedule(db)
 
 
 # ---------------------------------------------------------------- moderation (bot "Проверка")

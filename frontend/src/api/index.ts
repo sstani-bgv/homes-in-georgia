@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
+  Settings, Source, SourceSchedule, TickerMessage, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -171,6 +171,8 @@ export const api = {
     list: () => http.get<L<Source>>('/sources'),
     create: (b: Partial<Source>) => http.post<Source>('/sources', b),
     update: (id: number | string, b: Partial<Source>) => http.patch<Source>(`/sources/${id}`, b),
+    schedule: () => http.get<SourceSchedule[]>('/sources/schedule'),
+    setSchedule: (b: Record<string, number>) => http.put<SourceSchedule[]>('/sources/schedule', b),
   },
 
   moderation: {

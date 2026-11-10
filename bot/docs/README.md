@@ -30,7 +30,7 @@
 .venv/bin/python -m bot.run --check     # проверка базы: досеять настройки/источники, статистика
 .venv/bin/python -m bot.run             # бот (long polling): BOT_TOKEN, PUBLIC_URL, OPERATORS_CHAT_ID, AGENT_CODE
 bot/refresh.sh                          # одно обновление базы объявлений (fetchers → ingest → db.py sync → embed)
-bot/refresh_loop.sh                     # процесс refresh: сразу и каждые REFRESH_HOURS
+bot/refresh_loop.sh                     # процесс refresh: тик раз в REFRESH_TICK_MIN, источники по расписанию из админки
 cd bot && ../.venv/bin/python -m unittest discover -s test   # тесты (TEST_DATABASE_URL, схема bot_test)
 ```
 
