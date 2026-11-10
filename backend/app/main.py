@@ -89,5 +89,6 @@ def spa(path: str):
             return FileResponse(f)
         index = DIST / "index.html"
         if index.is_file():
-            return FileResponse(index, media_type="text/html")
+            # revalidated on every load: after a deploy the browser picks the new hashed bundle, not a cached old app
+            return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
     return JSONResponse({"detail": "frontend is not built (frontend/dist)", "code": "not_found"}, status_code=404)
