@@ -236,9 +236,7 @@ def row(r):
 # ---------- sources <-> sources.json ----------
 
 # Threads has no groups to list: the fetcher searches posts by these keywords (fetch_threads.py)
-THREADS_DEFAULTS = {"queries": ["сдаю квартиру Тбилиси", "аренда квартиры Тбилиси", "квартира в аренду Тбилиси",
-                                "apartment for rent Tbilisi", "flat for rent Tbilisi", "ქირავდება ბინა თბილისში"],
-                    "per_query": 50, "days_back": 7, "photos": 5}
+THREADS_DEFAULTS = {"queries": ["квартира Тбилиси", "аренда Тбилиси", "rent Tbilisi", "ქირავდება ბინა"], "days_back": 7, "photos": 5}
 
 
 def import_sources(c, cfg):

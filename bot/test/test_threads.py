@@ -12,7 +12,9 @@ class ThreadsTest(unittest.TestCase):
         self.assertIsNone(fetch_threads.skip_reason({"text": TEXT, "photos_src": ["x"]}))
         self.assertEqual(fetch_threads.skip_reason({"text": "Ищу квартиру в Ваке до $900, 2 спальни, с животными", "photos_src": ["x"]}),
                          "ищут квартиру")
-        self.assertAlmostEqual(fetch_threads._ts({"timestamp": "2026-11-08T10:00:00+0000"}), 1794132000, delta=1)
+        p = {"carousel_media": [{"image_versions2": {"candidates": [{"url": "a"}]}}, {"video_versions": []}]}
+        self.assertEqual(fetch_threads.photos_of(p), ["a"])  # carousel images only; a single post uses its own image
+        self.assertEqual(fetch_threads.photos_of({"image_versions2": {"candidates": [{"url": "b"}]}}), ["b"])
         c = ingest.from_threads({"id": "123", "group": "owner", "groups": ["owner"], "post_urls": ["https://www.threads.net/@owner/post/abc"],
                                  "author": "owner", "author_name": "owner", "author_type": None, "date": None, "text": TEXT, "photos": []})
         self.assertEqual((c["id"], c["source"], c["owner_id"], c["price_usd"], c["area"], c["floor"], c["bedrooms"]),
