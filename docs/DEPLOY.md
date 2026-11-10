@@ -6,6 +6,13 @@
 C="docker compose -f deploy/docker-compose.yml --env-file .env"
 ```
 
+## Миграции склеены в одну (0001, 10.11.2026)
+
+Перед первым продом цепочка 0001–0014 заменена одной миграцией `0001` (старые файлы в истории git). Схема та же
+(сверено `pg_dump -s`). Новая база создаётся как обычно (`alembic upgrade head` при старте api). База, которая уже
+прошла старую цепочку (стенд 37.27.206.154), переводится без изменений схемы: `$C exec api sh -c "cd backend && alembic
+stamp 0001 --purge"`, затем `$C up -d --build`. Разделы ниже про 0006/0013 относятся к таким старым базам.
+
 ## База: postgres:16-alpine → pgvector/pgvector:pg16 (этап 1, миграция 0006)
 
 Миграция 0006 требует расширение `vector`, его нет в `postgres:16-alpine`. Поэтому образ базы сменился на
@@ -58,6 +65,26 @@ $C up -d --build                                        # api: alembic upgrade h
 
 Фото объявлений бота (`bot/raw/img`, поле `listings.photos`) бот пока читает с диска; `--listing-photos` только кладёт
 их копию в бакет под ключами `bot/raw/img/<файл>` на будущее.
+
+## Старая база Давида (этап 3): объекты, история и медиа из рабочих групп
+
+Файлы уже лежат в бакете `homes-in-georgia-media` (Hetzner, fsn1, проект Давида) под ключами `legacy/<группа>/<сообщение>.<расш>`;
+там же `legacy/done.jsonl` (файл → объект → sha256) и `legacy/media_plan.jsonl`. Реестр объектов (`registry.json`)
+собирается локально: `python -m app.importers.legacy_objects build ...` (см. docstring), склейки по фото — `--photo-merges`.
+
+1. Бэкап базы (как перед любой выкаткой).
+2. CRM должна смотреть в этот бакет: `S3_*` в `.env` от бакета `homes-in-georgia-media`, `MEDIA_STORAGE=s3`.
+   Если CRM уже пишет в другой бакет — сначала перенести его файлы сюда (`rclone copy`), потом переключить.
+3. Положить `registry.json` и `done.jsonl` (это данные, не код) в том `media` контейнера api:
+   `$C exec api mkdir -p /app/data/legacy && docker cp registry.json homes-platform-api-1:/app/data/legacy/` (так же done.jsonl),
+   CSV свежей таблицы — в `/app/data/legacy-sheets/`.
+4. Свежая таблица: `$C exec api sh -c "cd backend && python -m app.importers.sheets_csv /app/data/legacy-sheets"`.
+5. Загрузка: `$C exec api sh -c "cd backend && python -m app.importers.legacy_objects load --out /app/data/legacy
+   --media /app/data/legacy/done.jsonl"`. Объект, который уже есть в CRM (тот же пост канала или кадастр), не создаётся
+   заново: к нему дописываются история, публикации и фото. Повторный запуск ничего не задваивает.
+6. Превью (640 px WebP, в т.ч. из HEIC): `$C exec api sh -c "cd backend && python -m app.storage previews"` — несколько
+   часов на ~92 тыс. фото; CRM работает и без них (отдаёт оригинал), но HEIC без превью браузеры не показывают.
+7. Проверить: число объектов `source_type='legacy'` ≈ числу в `summary.json`, карточка живого объекта с фото и постами.
 
 ## Эмбеддинги
 

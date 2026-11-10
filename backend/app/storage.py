@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 LISTING_IMG = REPO_ROOT / "bot" / "raw" / "img"  # listings.photos entries are raw/img/<file>, relative to bot/
 PRESIGN_TTL = 3600
 PREVIEW_PX, PREVIEW_Q = 640, 70
-PREVIEW_OF = (".jpg", ".jpeg", ".png", ".webp")  # what Pillow reads here; videos / gif / heic keep the original
+PREVIEW_OF = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif")  # what Pillow (+ pillow-heif) reads; videos / gif keep the original
 
 
 def is_s3() -> bool:
@@ -81,6 +81,11 @@ def preview_key(key: str) -> str:
 def make_preview(data: bytes) -> bytes | None:
     """~PREVIEW_PX px WebP of an image, None if Pillow can't read it (the original is served then)."""
     from PIL import Image, ImageOps
+    try:
+        import pillow_heif  # iPhone originals (HEIC): browsers other than Safari can't show them, the preview can
+        pillow_heif.register_heif_opener()
+    except ImportError:
+        pass
     try:
         with Image.open(io.BytesIO(data)) as im:
             im = ImageOps.exif_transpose(im)

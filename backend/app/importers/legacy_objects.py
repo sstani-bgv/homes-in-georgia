@@ -1,6 +1,7 @@
 """Stage 3: one registry of unique objects from David's two work groups, the agency channel and the Google Sheets.
 
     python -m app.importers.legacy_objects build --groups DIR --channel DIR --sheets DIR --out DIR
+    python -m app.importers.legacy_objects load --out DIR      # after sheets_csv, into DATABASE_URL
 
 Offline (no DB, no Telegram): reads the raw exports and writes out/registry.json (objects with sources, owner, agent,
 status history, deals, media to download), out/review.csv (doubtful merges) and out/summary.json.
@@ -150,7 +151,8 @@ def addr_key(a: str | None) -> str | None:
 
 def phones_of(t: str) -> set[str]:
     out = set()
-    for p in re.findall(r"\+?\d[\d \-()]{7,}\d", t or ""):
+    t = re.sub(r"\S*(?:https?://|t\.me/)\S*", " ", t or "")  # link ids are not phones
+    for p in re.findall(r"\+?\d[\d \-()]{7,}\d", t):
         d = re.sub(r"\D", "", norm_phone(p))
         if len(d) >= 9:
             out.add(d[-9:])
@@ -304,7 +306,7 @@ def load_channel(reg: Registry, cdir: Path):
     return live
 
 
-def build(groups: Path, channel: Path, sheets: Path, out: Path) -> dict:
+def build(groups: Path, channel: Path, sheets: Path, out: Path, photo_merges: Path | None = None) -> dict:
     reg = Registry()
     rec_msgs, rec_by_id, _ = load_group(reg, groups / "recruiting-team-chat", "recruiting-team-chat")
     team_msgs, team_by_id, _ = load_group(reg, groups / "team-chat", "team-chat")
@@ -398,6 +400,26 @@ def build(groups: Path, channel: Path, sheets: Path, out: Path) -> dict:
             if u:
                 sheet_agent.setdefault(u, r["agent"].strip())
 
+    # ---- same Telegram files (photo id, or document name+size) in ≥3 → same object
+    by_file = defaultdict(set)
+    for u in reg.units.values():
+        for x in u["media"]:
+            for k in (x["tl_id"], (x["name"], x["size"]) if x["name"] and x["size"] else None):
+                if k:
+                    by_file[k].add(u["id"])
+    shared = Counter()
+    for us in by_file.values():
+        if 1 < len(us) <= 20:  # ponytail: a file reused in >20 posts is a logo/stock shot, not evidence
+            us = sorted(us)
+            for i, a in enumerate(us):
+                for b in us[i + 1:]:
+                    shared[a, b] += 1
+    for (a, b), n in shared.items():
+        if n >= 3 and reg.find(a) != reg.find(b):
+            ua, ub = reg.units[a], reg.units[b]
+            if reg.union(a, b, "same_files", weak=True) and ua["akey"] and ub["akey"] and ua["akey"] != ub["akey"]:
+                reg.stats["same_files_diff_address"] += 1
+
     # ---- same body text → same object
     by_body = defaultdict(list)
     for u in reg.units.values():
@@ -421,6 +443,13 @@ def build(groups: Path, channel: Path, sheets: Path, out: Path) -> dict:
                 same_area = a["area"] and b["area"] and abs(a["area"] - b["area"]) <= 0.05 * max(a["area"], b["area"])
                 if same_floor and same_area:
                     reg.union(a["id"], b["id"], "address_beds_floor_area", weak=True)
+
+    # ---- photo evidence from the downloaded media (resolve_review.py / exact sha256 groups):
+    # pairs of object keys (= unit ids) whose photos match; owner-phone guard still applies
+    if photo_merges and photo_merges.exists():
+        for a, b in json.loads(photo_merges.read_text()):
+            if a in reg.units and b in reg.units:
+                reg.union(a, b, "same_photos", weak=True)
 
     # review: still separate objects at the same address with the same bedrooms
     for (ak, beds), us in by_addr.items():
@@ -599,6 +628,11 @@ def build(groups: Path, channel: Path, sheets: Path, out: Path) -> dict:
         o["media"] = files
         plan += [{"object": o["key"], **x} for x in files]
 
+    for o in out_objs:  # one object, several owners or very many posts: possibly two flats glued together
+        if len(o["owner_phones"]) > 1 or len(o["units"]) >= 15:
+            reg.review.append({"why": f"one object: {len(o['owner_phones'])} owner phones, {len(o['units'])} posts",
+                               "address": o["address"], "bedrooms": o["bedrooms"], "objects": 1,
+                               "units": " ".join(o["units"][:12])})
     out.mkdir(parents=True, exist_ok=True)
     for o in out_objs:
         o["owner_phones"] = sorted(o["owner_phones"])
@@ -637,15 +671,215 @@ def build(groups: Path, channel: Path, sheets: Path, out: Path) -> dict:
     return summary
 
 
+# ---------------------------------------------------------------- load into the CRM (after sheets_csv)
+
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv")
+
+
+def media_by_object(data: dict, done: Path) -> dict[str, list[dict]]:
+    """The downloaded files (legacy_media done.jsonl) per registry object: every file of every post (unit) the object
+    holds, one per sha256, photos before videos, newest post first. done.jsonl names an older build's object key, which
+    is a unit id, so files follow their unit into whatever object it is merged into now."""
+    unit_obj = {u: o["key"] for o in data["objects"] for u in o["units"]}
+    rows = {}
+    for line in open(done):
+        d = json.loads(line)
+        if "key" in d:
+            rows[d["where"]] = d  # the last success wins
+    out = defaultdict(list)
+    seen = defaultdict(set)
+    vid = lambda d: d["key"].lower().endswith(VIDEO_EXT)
+    for d in sorted(rows.values(), key=lambda d: (vid(d), -int(d["where"].split("/")[1]))):
+        o = unit_obj.get(d["object"])
+        if o and d["sha256"] not in seen[o]:
+            seen[o].add(d["sha256"])
+            out[o].append(d)
+    return out
+
+
+def existing_match(db, o: dict, cache: dict):
+    """A CRM object (not from this import) that is this legacy object: the same agency-channel post, else the same
+    cadastral code. Owner phone + address is left out: one owner often has several flats in one building."""
+    from sqlalchemy import select
+
+    from app.models import ChannelPost, Property
+    if not cache:
+        cache["post"], cache["cad"] = {}, {}
+        for p in db.scalars(select(Property).where(Property.source_type != "legacy")):
+            for m in (p.post_message_id, (p.source_external_id or "")[2:] if p.source_type == "channel" else None):
+                if m and str(m).isdigit():
+                    cache["post"].setdefault(int(m), p)
+            if p.cadastral_code:
+                cache["cad"].setdefault(p.cadastral_code.strip(), p)
+        for cp in db.scalars(select(ChannelPost).where(ChannelPost.property_id.is_not(None))):
+            if str(cp.message_id).isdigit() and cp.property_id:
+                p = db.get(Property, cp.property_id)
+                if p is not None and p.source_type != "legacy":
+                    cache["post"].setdefault(int(cp.message_id), p)
+    for c in o["channel_posts"]:
+        if c in cache["post"]:
+            return cache["post"][c], "channel_post"
+    if o.get("cadastral") and o["cadastral"] in cache["cad"]:
+        return cache["cad"][o["cadastral"]], "cadastral"
+    return None, None
+
+
+def load(registry: Path, db, media: Path | None = None, media_prefix: str = "legacy/") -> Counter:
+    """registry.json → users (unknown agent hashtags become inactive agents), owners, properties, their event history,
+    publications (old channel posts), media (files in the bucket under media_prefix, from legacy_media done.jsonl) and
+    deals linked by cadastral. A legacy object that already is a CRM object (same channel post or cadastral code) is
+    merged into it instead of created. Idempotent: an object already loaded (ai_flags.legacy.key) is skipped."""
+    from sqlalchemy import func, select
+
+    from app.models import ChannelPost, Deal, Event, Owner, Property, PropertyMedia, PropertyPublication, User
+    data = json.loads(registry.read_text())
+    files = media_by_object(data, media) if media else {}
+    n = Counter()
+    users = list(db.scalars(select(User)))
+    by_key = {}
+    for u in users:
+        for k in (u.agent_tag, u.name):
+            if k:
+                by_key.setdefault(k.strip().lstrip("#").lower(), u)
+    david = by_key.get("david")
+
+    def agent(name):
+        if not name:
+            return david
+        k = name.strip().lstrip("#").lower()
+        if k not in by_key:
+            u = User(name=name, role="agent", agent_tag=name, is_active=False)
+            db.add(u)
+            db.flush()
+            by_key[k] = u
+            n["agents_created_inactive"] += 1
+        return by_key[k]
+
+    owner_by_phone = {}
+    for o in db.scalars(select(Owner)):
+        d = re.sub(r"\D", "", o.phone_norm or "")
+        if len(d) >= 9:
+            owner_by_phone.setdefault(d[-9:], o)
+    obj_agent = {o["key"]: o["agent"] for o in data["objects"]}
+    for r in data["owners"]:
+        o = owner_by_phone.get(r["phone"])
+        if not o:
+            o = Owner(name=(r["names"] or [None])[0], phone="+995" + r["phone"], phone_norm=r["phone"],
+                      address=r.get("address"))
+            db.add(o)
+            owner_by_phone[r["phone"]] = o
+            n["owners_created"] += 1
+        if not o.agent_id:
+            newest = r["objects"][-1] if r["objects"] else None
+            o.agent_id = agent(obj_agent.get(newest) if newest else None).id
+            n["owners_agent_set"] += 1
+    db.flush()
+
+    done = set(db.scalars(select(Property.ai_flags["legacy"]["key"].astext).where(Property.ai_flags.has_key("legacy"))))
+    done |= set(db.scalars(select(Property.source_external_id).where(Property.source_type == "legacy")))
+    when = lambda s: datetime.fromisoformat(s) if s and "T" in s else None
+    match_cache: dict = {}
+    channel_post = {}
+    for cp in db.scalars(select(ChannelPost)):
+        if str(cp.message_id).isdigit():
+            channel_post[int(cp.message_id)] = cp
+    for o in data["objects"]:
+        if o["key"] in done:
+            n["objects_skipped"] += 1
+            continue
+        a = agent(o["agent"])
+        # one channel post = one album; a unit "ch:<first message id>" is one post, channel_posts holds every message id
+        posts = sorted({int(u[3:]) for u in o["units"] if u.startswith("ch:")}) or sorted(o["channel_posts"])[:1]
+        last_post = posts[-1] if posts else None
+        legacy = {"key": o["key"], "units": o["units"], "agent_src": o["agent_src"], "status": o["status"],
+                  "archive_reason": o["archive_reason"]}
+        p, why = existing_match(db, o, match_cache)
+        if p is not None:
+            # the CRM object stays as it is; the legacy side only fills what it lacks and adds its history
+            p.cadastral_code = p.cadastral_code or o.get("cadastral")
+            p.owner_id = p.owner_id or (owner_by_phone[o["owner_phones"][0]].id if o["owner_phones"] else None)
+            p.agent_id = p.agent_id or a.id
+            p.ai_flags = {**(p.ai_flags or {}), "legacy": {**legacy, "merged_by": why}}
+            n["objects_merged:" + why] += 1
+        else:
+            p = Property(source_type="legacy", source_external_id=o["key"], status=o["status"],
+                     archive_reason=o["archive_reason"],
+                     archived_at=when(o["last_seen"]) if o["status"] in ("archived", "rented") else None,
+                     address=o["address"], district=o["district"], cadastral_code=o.get("cadastral"),
+                     price=o["price"] if str(o["price"] or "").isdigit() else None, bedrooms=o["bedrooms"],
+                     area=o["area"], floor=o["floor"], description=o["text"], is_exclusive=o["exclusive"],
+                     agent_id=a.id, owner_id=owner_by_phone[o["owner_phones"][0]].id if o["owner_phones"] else None,
+                     post_url=f"https://t.me/rent_tbilisi_ge/{last_post}" if last_post else None,
+                     post_message_id=str(last_post) if last_post else None,
+                     published_at=when(o["first_seen"]), verified_at=when(o["first_seen"]),
+                     ai_flags={"legacy": legacy})
+            db.add(p)
+            n["objects_created"] += 1
+        db.flush()
+        posted = set(db.scalars(select(PropertyPublication.message_id).where(PropertyPublication.property_id == p.id)))
+        for c in posts:
+            if str(c) not in posted:
+                db.add(PropertyPublication(property_id=p.id, channel="tg", url=f"https://t.me/rent_tbilisi_ge/{c}",
+                                           message_id=str(c),
+                                           status="published" if o["live"] and c == last_post else "removed"))
+                n["publications"] += 1
+        for c in o["channel_posts"]:
+            if c in channel_post and channel_post[c].property_id is None:
+                channel_post[c].property_id = p.id
+                n["channel_posts_linked"] += 1
+        have = set(db.scalars(select(PropertyMedia.path).where(PropertyMedia.property_id == p.id)))
+        pos = db.scalar(select(func.max(PropertyMedia.position)).where(PropertyMedia.property_id == p.id)) or 0
+        for f in files.get(o["key"], []):
+            path = media_prefix + f["key"]
+            if path in have:
+                continue
+            pos += 1
+            db.add(PropertyMedia(property_id=p.id, kind="video" if path.lower().endswith(VIDEO_EXT) else "photo",
+                                 path=path, position=pos))
+            n["media"] += 1
+        for e in o["events"]:
+            db.add(Event(entity="property", entity_id=str(p.id), action="legacy_" + e["kind"], actor_label="import",
+                         data={k: v for k, v in e.items() if k not in ("kind", "date", "deal_text")}, at=when(e["date"])))
+            n["events"] += 1
+        if p.cadastral_code:
+            n["deals_linked"] += db.query(Deal).filter(Deal.cadastral == p.cadastral_code, Deal.property_id.is_(None)) \
+                .update({Deal.property_id: p.id}, synchronize_session=False)
+    # objects without an owner card: the Owner_Base owner at the same address, when exactly one has it
+    by_addr = defaultdict(list)
+    for ow in db.scalars(select(Owner).where(Owner.address.is_not(None))):
+        k = addr_key(ow.address)
+        if k:
+            by_addr[k].append(ow)
+    for p in db.scalars(select(Property).where(Property.source_type == "legacy", Property.owner_id.is_(None))):
+        cand = by_addr.get(addr_key(p.address)) or []
+        if len(cand) == 1:
+            p.owner_id = cand[0].id
+            n["owner_by_address"] += 1
+    # owners nobody brought in: David's (stage 6.5)
+    n["owners_to_david"] = db.query(Owner).filter(Owner.agent_id.is_(None)).update({Owner.agent_id: david.id},
+                                                                                     synchronize_session=False)
+    db.commit()
+    n["owners_total"] = db.scalar(select(func.count()).select_from(Owner))
+    return n
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build"])
-    ap.add_argument("--groups", required=True, type=Path)
-    ap.add_argument("--channel", required=True, type=Path)
-    ap.add_argument("--sheets", required=True, type=Path)
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("cmd", choices=["build", "load"])
+    ap.add_argument("--groups", type=Path)
+    ap.add_argument("--channel", type=Path)
+    ap.add_argument("--sheets", type=Path)
+    ap.add_argument("--media", type=Path, help="load: legacy_media done.jsonl (files already in the bucket)")
+    ap.add_argument("--media-prefix", default="legacy/", help="load: bucket key prefix of those files")
+    ap.add_argument("--photo-merges", type=Path, help="JSON [[key_a, key_b], ...] from photo matching")
+    ap.add_argument("--out", required=True, type=Path, help="build: output dir; load: the dir with registry.json")
     a = ap.parse_args(argv)
-    print(json.dumps(build(a.groups, a.channel, a.sheets, a.out), ensure_ascii=False, indent=1, default=str))
+    if a.cmd == "load":
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            print(json.dumps(load(a.out / "registry.json", db, a.media, a.media_prefix), ensure_ascii=False, indent=1))
+        return
+    print(json.dumps(build(a.groups, a.channel, a.sheets, a.out, a.photo_merges), ensure_ascii=False, indent=1, default=str))
 
 
 if __name__ == "__main__":

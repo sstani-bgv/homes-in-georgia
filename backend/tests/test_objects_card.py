@@ -1,42 +1,12 @@
-"""Stage 2: the object is the main entity: listings + publications per object (migration 0007 backfill), the publish
-paths write property_publications, and the full card payload respects the owner-contact rule."""
-from alembic import command
-from alembic.config import Config
+"""Stage 2: the object is the main entity: listings + publications per object, the publish paths write
+property_publications, and the full card payload respects the owner-contact rule."""
 from sqlalchemy import select, text
 
-from app.db import engine
 from app.models import ChannelPost, Deal, Property, PropertyListing, PropertyPublication
 from app.services.properties import record_publication
-from tests.conftest import BACKEND, TEST_URL, auth, make_listing, make_user
+from tests.conftest import auth, make_listing, make_user
 
 
-def _alembic(fn, rev):
-    cfg = Config(str(BACKEND / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", TEST_URL.replace("%", "%%"))
-    fn(cfg, rev)
-
-
-def test_migration_backfills_links_publications_and_channel_posts(db):
-    make_listing(db, "ss7001")
-    db.close()
-    _alembic(command.downgrade, "0006")
-    try:
-        with engine.begin() as c:
-            c.execute(text("""INSERT INTO properties (id, listing_id, source_type, source_url, status, post_url,
-                                  post_message_id, published_at)
-                              VALUES (1, 'ss7001', 'ss', 'https://ss.ge/ss7001', 'published', 'https://t.me/c/555/45', '45', now()),
-                                     (2, NULL, 'direct', NULL, 'taken', NULL, NULL, NULL)"""))
-            c.execute(text("""INSERT INTO channel_posts (message_id, link, status) VALUES
-                              ('wg:45', 'https://t.me/c/555/45', 'active'), ('46', 'https://t.me/rent_tbilisi_ge/46', 'active')"""))
-    finally:
-        _alembic(command.upgrade, "head")
-    links = db.scalars(select(PropertyListing)).all()
-    assert [(x.property_id, x.listing_id, x.source, x.url) for x in links] == [(1, "ss7001", "ss", "https://ss.ge/ss7001")]
-    assert links[0].first_seen_at is not None
-    pubs = db.scalars(select(PropertyPublication)).all()
-    assert [(x.property_id, x.channel, x.status, x.message_id) for x in pubs] == [(1, "tg", "published", "45")]
-    posts = {x.message_id: x.property_id for x in db.scalars(select(ChannelPost))}
-    assert posts == {"wg:45": 1, "46": None}  # unmatched channel posts stay as they are
 
 
 def test_take_links_listing_and_publish_writes_publication(db, client):

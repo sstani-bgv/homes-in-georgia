@@ -332,6 +332,10 @@ const ACTION_TEXT: Record<string, string> = {
   from_deal: 'Создан из сделки', fast_track: 'Собственник согласен · объект показан клиентам',
   agent_bound: 'Собственник закреплён за агентом', agent_released: 'Собственник освобождён',
   listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято',
+  // history from David's old work chats (backend/app/importers/legacy_objects.py)
+  legacy_posted: 'Пост в канале (старая база)', legacy_updated: 'Пост обновлён (старая база)', legacy_discount: 'Скидка (старая база)',
+  legacy_exclusive: 'Эксклюзив (старая база)', legacy_archived: 'В архив (старая база)',
+  legacy_rented_by_owner: 'Собственник сдал сам (старая база)', legacy_rented_by_us: 'Сдали мы (старая база)',
 };
 const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked'];
 function eventText(e: EventItem): string {

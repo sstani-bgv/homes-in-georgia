@@ -1,9 +1,6 @@
 """Stage 6: key fields lock after the operator's verification, «Запрос оператору» (create / approve / reject), archive
 with a mandatory reason, the backfill of reasons for objects archived before stage 6."""
-import importlib.util
-from pathlib import Path
 
-from sqlalchemy import text
 
 from app.models import ChangeRequest, Event, Owner, Property
 from app.services import properties
@@ -123,28 +120,3 @@ def test_existing_flows_set_reasons_and_transfer_request(db, client, sent):
     assert client.post(f"/api/properties/{b}/rented-self", json={}, headers=auth(georgiy)).json()["archive_reason"] == "rented_by_owner"
     # re-taking a refused object clears its archive reason
     assert client.post("/api/properties", json={"listing_id": "ss6003"}, headers=auth(levan)).json()["archive_reason"] is None
-
-
-def test_backfill_reasons_from_events(db):
-    spec = importlib.util.spec_from_file_location(
-        "m0010", Path(__file__).parents[1] / "alembic/versions/0010_change_requests_archive_reasons.py")
-    mig = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mig)
-    ag = make_user(db, "agent", "Георгий")
-    refused, rented_self, plain, rented, pub = (Property(status=s, agent_id=ag.id) for s in
-                                                ("archived", "archived", "archived", "rented", "published"))
-    db.add_all([refused, rented_self, plain, rented, pub])
-    db.flush()
-    pub.published_at = refused.updated_at
-    for p, action in ((refused, "owner_refused"), (rented_self, "owner_rented_self")):
-        db.add(Event(entity="property", entity_id=str(p.id), action=action, data={"status": "archived", "comment": "нет"}))
-    db.add(Event(entity="property", entity_id=str(plain.id), action="archived", data={"status": "archived"}))
-    db.commit()
-    for sql in mig.BACKFILL:
-        db.execute(text(sql))
-    db.commit()
-    db.expire_all()
-    assert [(p.archive_reason, p.archive_comment) for p in (refused, rented_self, plain, rented)] == [
-        ("owner_refused", "нет"), ("rented_by_owner", "нет"), ("other", None), ("rented_by_us", None)]
-    assert refused.archived_at and pub.verified_at and rented.verified_at and refused.verified_at is None
-    assert not db.query(ChangeRequest).count()

@@ -1,9 +1,10 @@
-"""initial schema
+"""initial schema: every table, pgvector embeddings and the default settings in one migration.
+
+Squashed on 2026-11-10 from 0001-0014 before the first production deploy (the old files are in git history). A
+database migrated by the old chain has the same schema: `alembic stamp 0001 --purge` moves it to this revision.
 
 Revision ID: 0001
-Revises: 
-Create Date: 2026-11-02 12:50:23.090210
-
+Revises:
 """
 from typing import Sequence, Union
 
@@ -25,13 +26,14 @@ DEFAULT_SETTINGS = {
     "review_batch": "5",
     "search_mode": "llm",
     "final_llm": "on",
-    "client_catalog": "listings",
     "sla_operator_take_min": "5",
     "sla_agent_slots_min": "30",
     "sla_slots_to_client_min": "60",
     "client_promise_min": "30",
     "dashboard_metrics": '["deals","platform","active_objects","leaderboard","funnel","response_times"]',
 }
+# 768 = multilingual SigLIP (bot/embed.py): text and image towers share one space (app/embeddings.py)
+EMBED_DIM = 768
 
 
 def upgrade() -> None:
@@ -69,10 +71,18 @@ def upgrade() -> None:
     sa.Column('profile_done', sa.Integer(), server_default=sa.text('0'), nullable=False),
     sa.Column('created_at', sa.Text(), nullable=False),
     sa.Column('updated_at', sa.Text(), nullable=False),
-    sa.CheckConstraint("lang IN ('ru', 'en')", name='clients_lang_check'),
+    sa.CheckConstraint("lang IN ('ru', 'en', 'ka')", name='clients_lang_check'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('channel', 'external_id', name='clients_channel_external_id_key')
     )
+    op.create_table('inline_cards',
+    sa.Column('token', sa.Text(), nullable=False),
+    sa.Column('kind', sa.Text(), nullable=False),
+    sa.Column('ref', sa.Text(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.PrimaryKeyConstraint('token')
+    )
+    op.create_index('inline_cards_kind_ref_idx', 'inline_cards', ['kind', 'ref'], unique=False)
     op.create_table('jobs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('kind', sa.Text(), nullable=False),
@@ -125,7 +135,7 @@ def upgrade() -> None:
     sa.Column('options', sa.Text(), server_default='{}', nullable=False),
     sa.Column('enabled', sa.Integer(), server_default=sa.text('1'), nullable=False),
     sa.Column('position', sa.Integer(), server_default=sa.text('0'), nullable=False),
-    sa.CheckConstraint("kind IN ('tg_agency', 'tg_competitor', 'fb_group')", name='sources_kind_check'),
+    sa.CheckConstraint("kind IN ('tg_agency', 'tg_competitor', 'fb_group', 'ig_account')", name='sources_kind_check'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('key')
     )
@@ -161,6 +171,7 @@ def upgrade() -> None:
     sa.Column('exclusive_deals', sa.Integer(), server_default=sa.text('0'), nullable=False),
     sa.Column('plans', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text('\'{"photo": 15, "showing": 15, "stickers": 15, "rental": 15}\'::jsonb'), nullable=False),
     sa.Column('legacy_id', sa.Text(), nullable=True),
+    sa.Column('agent_tag', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),
     sa.CheckConstraint("role IN ('superadmin', 'admin', 'operator', 'agent', 'recruit')", name='users_role_check'),
@@ -169,24 +180,25 @@ def upgrade() -> None:
     sa.UniqueConstraint('login'),
     sa.UniqueConstraint('tg_id')
     )
-    op.create_table('channel_posts',
+    op.create_table('change_requests',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('message_id', sa.Text(), nullable=True),
-    sa.Column('date', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('agent_name', sa.Text(), nullable=True),
-    sa.Column('agent_id', sa.Integer(), nullable=True),
-    sa.Column('district', sa.Text(), nullable=True),
-    sa.Column('price', sa.Numeric(precision=14, scale=2), nullable=True),
-    sa.Column('rooms', sa.Text(), nullable=True),
-    sa.Column('building', sa.Text(), nullable=True),
-    sa.Column('is_exclusive', sa.Boolean(), server_default=sa.text('false'), nullable=False),
-    sa.Column('link', sa.Text(), nullable=True),
-    sa.Column('raw', sa.Text(), nullable=True),
-    sa.Column('status', sa.Text(), server_default='active', nullable=False),
-    sa.ForeignKeyConstraint(['agent_id'], ['users.id'], ondelete='SET NULL'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('message_id')
+    sa.Column('entity', sa.Text(), nullable=False),
+    sa.Column('entity_id', sa.Integer(), nullable=False),
+    sa.Column('kind', sa.Text(), nullable=False),
+    sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+    sa.Column('reason', sa.Text(), nullable=True),
+    sa.Column('status', sa.Text(), server_default='pending', nullable=False),
+    sa.Column('requested_by', sa.Integer(), nullable=True),
+    sa.Column('decided_by', sa.Integer(), nullable=True),
+    sa.Column('decided_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('decision_comment', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['decided_by'], ['users.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['requested_by'], ['users.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
     )
+    op.create_index('change_requests_entity_idx', 'change_requests', ['entity', 'entity_id'], unique=False)
+    op.create_index('change_requests_status_idx', 'change_requests', ['status'], unique=False)
     op.create_table('events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('entity', sa.Text(), nullable=False),
@@ -222,6 +234,7 @@ def upgrade() -> None:
     sa.Column('lng', sa.Float(), nullable=True),
     sa.Column('geo_precision', sa.Text(), nullable=True),
     sa.Column('photos', sa.Text(), server_default='[]', nullable=False),
+    sa.Column('photo_hashes', sa.Text(), server_default='[]', nullable=False),
     sa.Column('description_ru', sa.Text(), nullable=True),
     sa.Column('description_en', sa.Text(), nullable=True),
     sa.Column('district_en', sa.Text(), nullable=True),
@@ -256,8 +269,10 @@ def upgrade() -> None:
     sa.Column('link', sa.Text(), nullable=True),
     sa.Column('is_agent', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('agent_id', sa.Integer(), nullable=True),
     sa.Column('created_by', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['agent_id'], ['users.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -311,6 +326,7 @@ def upgrade() -> None:
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('is_exclusive', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('checklist', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+    sa.Column('post_fields', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
     sa.Column('ai_flags', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
     sa.Column('duplicate_of', sa.Integer(), nullable=True),
     sa.Column('dup_check', sa.Text(), nullable=True),
@@ -320,10 +336,17 @@ def upgrade() -> None:
     sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('post_url', sa.Text(), nullable=True),
     sa.Column('post_message_id', sa.Text(), nullable=True),
+    sa.Column('verified_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('archive_reason', sa.Text(), nullable=True),
+    sa.Column('archive_comment', sa.Text(), nullable=True),
+    sa.Column('archived_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('fast_track_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('fast_track_by', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['agent_id'], ['users.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['duplicate_of'], ['properties.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['fast_track_by'], ['users.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['listing_id'], ['listings.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['owner_id'], ['owners.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['reviewed_by'], ['users.id'], ondelete='SET NULL'),
@@ -342,6 +365,43 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['listing_id'], ['listings.id'], ),
     sa.PrimaryKeyConstraint('client_id', 'listing_id')
     )
+    op.create_table('channel_posts',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('message_id', sa.Text(), nullable=True),
+    sa.Column('date', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('agent_name', sa.Text(), nullable=True),
+    sa.Column('agent_id', sa.Integer(), nullable=True),
+    sa.Column('district', sa.Text(), nullable=True),
+    sa.Column('price', sa.Numeric(precision=14, scale=2), nullable=True),
+    sa.Column('rooms', sa.Text(), nullable=True),
+    sa.Column('building', sa.Text(), nullable=True),
+    sa.Column('is_exclusive', sa.Boolean(), server_default=sa.text('false'), nullable=False),
+    sa.Column('link', sa.Text(), nullable=True),
+    sa.Column('raw', sa.Text(), nullable=True),
+    sa.Column('status', sa.Text(), server_default='active', nullable=False),
+    sa.Column('property_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['agent_id'], ['users.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['property_id'], ['properties.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('message_id')
+    )
+    op.create_index(op.f('ix_channel_posts_property_id'), 'channel_posts', ['property_id'], unique=False)
+    op.create_table('client_views',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('client_id', sa.Integer(), nullable=False),
+    sa.Column('listing_id', sa.Text(), nullable=False),
+    sa.Column('property_id', sa.Integer(), nullable=True),
+    sa.Column('search_id', sa.Integer(), nullable=True),
+    sa.Column('source', sa.Text(), server_default='search', nullable=False),
+    sa.Column('shown_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['client_id'], ['clients.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['listing_id'], ['listings.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['property_id'], ['properties.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['search_id'], ['searches.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('client_views_client_idx', 'client_views', ['client_id', 'shown_at'], unique=False)
+    op.create_index('client_views_listing_idx', 'client_views', ['listing_id'], unique=False)
     op.create_table('leads',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('client_id', sa.Integer(), nullable=False),
@@ -360,6 +420,7 @@ def upgrade() -> None:
     sa.Column('refusal_reason', sa.Text(), nullable=True),
     sa.Column('client_note', sa.Text(), nullable=True),
     sa.Column('deal_id', sa.Integer(), nullable=True),
+    sa.Column('archived_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.Text(), nullable=False),
     sa.Column('updated_at', sa.Text(), nullable=False),
     sa.Column('created_ts', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -373,6 +434,41 @@ def upgrade() -> None:
     sa.UniqueConstraint('client_id', 'listing_id', name='leads_client_id_listing_id_key')
     )
     op.create_index('leads_status_idx', 'leads', ['status'], unique=False)
+    op.create_table('listing_matches',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('listing_id', sa.Text(), nullable=False),
+    sa.Column('property_id', sa.Integer(), nullable=False),
+    sa.Column('score', sa.Float(), server_default=sa.text('0'), nullable=False),
+    sa.Column('reasons', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=False),
+    sa.Column('status', sa.Text(), server_default='pending', nullable=False),
+    sa.Column('decided_by', sa.Integer(), nullable=True),
+    sa.Column('decided_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['decided_by'], ['users.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['listing_id'], ['listings.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['property_id'], ['properties.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('listing_id', 'property_id', name='listing_matches_pair_uq')
+    )
+    op.create_index(op.f('ix_listing_matches_property_id'), 'listing_matches', ['property_id'], unique=False)
+    op.create_table('property_listings',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('property_id', sa.Integer(), nullable=False),
+    sa.Column('listing_id', sa.Text(), nullable=False),
+    sa.Column('source', sa.Text(), nullable=True),
+    sa.Column('url', sa.Text(), nullable=True),
+    sa.Column('first_seen_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('removed_checked_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('removed_checked_by', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['listing_id'], ['listings.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['property_id'], ['properties.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['removed_checked_by'], ['users.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('listing_id')
+    )
+    op.create_index(op.f('ix_property_listings_property_id'), 'property_listings', ['property_id'], unique=False)
     op.create_table('property_media',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('property_id', sa.Integer(), nullable=False),
@@ -387,6 +483,20 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_property_media_property_id'), 'property_media', ['property_id'], unique=False)
+    op.create_table('property_publications',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('property_id', sa.Integer(), nullable=False),
+    sa.Column('channel', sa.Text(), server_default='tg', nullable=False),
+    sa.Column('status', sa.Text(), server_default='published', nullable=False),
+    sa.Column('url', sa.Text(), nullable=True),
+    sa.Column('message_id', sa.Text(), nullable=True),
+    sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('removed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['property_id'], ['properties.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_property_publications_property_id'), 'property_publications', ['property_id'], unique=False)
     op.create_table('deals',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('lead_id', sa.Integer(), nullable=True),
@@ -429,6 +539,7 @@ def upgrade() -> None:
     sa.Column('month', sa.Text(), nullable=True),
     sa.Column('source', sa.Text(), server_default='crm', nullable=False),
     sa.Column('raw', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+    sa.Column('tg_ref', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['agent_id'], ['users.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['confirmed_by'], ['users.id'], ondelete='SET NULL'),
@@ -438,9 +549,10 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('deals_agent_idx', 'deals', ['agent_id'], unique=False)
+    op.create_index('deals_lead_live_uq', 'deals', ['lead_id'], unique=True, postgresql_where=sa.text("status <> 'cancelled' AND lead_id IS NOT NULL"))
     op.create_index('deals_month_idx', 'deals', ['month'], unique=False)
+    op.create_index('deals_tg_ref_uq', 'deals', ['tg_ref'], unique=True, postgresql_where=sa.text('tg_ref IS NOT NULL'))
     op.create_index(op.f('ix_deals_cadastral'), 'deals', ['cadastral'], unique=False)
-    op.create_foreign_key('leads_deal_id_fkey', 'leads', 'deals', ['deal_id'], ['id'], ondelete='SET NULL')
     op.create_table('lead_events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('lead_id', sa.Integer(), nullable=False),
@@ -488,13 +600,32 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_evaluations_deal_id'), 'evaluations', ['deal_id'], unique=False)
     # ### end Alembic commands ###
+
+    # not in the models (or skipped by create_table): the leads <-> deals cycle, status checks, owner/agent indexes
+    op.create_foreign_key('leads_deal_id_fkey', 'leads', 'deals', ['deal_id'], ['id'], ondelete='SET NULL')
+    op.create_check_constraint('listing_matches_status_check', 'listing_matches',
+                               "status IN ('pending', 'confirmed', 'rejected')")
+    op.create_check_constraint('property_publications_status_check', 'property_publications',
+                               "status IN ('draft', 'published', 'removed')")
+    op.create_index('owners_agent_idx', 'owners', ['agent_id'])
+    op.create_index('users_agent_tag_uq', 'users', [sa.text('lower(agent_tag)')], unique=True)
+
+    # pgvector columns are not mapped (raw SQL in app/embeddings.py). Qualified by the extension's schema: the bot
+    # tests migrate with search_path = their own schema only.
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
+    v = op.get_bind().scalar(sa.text("SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname = 'vector'"))
+    op.execute(f"ALTER TABLE properties ADD COLUMN text_embedding {v}.vector({EMBED_DIM}), "
+               f"ADD COLUMN photo_embedding {v}.vector({EMBED_DIM})")
+    for col in ("text_embedding", "photo_embedding"):
+        op.execute(f"CREATE INDEX properties_{col}_idx ON properties USING hnsw ({col} {v}.vector_cosine_ops)")
+
     settings_table = sa.table('settings', sa.column('key', sa.Text), sa.column('value', sa.Text))
     op.bulk_insert(settings_table, [{'key': k, 'value': v} for k, v in DEFAULT_SETTINGS.items()])
 
 
 def downgrade() -> None:
-    op.drop_constraint('leads_deal_id_fkey', 'leads', type_='foreignkey')
     """Downgrade schema."""
+    op.drop_constraint('leads_deal_id_fkey', 'leads', type_='foreignkey')
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index(op.f('ix_evaluations_deal_id'), table_name='evaluations')
     op.drop_table('evaluations')
@@ -503,13 +634,26 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_lead_events_lead_id'), table_name='lead_events')
     op.drop_table('lead_events')
     op.drop_index(op.f('ix_deals_cadastral'), table_name='deals')
+    op.drop_index('deals_tg_ref_uq', table_name='deals', postgresql_where=sa.text('tg_ref IS NOT NULL'))
     op.drop_index('deals_month_idx', table_name='deals')
+    op.drop_index('deals_lead_live_uq', table_name='deals', postgresql_where=sa.text("status <> 'cancelled' AND lead_id IS NOT NULL"))
     op.drop_index('deals_agent_idx', table_name='deals')
     op.drop_table('deals')
+    op.drop_index(op.f('ix_property_publications_property_id'), table_name='property_publications')
+    op.drop_table('property_publications')
     op.drop_index(op.f('ix_property_media_property_id'), table_name='property_media')
     op.drop_table('property_media')
+    op.drop_index(op.f('ix_property_listings_property_id'), table_name='property_listings')
+    op.drop_table('property_listings')
+    op.drop_index(op.f('ix_listing_matches_property_id'), table_name='listing_matches')
+    op.drop_table('listing_matches')
     op.drop_index('leads_status_idx', table_name='leads')
     op.drop_table('leads')
+    op.drop_index('client_views_listing_idx', table_name='client_views')
+    op.drop_index('client_views_client_idx', table_name='client_views')
+    op.drop_table('client_views')
+    op.drop_index(op.f('ix_channel_posts_property_id'), table_name='channel_posts')
+    op.drop_table('channel_posts')
     op.drop_table('reactions')
     op.drop_index('properties_status_idx', table_name='properties')
     op.drop_index('properties_agent_idx', table_name='properties')
@@ -523,7 +667,9 @@ def downgrade() -> None:
     op.drop_table('listings')
     op.drop_index('events_entity_idx', table_name='events')
     op.drop_table('events')
-    op.drop_table('channel_posts')
+    op.drop_index('change_requests_status_idx', table_name='change_requests')
+    op.drop_index('change_requests_entity_idx', table_name='change_requests')
+    op.drop_table('change_requests')
     op.drop_table('users')
     op.drop_table('ticker_messages')
     op.drop_table('tg_files')
@@ -536,6 +682,8 @@ def downgrade() -> None:
     op.drop_index('jobs_kind_ref_idx', table_name='jobs')
     op.drop_index('jobs_due_idx', table_name='jobs')
     op.drop_table('jobs')
+    op.drop_index('inline_cards_kind_ref_idx', table_name='inline_cards')
+    op.drop_table('inline_cards')
     op.drop_table('clients')
     op.drop_index('channel_videos_group', table_name='channel_videos')
     op.drop_table('channel_videos')
