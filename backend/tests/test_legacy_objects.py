@@ -57,3 +57,18 @@ def test_post_hashtags_fill_the_generator_fields():
         "metro": "LibertySquare", "prop_type": "Apartment", "deal": "Rent", "building": "OldBuilding", "design": "New",
         "heating": "ElectricalHeating", "amenities": ["WiFi", "Shower", "Stove"], "periods": ["6Month", "12Month"],
         "pets": "ByAgreement", "tenants": 2, "deposit": 400}
+
+
+def test_prefill_takes_empty_fields_from_older_posts(db):
+    from app.models import Property
+    p = Property(source_type="legacy", source_external_id="ch:5", status="archived", price=700,
+                 description="#Vake 🏢 #2Bed for #Rent | 80 Sq.m | 4 Floor", post_fields={"heating": "CentralHeating"},
+                 ai_flags={"legacy": {"key": "ch:5"}})
+    db.add(p)
+    db.commit()
+    older = "#Vake 📍 5 Abashidze St\n🏢 #2Bed #Apartment\n✨ #NewBuilding | 4/12 Floor | #GasHeating\n💰 650$"
+    n = L.prefill(db, {"ch:5": [p.description, older]})
+    db.refresh(p)
+    assert (p.address, p.total_floors, p.floor, p.price) == ("5 Abashidze St", 12, 4, 700)  # the newer price stays
+    assert p.post_fields["building"] == "NewBuilding" and p.post_fields["heating"] == "CentralHeating"
+    assert n["total_floors"] == 1 and n["objects"] == 1

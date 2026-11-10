@@ -2,7 +2,8 @@
 
     python -m app.importers.legacy_objects build --groups DIR --channel DIR --sheets DIR --out DIR
     python -m app.importers.legacy_objects load --out DIR      # after sheets_csv, into DATABASE_URL
-    python -m app.importers.legacy_objects prefill             # generator fields from the post hashtags (loaded before)
+    python -m app.importers.legacy_objects texts --groups DIR --channel DIR --out DIR   # every post's text per object
+    python -m app.importers.legacy_objects prefill [--texts DIR/post_texts.json]      # fill empty fields from them
 
 Offline (no DB, no Telegram): reads the raw exports and writes out/registry.json (objects with sources, owner, agent,
 status history, deals, media to download), out/review.csv (doubtful merges) and out/summary.json.
@@ -908,40 +909,72 @@ def load(registry: Path, db, media: Path | None = None, media_prefix: str = "leg
     return n
 
 
-def prefill(db) -> Counter:
-    """Old-base objects loaded before the hashtag parsing: fill their EMPTY total floors and generator fields from the
-    post text; an agent's own picks stay."""
-    from sqlalchemy import select
+def post_texts(registry: Path, groups: Path, channel: Path) -> dict[str, list[str]]:
+    """object key -> the texts of ALL its posts, newest first (registry.json keeps only the newest)."""
+    reg = Registry()
+    for name in GROUPS:
+        load_group(reg, groups / name, name)
+    load_channel(reg, channel)
+    out = {}
+    for o in json.loads(registry.read_text())["objects"]:
+        us = sorted((reg.units[u] for u in o["units"] if u in reg.units), key=lambda u: u["date"], reverse=True)
+        out[o["key"]] = list(dict.fromkeys([o["text"] or ""] + [u["text"] for u in us if u["text"]]))
+    return out
+
+
+CARD_PARSERS = {"address": address_of, "district": district_of, "price": price_of, "bedrooms": bedrooms_of,
+                "area": area_of, "floor": floor_of, "total_floors": total_floors_of}
+
+
+def prefill(db, texts: dict[str, list[str]] | None = None) -> Counter:
+    """Old-base objects: fill their EMPTY card fields and generator fields from their posts, newest post first (texts:
+    every post of the object from post_texts; without it the stored newest post). An agent's own values stay."""
+    from sqlalchemy import or_, select
     from app.models import Property
     n = Counter()
-    for p in db.scalars(select(Property).where(Property.source_type == "legacy")):
-        t = p.description or ""
-        if p.total_floors is None and (tf := total_floors_of(t)):
-            p.total_floors, n["total_floors"] = tf, n["total_floors"] + 1
-        cur, new = dict(p.post_fields or {}), post_fields_of(t)
-        add = {k: v for k, v in new.items() if cur.get(k) in (None, "", [])}
-        if add:
-            p.post_fields, n["post_fields"] = {**cur, **add}, n["post_fields"] + 1
+    for p in db.scalars(select(Property).where(or_(Property.source_type == "legacy",
+                                                   Property.ai_flags["legacy"].isnot(None)))):
+        key = (p.ai_flags or {}).get("legacy", {}).get("key") or p.source_external_id
+        posts = (texts or {}).get(key) or [p.description or ""]
+        if p.source_type != "legacy":
+            posts = posts[1:]  # a CRM object merged with the old base: its own description is not a post
         n["objects"] += 1
+        for t in posts:
+            for f, parse in CARD_PARSERS.items():
+                if getattr(p, f) in (None, "") and (v := parse(t)) not in (None, ""):
+                    setattr(p, f, v)
+                    n[f] += 1
+            cur, new = dict(p.post_fields or {}), post_fields_of(t)
+            add = {k: v for k, v in new.items() if cur.get(k) in (None, "", [])}
+            if add:
+                p.post_fields = {**cur, **add}
+                for k in add:
+                    n["post_fields." + k] += 1
     db.commit()
     return n
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "load", "prefill"])
+    ap.add_argument("cmd", choices=["build", "load", "texts", "prefill"])
     ap.add_argument("--groups", type=Path)
     ap.add_argument("--channel", type=Path)
     ap.add_argument("--sheets", type=Path)
     ap.add_argument("--media", type=Path, help="load: legacy_media done.jsonl (files already in the bucket)")
     ap.add_argument("--media-prefix", default="legacy/", help="load: bucket key prefix of those files")
+    ap.add_argument("--texts", type=Path, help="prefill: post_texts.json from `texts`")
     ap.add_argument("--photo-merges", type=Path, help="JSON [[key_a, key_b], ...] from photo matching")
     ap.add_argument("--out", type=Path, help="build: output dir; load: the dir with registry.json")
     a = ap.parse_args(argv)
+    if a.cmd == "texts":  # local, next to the raw exports: --out DIR (registry.json in, post_texts.json out)
+        (a.out / "post_texts.json").write_text(json.dumps(post_texts(a.out / "registry.json", a.groups, a.channel),
+                                                          ensure_ascii=False))
+        return
     if a.cmd == "prefill":
         from app.db import SessionLocal
+        texts = json.loads(a.texts.read_text()) if a.texts else None
         with SessionLocal() as db:
-            print(json.dumps(prefill(db), ensure_ascii=False, indent=1))
+            print(json.dumps(prefill(db, texts), ensure_ascii=False, indent=1))
         return
     if a.out is None:
         ap.error("--out is required for build / load")
