@@ -89,6 +89,7 @@ def test_bot_catalog_is_the_crm_objects(db):
     assert (row.source, row.status, row.price_usd, row.bedrooms, row.floor) == ("object", "published", 700, 2, 4)
     assert json.loads(row.photos) == ["s3:legacy/team-chat/1.heic", "s3:legacy/team-chat/2.jpg"]
     assert d["videos"] == [{"key": "legacy/team-chat/3.mp4"}] and d["floors"] == 12
+    assert d["address_en"] == "5 Abashidze St"
     assert (d["building"], d["heating"], d["pets"], d["terms"]) == ("new", "central", "by_agreement", [6, 12])
     search = db.execute(text("SELECT l.id FROM listings l WHERE " + _bot_rule("CLIENT_SEARCH"))).scalars().all()
     assert search == [row.id]  # the scraped ad is not in the bot's search

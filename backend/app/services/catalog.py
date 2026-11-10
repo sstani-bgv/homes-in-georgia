@@ -64,6 +64,8 @@ def fields(db: Session, p: Property) -> dict:
         d.pop(k, None)
     if p.total_floors:
         d["floors"] = p.total_floors
+    if p.address:  # the post's 📍 line is a [address](maps link): the card shows the plain address
+        d["address_en"] = p.address
     src = db.get(Listing, p.listing_id) if p.listing_id else None  # the ad it was taken from: the map pin
     media = db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == p.id)
                        .order_by(PropertyMedia.position, PropertyMedia.id)).all()
