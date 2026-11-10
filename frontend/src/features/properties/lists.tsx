@@ -364,12 +364,17 @@ const BASE: PS[] = ['published', 'rented'];
 export function PropertyList({ mine, archived, status: only, base = '' }: { mine?: boolean; archived?: boolean; status?: string; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(0);
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['properties', 'list', scope, q, status],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')) }),
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ['properties', 'list', scope, q, status, page],
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
+  const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: scope === 'all' || scope === 'archive' });
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const filter = (f: () => void) => { f(); setPage(0); };
   const items = itemsOf(data);
   const navigate = useNavigate();
   const link = (id: number) => propLink(base, id);
@@ -379,15 +384,22 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
       <div className="row row-wrap" style={{ marginBottom: 14 }}>
         <div className="input-icon grow" style={{ minWidth: 180, maxWidth: 380 }}>
           <Search size={16} />
-          <input className="input" placeholder="Адрес, район, номер" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" placeholder="Адрес, район, агент, цена, #тег, телефон" value={q} onChange={(e) => { const v = e.target.value; filter(() => setQ(v)); }} />
         </div>
         {!archived && !only && (
-          <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)}>
+          <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => { const v = e.target.value; filter(() => setStatus(v)); }}>
             <option value="">Все статусы</option>
             {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
       </div>
+      {counts.data && (
+        <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>
+          Всего объектов: <b>{Object.values(counts.data).reduce((a, b) => a + b, 0).toLocaleString('ru')}</b>
+          {' · '}{(['published', 'rented', 'archived'] as PS[]).map((k) => `${PROPERTY_STATUS[k]}: ${(counts.data[k] || 0).toLocaleString('ru')}`).join(' · ')}
+        </div>
+      )}
+      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {total.toLocaleString('ru')}{total > PAGE ? ` · показаны ${(page * PAGE + 1).toLocaleString('ru')}–${Math.min(total, (page + 1) * PAGE).toLocaleString('ru')}` : ''}</div>}
       {peek !== null && <PropertyModal id={peek} base={base} onClose={() => setPeek(null)} />}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : scope === 'all' ? (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
@@ -424,6 +436,15 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
             ))}
           </div>
         </>
+      )}
+      {pages > 1 && (
+        <div className="row gap-sm" style={{ justifyContent: 'center', marginTop: 16 }}>
+          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(0); window.scrollTo(0, 0); }}>« Первая</Button>
+          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(page - 1); window.scrollTo(0, 0); }}>‹ Назад</Button>
+          <span className="muted" style={{ alignSelf: 'center', padding: '0 8px' }}>Стр. {page + 1} из {pages}{isFetching ? ' …' : ''}</span>
+          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(page + 1); window.scrollTo(0, 0); }}>Вперёд ›</Button>
+          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(pages - 1); window.scrollTo(0, 0); }}>Последняя »</Button>
+        </div>
       )}
     </>
   );

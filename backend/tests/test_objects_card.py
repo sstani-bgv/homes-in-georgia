@@ -56,3 +56,25 @@ def test_card_payload_and_contact_rules(db, client):
     foreign = client.get(f"/api/properties/{pid}", headers=auth(levan)).json()
     assert all(a["url"] is None for a in foreign["listings"]) and foreign["deals"] == []
     assert len(foreign["listings"]) == 2
+
+
+def test_base_search_words_order_and_counts(db, client):
+    from datetime import datetime, timezone
+    zaza = make_user(db, "agent", "Zaza")
+    nino = make_user(db, "operator", "Нино")
+    t = lambda d: datetime(2026, 1, d, tzinfo=timezone.utc)
+    a = Property(status="published", district="Vake", price=600, agent_id=zaza.id, published_at=t(1),
+                 description="#Vake #2Bed for #Rent", address="5 Abashidze St")
+    b = Property(status="rented", district="Saburtalo", price=600, agent_id=zaza.id, published_at=t(5),
+                 description="#Saburtalo #1Bed", address="1 Kazbegi Ave")
+    c = Property(status="archived", district="Vake", price=900, published_at=t(9), description="#Vake #2Bed")
+    db.add_all([a, b, c])
+    db.commit()
+    ids = lambda q, **kw: [x["id"] for x in client.get("/api/properties", params={"base": 1, "status": "published,rented",
+                                                                                 "q": q, **kw}, headers=auth(nino)).json()["items"]]
+    assert ids("") == [b.id, a.id]                       # newest publication first; the archive is not the base
+    assert ids("Vake 2Bed") == [a.id] and ids("#vake #2bed") == [a.id]
+    assert ids("600 zaza") == [b.id, a.id] and ids("Saburtalo 600") == [b.id]
+    assert ids("", limit=1, offset=1) == [a.id]
+    counts = client.get("/api/properties/counts", headers=auth(nino)).json()
+    assert counts == {"published": 1, "rented": 1, "archived": 1}

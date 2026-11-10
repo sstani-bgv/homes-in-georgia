@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote
 
-from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy import update as update_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -1533,15 +1533,27 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
         stmt = stmt.where(Property.agent_id == agent_id)
     if status:
         stmt = stmt.where(Property.status.in_(status.split(",")))
-    if q:
-        like = f"%{q.strip().lstrip('#')}%"
-        conds = [Property.address.ilike(like), Property.district.ilike(like), Property.cadastral_code.ilike(like),
-                 cast(Property.id, Text).ilike(like)]
+    if q and (words := [w.lstrip("#") for w in q.split() if w.lstrip("#")]):
+        def word(w: str):  # every word must hit some field: «Vake 2Bed», «Saburtalo 600», «Zaza», an id
+            like = f"%{w}%"
+            conds = [Property.address.ilike(like), Property.district.ilike(like), Property.cadastral_code.ilike(like),
+                     Property.description.ilike(like),
+                     Property.agent_id.in_(select(User.id).where(or_(User.name.ilike(like), User.agent_tag.ilike(like))))]
+            if w.isdigit():
+                conds += [Property.id == int(w), Property.price == int(w)]
+            return or_(*conds)
+        cond = and_(*map(word, words))
         pn = norm_phone(re.sub(r"[^\d+]", "", q))
-        if len(pn) >= 5:  # the owner's phone, any format
-            conds.append(Property.owner_id.in_(select(Owner.id).where(Owner.phone_norm.like(f"%{pn}%"))))
-        stmt = stmt.where(or_(*conds))
-    return stmt.order_by(Property.updated_at.desc())
+        if len(pn) >= 5 and not re.search(r"[^\d\s+()\-]", q):  # the owner's phone, any format
+            cond = or_(cond, Property.owner_id.in_(select(Owner.id).where(Owner.phone_norm.like(f"%{pn}%"))))
+        stmt = stmt.where(cond)
+    # the base by publication date, the archive by archiving date; work lists by the last change
+    first = (Property.published_at if base else Property.archived_at if status == "archived" else Property.updated_at)
+    return stmt.order_by(first.desc().nulls_last(), Property.id.desc())
+
+
+def status_counts(db: Session) -> dict[str, int]:
+    return dict(db.execute(select(Property.status, func.count()).group_by(Property.status)).all())
 
 
 # ---------------------------------------------------------------- deals (stage 7)

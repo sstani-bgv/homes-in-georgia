@@ -147,6 +147,12 @@ def properties_list(status: str | None = None, agent_id: int | None = None, q: s
     return {"items": P.outs(db, rows, user), "total": total}
 
 
+@router.get("/properties/counts")
+def properties_counts(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """objects per status, for «В базе N объектов» (counts only, nothing personal)"""
+    return P.status_counts(db)
+
+
 @router.get("/properties/board")
 def properties_board(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return P.board(db, user)
