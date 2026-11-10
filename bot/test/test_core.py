@@ -167,6 +167,16 @@ class CoreTest(Base):
                 self.assertEqual((im.format, im.size), ("JPEG", (2560, 640)))
             self.assertEqual(core.album({"photos": ["s3:legacy/team-chat/7.png"]})[0]["path"], out[0]["path"])  # cached
 
+    def test_service_results_outlive_their_session(self):
+        """A lead from svc() is read after its session closed (notify.operator_intro): expired attributes are reloaded
+        first, or the first ❤️ never gets the operator's intro (DetachedInstanceError)."""
+        import journey
+        from app.models import Client
+        cid = self.cl["id"]
+        got = journey._run(lambda s: (lambda c: (s.expire(c), c)[1])(s.get(Client, cid)), (), {})
+        self.assertEqual(got.username, "anna")
+        self.assertEqual(journey._run(lambda s: {"x": 1}, (), {}), {"x": 1})  # plain results pass through
+
     def test_card_hides_source(self):
         text = core.card(core.listing("ss1"), "светлая", "~1.0 км от метро", "ru")
         for leak in ("+995", "599", "ss.ge", "http"):

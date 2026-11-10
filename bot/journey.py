@@ -31,9 +31,20 @@ FIELD = ("agent", "recruit")
 # ---------- services (sync, in a thread: one session per call) ----------
 
 def _run(fn, args, kw):
+    """fn(session, ...) in its own session. An ORM object it returns is reloaded before the session closes: the
+    handlers read it afterwards (notify.operator_intro(lead)) and an expired attribute of a detached object raises
+    DetachedInstanceError (2026-11-10: the first ❤️ got no operator intro)."""
+    from sqlalchemy import inspect
+    from sqlalchemy.exc import NoInspectionAvailable
     from app.db import SessionLocal
     with SessionLocal() as s:
-        return fn(s, *args, **kw)
+        res = fn(s, *args, **kw)
+        try:
+            if getattr(inspect(res), "persistent", False):
+                s.refresh(res)
+        except NoInspectionAvailable:
+            pass
+        return res
 
 
 async def svc(fn, *args, **kw):
