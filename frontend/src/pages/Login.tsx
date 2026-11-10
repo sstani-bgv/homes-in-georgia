@@ -1,57 +1,46 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+// CRM sign-in: Telegram only (own button, no widget iframe).
+// Made with Claude (Anthropic) - Homes in Georgia - Created by Irakli Kvirkvelia
+import { FormEvent, useEffect, useState } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { IS_MOCK } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Field, Input } from '../components/ui';
-import { BrandMark } from '../layout/AppLayout';
 
-// Telegram's login widget only works on the domain set in BotFather (/setdomain), never on localhost
-const LOCAL = !IS_MOCK && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+type TgUser = Record<string, unknown>;
+type TgLogin = { auth: (o: { bot_id: string; request_access?: string }, cb: (u: TgUser | false) => void) => void };
 
-function TelegramWidget({ onAuth }: { onAuth: (u: Record<string, unknown>) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [bot, setBot] = useState<string | undefined>(import.meta.env.VITE_BOT_USERNAME || undefined);
-  // Latest callback in a ref: the widget script is injected once per bot username, not on every parent render.
-  const onAuthRef = useRef(onAuth);
-  useEffect(() => { onAuthRef.current = onAuth; }, [onAuth]);
-
-  useEffect(() => {
-    if (bot) return;
-    // /api/config is optional (not in the backend yet): fall back to the public bot username from ARCHITECTURE §2.
-    api.config().then((c) => setBot(c.bot_username || 'HomesinGeorgia_bot')).catch(() => setBot('HomesinGeorgia_bot'));
-  }, [bot]);
-
-  useEffect(() => {
-    if (!bot || !ref.current || IS_MOCK) return;
-    (window as unknown as { onTelegramAuth: (u: Record<string, unknown>) => void }).onTelegramAuth = (u) => onAuthRef.current(u);
+function loadTelegram(): Promise<TgLogin> {
+  const w = window as unknown as { Telegram?: { Login?: TgLogin } };
+  if (w.Telegram?.Login) return Promise.resolve(w.Telegram.Login);
+  return new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = 'https://telegram.org/js/telegram-widget.js?22';
     s.async = true;
-    s.setAttribute('data-telegram-login', bot);
-    s.setAttribute('data-size', 'large');
-    s.setAttribute('data-radius', '12');
-    s.setAttribute('data-request-access', 'write');
-    s.setAttribute('data-onauth', 'onTelegramAuth(user)');
-    ref.current.innerHTML = '';
-    ref.current.appendChild(s);
-  }, [bot]);
-
-  if (IS_MOCK) {
-    return <Button variant="secondary" block onClick={() => onAuthRef.current({ id: 1 })}>Войти через Telegram (demo)</Button>;
-  }
-  return <div ref={ref} style={{ display: 'flex', justifyContent: 'center', minHeight: 40 }} />;
+    s.onload = () => (w.Telegram?.Login ? ok(w.Telegram.Login) : fail(new Error('no Telegram')));
+    s.onerror = () => fail(new Error('no Telegram'));
+    document.head.appendChild(s);
+  });
 }
+
+const TG_ICON = 'M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z';
 
 export function LoginPage() {
   const { user, signIn, error: bootError } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const [botId, setBotId] = useState('');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(bootError);
   const next = params.get('next') || '/';
+  const showPassword = IS_MOCK || params.get('password') === '1';
+
+  useEffect(() => {
+    api.config().then((c) => setBotId(String((c as unknown as { bot_id?: string }).bot_id || ''))).catch(() => setBotId(''));
+    loadTelegram().catch(() => undefined);
+  }, []);
 
   if (user) return <Navigate to={next} replace />;
 
@@ -63,35 +52,36 @@ export function LoginPage() {
       .finally(() => setBusy(false));
   };
   const submit = (e: FormEvent) => { e.preventDefault(); done(api.auth.login(login.trim(), password)); };
+  const telegram = () => {
+    if (IS_MOCK) return done(api.auth.telegramLogin({ id: 1 }));
+    if (!botId) return setError('Вход через Telegram сейчас недоступен');
+    setError(null);
+    loadTelegram()
+      .then((tg) => tg.auth({ bot_id: botId, request_access: 'write' }, (u) => { if (u) done(api.auth.telegramLogin(u)); }))
+      .catch(() => setError('Не удалось открыть Telegram. Обновите страницу'));
+  };
 
   return (
-    <div className="login-wrap">
-      <div className="login-card">
-        <div className="row" style={{ marginBottom: 22 }}>
-          <span className="brand-mark" style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--brand-soft)', display: 'grid', placeItems: 'center' }}><BrandMark size={28} /></span>
-          <div>
-            <div className="label label-red">Homes in Georgia</div>
-            <h2 style={{ fontWeight: 900 }}>Вход в CRM</h2>
-          </div>
-        </div>
-        {!LOCAL && <>
-          <TelegramWidget onAuth={(u) => done(api.auth.telegramLogin(u))} />
-          <div className="row" style={{ margin: '18px 0' }}>
-            <div className="divider grow" style={{ margin: 0 }} /><span className="label">или</span><div className="divider grow" style={{ margin: 0 }} />
-          </div>
-        </>}
-        <form onSubmit={submit} className="col">
-          <Field label="Логин"><Input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required /></Field>
-          <Field label="Пароль"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></Field>
-          {error && <div className="alert alert-warn">{error}</div>}
-          <Button type="submit" size="lg" block loading={busy}>Войти</Button>
-        </form>
-        {IS_MOCK && (
-          <div className="alert alert-info mt" style={{ fontSize: 12, display: 'block' }}>
-            Demo-режим: логины <b>admin</b> (Давид), <b>nino</b> (оператор), <b>georgiy</b> (агент), пароль любой.
-          </div>
+    <div className="tg-login">
+      <div className="tg-login-box">
+        <img className="tg-login-logo" src="/brand/logo-white.svg" alt="Homes in Georgia" />
+        <h1>Вход в CRM</h1>
+        <p className="tg-login-sub">For Homes in Georgia staff only</p>
+        <button type="button" className="tg-login-btn" onClick={telegram} disabled={busy}>
+          <span className="tg-login-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d={TG_ICON} /></svg></span>
+          {busy ? 'Входим…' : 'Войти через Telegram'}
+        </button>
+        <p className="tg-login-note">Вход подтверждается в приложении Telegram</p>
+        {error && <div className="tg-login-err">{error}</div>}
+        {showPassword && (
+          <form onSubmit={submit} className="col tg-login-form">
+            <Field label="Логин"><Input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required /></Field>
+            <Field label="Пароль"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></Field>
+            <Button type="submit" size="lg" block loading={busy}>Войти</Button>
+          </form>
         )}
       </div>
+      <div className="tg-login-copy">© {new Date().getFullYear()} Homes in Georgia</div>
     </div>
   );
 }

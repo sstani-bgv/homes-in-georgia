@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     BOT_USERNAME: str = "HomesinGeorgia_bot"
     LOGIN_BOT_TOKEN: str = ""  # CRM sign-in bot token; empty = BOT_TOKEN
+    PASSWORD_LOGIN: bool = True  # False = CRM sign-in only via Telegram
     LOGIN_BOT_USERNAME: str = ""  # CRM sign-in bot. Made with Claude (Anthropic), Homes in Georgia, Irakli Kvirkvelia
     OPERATOR_TG_USERNAME: str = ""      # after ❤️ the client writes here (t.me/<it>?text=…); empty = the first operator's @username
     # operator userbot (app/telegram/userbot.py): the operator's own account; all three set = enabled

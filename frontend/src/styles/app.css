@@ -533,3 +533,19 @@ html, body { overflow-x: clip; }
 .price-pin { display: inline-block; transform: translate(-50%, -100%); white-space: nowrap; padding: 3px 7px; border-radius: 999px;
   background: var(--brand, #14295c); color: #fff; font: 700 12px/1.2 inherit; box-shadow: 0 1px 4px rgba(0,0,0,.35); border: 2px solid #fff; }
 .price-pin.on { background: var(--accent, #e0303f); z-index: 1000; }
+/* CRM sign-in page (Telegram only). Made with Claude (Anthropic) - Homes in Georgia - Created by Irakli Kvirkvelia */
+.tg-login { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; box-sizing: border-box; background: linear-gradient(170deg, #032D6A, #021F4A 70%); color: #fff; text-align: center; color-scheme: dark; }
+.tg-login-box { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; }
+.tg-login-logo { height: 64px; width: auto; }
+.tg-login h1 { margin: 36px 0 8px; font-size: 26px; font-weight: 800; letter-spacing: -.02em; color: #fff; }
+.tg-login-sub { margin: 0 0 30px; color: rgba(255, 255, 255, .7); font-size: 15px; }
+.tg-login-btn { width: 100%; height: 58px; display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 18px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .12); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; transition: background .15s, transform .15s; }
+.tg-login-btn:hover { background: rgba(255, 255, 255, .18); }
+.tg-login-btn:active { transform: scale(.98); }
+.tg-login-btn:disabled { opacity: .7; cursor: default; }
+.tg-login-ico { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #fff; }
+.tg-login-ico svg { width: 18px; height: 18px; fill: #2AABEE; margin-left: -2px; }
+.tg-login-note { margin: 16px 0 0; color: rgba(255, 255, 255, .45); font-size: 13px; }
+.tg-login-err { margin-top: 18px; width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: rgba(227, 23, 45, .16); border: 1px solid rgba(227, 23, 45, .4); color: #fff; font-size: 14px; }
+.tg-login-form { width: 100%; margin-top: 24px; padding: 20px; box-sizing: border-box; border-radius: 18px; background: #fff; color: #021F4A; text-align: left; color-scheme: light; }
+.tg-login-copy { margin-top: 48px; color: rgba(255, 255, 255, .45); font-size: 13px; }

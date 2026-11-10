@@ -351,7 +351,7 @@ PREVIEW_HEADERS = {"Cache-Control": "private, max-age=2592000, immutable", "X-Co
 
 @public.get("/config")
 def public_config():
-    return {"bot_username": env.LOGIN_BOT_USERNAME or env.BOT_USERNAME, "public_url": env.PUBLIC_URL}
+    return {"bot_username": env.LOGIN_BOT_USERNAME or env.BOT_USERNAME, "public_url": env.PUBLIC_URL, "bot_id": (env.LOGIN_BOT_TOKEN or env.BOT_TOKEN).split(":")[0]}
 
 
 @public.get("/listing-photos/{listing_id}/{n}")

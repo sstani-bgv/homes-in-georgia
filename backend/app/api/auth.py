@@ -125,6 +125,8 @@ def _throttled(*keys: str) -> bool:
 
 @router.post("/login")
 def login(body: LoginIn, request: Request, db: Session = Depends(get_db, scope="function")):
+    if not settings.PASSWORD_LOGIN:
+        raise DomainError("forbidden", "password login is disabled, use Telegram", 403)
     keys = (f"ip:{request.client.host if request.client else '-'}", f"login:{body.login.strip().lower()}")
     if _throttled(*keys):
         raise DomainError("too_many_attempts", "too many attempts, try again in 15 minutes", 429)
