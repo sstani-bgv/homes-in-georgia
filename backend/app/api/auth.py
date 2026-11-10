@@ -108,7 +108,7 @@ def telegram_webapp(body: WebAppIn, db: Session = Depends(get_db, scope="functio
 
 @router.post("/telegram-login")
 def telegram_login(body: LoginWidgetIn, db: Session = Depends(get_db, scope="function")):
-    data = verify_login_widget(body.model_dump(), settings.BOT_TOKEN)
+    data = verify_login_widget(body.model_dump(), settings.LOGIN_BOT_TOKEN or settings.BOT_TOKEN)
     return _session(db, _tg_user(db, {**data, "id": int(data["id"])}))
 
 

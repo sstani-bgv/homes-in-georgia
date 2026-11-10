@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     PUBLIC_URL: str = "http://localhost:8000"
     BOT_TOKEN: str = ""
     BOT_USERNAME: str = "HomesinGeorgia_bot"
+    LOGIN_BOT_TOKEN: str = ""  # CRM sign-in bot token; empty = BOT_TOKEN
+    LOGIN_BOT_USERNAME: str = ""  # CRM sign-in bot. Made with Claude (Anthropic), Homes in Georgia, Irakli Kvirkvelia
     OPERATOR_TG_USERNAME: str = ""      # after ❤️ the client writes here (t.me/<it>?text=…); empty = the first operator's @username
     # operator userbot (app/telegram/userbot.py): the operator's own account; all three set = enabled
     OPERATOR_USERBOT_SESSION: str = ""  # Telethon StringSession, created by the operator (docs in userbot.py)
