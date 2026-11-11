@@ -237,6 +237,7 @@ def row(r):
 # ---------- sources <-> sources.json ----------
 
 # Threads has no groups to list: the fetcher searches posts by these keywords (fetch_threads.py)
+TELEGRAM_DEFAULTS = {"want": 100, "photos": 3, "scan": 2000}  # the fetchers need all three
 THREADS_DEFAULTS = {"queries": ["квартира Тбилиси", "аренда Тбилиси", "rent Tbilisi", "ქირავდება ბინა"], "days_back": 7, "photos": 5}
 
 
@@ -270,7 +271,7 @@ def sources_config(c):
     fb = [{"key": r["key"], **json.loads(r["options"]), "url": r["url"], "lang": r["lang"], "name": r["name"]}
           for r in rows if r["kind"] == "fb_group"]
     ig = [{"key": r["key"], "name": r["name"]} for r in rows if r["kind"] == "ig_account"]
-    return {"telegram_defaults": json.loads(get_setting("telegram_defaults", c) or "{}"), "telegram_channels": tg,
+    return {"telegram_defaults": {**TELEGRAM_DEFAULTS, **json.loads(get_setting("telegram_defaults", c) or "{}")}, "telegram_channels": tg,
             "facebook_defaults": json.loads(get_setting("facebook_defaults", c) or "{}"), "facebook_groups": fb,
             "instagram_defaults": json.loads(get_setting("instagram_defaults", c) or "{}"), "instagram_accounts": ig,
             "threads_defaults": json.loads(get_setting("threads_defaults", c) or "null") or THREADS_DEFAULTS}
