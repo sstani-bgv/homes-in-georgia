@@ -83,6 +83,7 @@ def _status(db: Session, p: Property, status: str, actor: User | None, action: s
     old = p.status
     p.status = status
     p.updated_at = now()
+    p.board_hidden_at = None  # a new step brings the card back to the board
     log_event(db, "property", p.id, action or status, actor, previous=old, status=status, **data)
 
 
@@ -1669,13 +1670,32 @@ def verify(db: Session, pid: int, actor: User) -> Property:
 def board(db: Session, user: User, per_column: int = 100) -> dict[str, list[dict]]:
     columns = {}
     for st in BOARD:
-        stmt = select(Property).where(Property.status == st)
+        stmt = select(Property).where(Property.status == st, Property.board_hidden_at.is_(None))
         if user.role not in STAFF:
             stmt = stmt.where(Property.agent_id == user.id)
         columns[st] = list(db.scalars(stmt.order_by(Property.updated_at.desc()).limit(per_column)))
     cache: dict = {}
     prefetch(db, [p for rows in columns.values() for p in rows], cache)
     return {st: [out(db, p, user, cache=cache) for p in rows] for st, rows in columns.items()}
+
+
+BOARD_HIDEABLE = ("published", "rented")
+
+
+def board_hide(db: Session, user: User, status: str) -> int:
+    """«Убрать с доски»: every card of a done column (staff: all, agent: his own) leaves the board; the object keeps its
+    status (still in the channel, the bot and the lists). -> how many."""
+    if status not in BOARD_HIDEABLE:
+        raise DomainError("bad_status", "only published / rented cards can leave the board")
+    stmt = select(Property).where(Property.status == status, Property.board_hidden_at.is_(None))
+    if user.role not in STAFF:
+        stmt = stmt.where(Property.agent_id == user.id)
+    rows = list(db.scalars(stmt))
+    for p in rows:
+        p.board_hidden_at = now()
+    log_event(db, "property", "-", "board_hidden", user, status=status, count=len(rows))
+    db.commit()
+    return len(rows)
 
 
 def history(db: Session, pid: int) -> list[dict]:

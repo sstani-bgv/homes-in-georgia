@@ -209,9 +209,9 @@ def _schedule(db: Session) -> list[dict]:
         if key in ("ss", "facebook", "threads"):
             rr = runs.get(key) or []
             spent = sum(r[1] for r in rr)
-            if key == "threads":  # a flat price per query and run, new posts are free
-                per_run = spent / len(rr) if rr else THREADS_PER_QUERY * queries
-                paid = {"per_run": round(per_run, 4), "per_hour": 0}
+            if key == "threads":  # a flat price per query and run, new posts are free. Not the recorded spend: Apify
+                # reports a pay-per-event run's usage late, the fetcher read $0 / $0.03 for runs that cost $0.12
+                paid = {"per_run": round(THREADS_PER_QUERY * queries, 4), "per_hour": 0}
             else:  # a start (+ ss.ge: the list page) + each new post / detail page, which come at their own pace
                 hours = sum(r[3] for r in rr if r[3])
                 var = sum(max(0, r[1] - start) for r in rr if r[3])

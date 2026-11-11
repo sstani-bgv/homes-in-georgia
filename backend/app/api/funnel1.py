@@ -163,6 +163,11 @@ def properties_board(db: Session = Depends(get_db, scope="function"), user: User
     return P.board(db, user)
 
 
+@router.post("/properties/board/hide")
+def properties_board_hide(body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return {"hidden": P.board_hide(db, user, str(body.get("status") or ""))}
+
+
 @router.get("/properties/deal-search")
 def properties_deal_search(q: str | None = None, pid: int | None = None, deal_type: str = "rent", lead_id: int | None = None,
                            db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-react';
+import { Archive, ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
@@ -286,6 +286,11 @@ export function PropertyBoard({ base = '' }: { base?: string }) {
     onSuccess: (_, { to }) => { qc.invalidateQueries({ queryKey: ['properties'] }); qc.invalidateQueries({ queryKey: ['property'] }); toast(`Объект перенесён: ${PROPERTY_STATUS[to]}`); },
     onError: (e) => { toast(errText(e), true); qc.invalidateQueries({ queryKey: ['properties'] }); },
   });
+  const hide = useMutation({
+    mutationFn: (s: 'published' | 'rented') => api.properties.boardHide(s),
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['properties', 'board'] }); toast(`Убрано с доски: ${r.hidden}`); },
+    onError: (e) => toast(errText(e), true),
+  });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   const all = Object.values(data || {}).flat();
@@ -322,6 +327,13 @@ export function PropertyBoard({ base = '' }: { base?: string }) {
               onDragOver={(e) => { e.preventDefault(); setOver(s); }} onDragLeave={() => setOver(null)}
               onDrop={(e) => { e.preventDefault(); drop(s, Number(e.dataTransfer.getData('text/property'))); }}>
               <div className="kanban-col-head"><span className="label">{PROPERTY_STATUS[s]}</span><span className="tab-count">{items.length}</span></div>
+              {(s === 'published' || s === 'rented') && items.length > 0 && (!collapsed) && (
+                <Button size="sm" variant="ghost" block disabled={hide.isPending}
+                  title="Объекты остаются в канале, боте и списках; карточка вернётся на доску при смене статуса"
+                  onClick={() => { if (confirm(`Убрать с доски все карточки «${PROPERTY_STATUS[s]}» (${items.length})? Объекты останутся в канале, боте и списках.`)) hide.mutate(s); }}>
+                  <Archive size={14} />Убрать с доски
+                </Button>
+              )}
               <div className="kanban-col-body">
                 {collapsed ? <Button size="sm" variant="secondary" block onClick={() => setShowPublished(true)}>Показать</Button>
                   : items.length === 0 ? <div className="faint" style={{ fontSize: 12, padding: 6 }}>Пусто</div>

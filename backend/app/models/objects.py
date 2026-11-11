@@ -81,6 +81,7 @@ class Property(Base):
     archive_reason = Column(Text)  # ARCHIVE_REASONS
     archive_comment = Column(Text)
     archived_at = Column(DateTime(timezone=True))
+    board_hidden_at = Column(DateTime(timezone=True))  # «Убрать с доски» (published / rented), migration 0003
     # stage 10: «Собственник согласен показать клиентам»: client-eligible with the ad's photos before the publication
     fast_track_at = Column(DateTime(timezone=True))
     fast_track_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))

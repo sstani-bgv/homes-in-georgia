@@ -175,8 +175,14 @@ on('GET', '/listings/:id', (m) => F.listings.find((l) => l.id === m[1]));
 on('GET', '/properties/board', () => {
   const u = currentUser();
   const out: Record<string, Property[]> = {};
-  F.properties.forEach((p) => { (out[p.status] ||= []).push(propOut(p, u)); });
+  F.properties.filter((p) => !(p as { board_hidden?: boolean }).board_hidden).forEach((p) => { (out[p.status] ||= []).push(propOut(p, u)); });
   return out;
+});
+on('POST', '/properties/board/hide', (_m, b) => {
+  const u = currentUser();
+  const ps = F.properties.filter((p) => p.status === (b as { status: string }).status && (u.role !== 'agent' || p.agent_id === u.id));
+  ps.forEach((p) => { (p as { board_hidden?: boolean }).board_hidden = true; });
+  return { hidden: ps.length };
 });
 on('GET', '/properties', (_m, _b, q) => {
   const u = currentUser();
