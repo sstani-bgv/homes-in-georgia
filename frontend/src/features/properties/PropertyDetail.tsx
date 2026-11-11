@@ -979,6 +979,7 @@ function OwnerDoc({ p, canEdit, kind, label, accept }: { p: Property; canEdit: b
     <div className="row row-wrap gap-sm">
       {d ? <span><CheckCircle2 size={14} color="var(--ok, #1a7f4b)" /> {label} · <a href={mediaUrl(d.url)} target="_blank" rel="noreferrer"><FileText size={14} /> открыть</a></span>
         : <span className="muted">{label}: нет</span>}
+      {kind === 'registry_extract' && p.registry_app && <a className="faint" style={{ fontSize: 12 }} href={p.registry_app.url} target="_blank" rel="noreferrer">заявка NAPR №{p.registry_app.reg_number}{p.registry_app.date ? ` от ${new Date(p.registry_app.date).toLocaleDateString('ru-RU')}` : ''}</a>}
       {canEdit && <>
         <input ref={ref} type="file" accept={accept} hidden onChange={(e) => { const fl = e.target.files?.[0]; if (fl) up.mutate(fl); e.target.value = ''; }} />
         <Button size="sm" variant="secondary" loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={14} />{d ? 'Заменить' : 'Загрузить'}</Button>

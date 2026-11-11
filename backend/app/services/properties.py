@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import hashlib
+import json
 import html as html_
 import re
 import uuid
@@ -968,14 +969,33 @@ def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | Non
         if not (docs.get(kind) and docs[kind][1]):
             raise DomainError("missing_fields", f"Загрузите: {label}")
         _check_owner_doc(kind, *docs[kind])  # everything is checked before anything is stored
+    app = _registry_app(data.get("registry_app"))
     m = _store_contract(db, p, pdf, None)
     for kind, (name, content) in docs.items():
         if kind in OWNER_DOCS:
             _store_owner_doc(db, p, kind, name, content, None)
-    log_event(db, "property", p.id, "exclusive_contract_signed", None, label=f["full_name"], **f, ip=ip,
+    log_event(db, "property", p.id, "exclusive_contract_signed", None, label=f["full_name"], **f, ip=ip, registry_app=app,
               user_agent=(user_agent or "")[:300], pdf_sha256=hashlib.sha256(pdf).hexdigest())
     db.commit()
     return m
+
+
+def _registry_app(raw) -> dict | None:
+    """The NAPR application the owner picked on the sign page (registry.search item): JSON from the form, trimmed."""
+    try:
+        d = json.loads(raw) if isinstance(raw, str) and raw.strip() else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict) or not str(d.get("app_id") or "").isdigit():
+        return None
+    return {k: str(d.get(k) or "")[:300] for k in ("app_id", "reg_number", "date", "type", "address")}
+
+
+def registry_app(db: Session, pid: int) -> dict | None:
+    """The application picked at the last signing (from its event), for the CRM next to the extract."""
+    ev = db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(pid),
+                                        Event.action == "exclusive_contract_signed").order_by(Event.id.desc())).first()
+    return (ev.data or {}).get("registry_app") if ev else None
 
 
 def contract(db: Session, pid: int) -> PropertyMedia | None:
@@ -1764,6 +1784,8 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         # the passport and the extract: only staff and the object's agent (the files themselves: api media_file)
         d["owner_docs"] = {k: {"id": m.id, "url": f"/api/media/{m.path}", "created_at": m.created_at}
                            for k, m in owner_docs(db, p.id).items()} if p.is_exclusive and can_see_owner(p, user) else {}
+        if app := d["owner_docs"] and registry_app(db, p.id):
+            d["registry_app"] = {**app, "url": f"https://naprweb.reestri.gov.ge/_dea/#/view/{app['app_id']}"}
         d["exclusive_sign_token"] = sign_token(p.id) if p.is_exclusive and can_see_owner(p, user) else None
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None

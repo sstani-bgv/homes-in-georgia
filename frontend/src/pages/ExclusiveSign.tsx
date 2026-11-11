@@ -2,7 +2,7 @@
 // PlatformDGE/hig-sign). The PDF is built here and attached to the object (backend properties.sign_contract).
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { http } from '../api/client';
 import { errText } from '../components/toast';
 import { Button, ErrorBox, Field, Input, Loading, Seg } from '../components/ui';
@@ -13,16 +13,55 @@ import { CheckCircle2, Copy, ExternalLink, Upload } from 'lucide-react';
 
 interface SignView { id: number; address: string; cadastral_code: string; owner_name: string; owner_phone: string; signed_at: string | null }
 
-// the registry extract: NAPR's public search (my.gov.ge service 176 embeds it); its document view is behind reCAPTCHA,
-// so the owner downloads the extract himself and uploads it here
+// the registry extract: our backend lists NAPR's applications for the code (services/registry.py); the owner taps one,
+// NAPR's own page opens with its reCAPTCHA, he downloads the extract (ამონაწერი) himself and uploads it here
 const REGISTRY_URL = 'https://naprweb.reestri.gov.ge/_dea/#/search';
 const MAX_DOC = 15 * 1024 * 1024;
-type Docs = { extract: string; extractHow: string; openRegistry: string; copyCode: string; copied: string; passport: string; passportHint: string; pick: string; replace: string; tooBig: string };
+type Docs = { listTitle: string; listHint: string; open: string; picked: string; more: string; none: string; down: string; upload: string; extract: string; extractHow: string; openRegistry: string; copyCode: string; copied: string; passport: string; passportHint: string; pick: string; replace: string; tooBig: string };
 const DOCS: Record<Lang, Docs> = {
-  ka: { extract: 'საჯარო რეესტრის ამონაწერი (PDF)', extractHow: 'გახსენით რეესტრი, ჩაწერეთ საკადასტრო კოდი, გახსენით ბოლო განცხადება და ჩამოტვირთეთ ამონაწერი (PDF), შემდეგ ატვირთეთ აქ.', openRegistry: 'რეესტრის გახსნა', copyCode: 'კოდის კოპირება', copied: 'დაკოპირდა', passport: 'პასპორტი / პირადობის მოწმობა', passportHint: 'ფოტო ან PDF (JPG, PNG, HEIC, PDF), 15 მბ-მდე. ინახება დახურულად, ხედავს მხოლოდ სააგენტო.', pick: 'ფაილის არჩევა', replace: 'შეცვლა', tooBig: 'ფაილი 15 მბ-ზე დიდია' },
-  ru: { extract: 'Выписка из Публичного реестра (PDF)', extractHow: 'Откройте реестр, введите кадастровый код, откройте последнюю заявку и скачайте выписку (ამონაწერი, PDF), затем загрузите её сюда.', openRegistry: 'Открыть реестр', copyCode: 'Скопировать код', copied: 'Скопировано', passport: 'Паспорт / ID-карта', passportHint: 'Фото или PDF (JPG, PNG, HEIC, PDF), до 15 МБ. Хранится закрыто, видит только агентство.', pick: 'Выбрать файл', replace: 'Заменить', tooBig: 'Файл больше 15 МБ' },
-  en: { extract: 'Public Registry extract (PDF)', extractHow: 'Open the registry, enter the cadastral code, open the latest application and download the extract (ამონაწერი, PDF), then upload it here.', openRegistry: 'Open the registry', copyCode: 'Copy code', copied: 'Copied', passport: 'Passport / ID card', passportHint: 'Photo or PDF (JPG, PNG, HEIC, PDF), up to 15 MB. Stored privately, only the agency sees it.', pick: 'Choose file', replace: 'Replace', tooBig: 'The file is larger than 15 MB' },
+  ka: { listTitle: 'თქვენი ობიექტის განცხადებები რეესტრში', listHint: 'შეეხეთ ბოლო დასრულებულ განცხადებას: გაიხსნება რეესტრის გვერდი — მონიშნეთ „მე არ ვარ რობოტი“, ჩამოტვირთეთ ამონაწერი (PDF) და ატვირთეთ აქ.', open: 'გახსნა', picked: 'არჩეულია', more: 'მეტის ჩვენება', none: 'ამ კოდით განცხადებები ვერ მოიძებნა.', down: 'რეესტრი ახლა არ პასუხობს.', upload: 'ჩამოტვირთული ამონაწერის ატვირთვა', extract: 'საჯარო რეესტრის ამონაწერი (PDF)', extractHow: 'გახსენით რეესტრი, ჩაწერეთ საკადასტრო კოდი, გახსენით ბოლო განცხადება და ჩამოტვირთეთ ამონაწერი (PDF), შემდეგ ატვირთეთ აქ.', openRegistry: 'რეესტრის გახსნა', copyCode: 'კოდის კოპირება', copied: 'დაკოპირდა', passport: 'პასპორტი / პირადობის მოწმობა', passportHint: 'ფოტო ან PDF (JPG, PNG, HEIC, PDF), 15 მბ-მდე. ინახება დახურულად, ხედავს მხოლოდ სააგენტო.', pick: 'ფაილის არჩევა', replace: 'შეცვლა', tooBig: 'ფაილი 15 მბ-ზე დიდია' },
+  ru: { listTitle: 'Заявки по вашему объекту в реестре', listHint: 'Нажмите на последнюю завершённую заявку: откроется страница реестра — отметьте «Я не робот», скачайте выписку (PDF) и загрузите её сюда.', open: 'Открыть', picked: 'Выбрано', more: 'Показать ещё', none: 'По этому коду заявок не найдено.', down: 'Реестр сейчас не отвечает.', upload: 'Загрузите скачанную выписку', extract: 'Выписка из Публичного реестра (PDF)', extractHow: 'Откройте реестр, введите кадастровый код, откройте последнюю заявку и скачайте выписку (ამონაწერი, PDF), затем загрузите её сюда.', openRegistry: 'Открыть реестр', copyCode: 'Скопировать код', copied: 'Скопировано', passport: 'Паспорт / ID-карта', passportHint: 'Фото или PDF (JPG, PNG, HEIC, PDF), до 15 МБ. Хранится закрыто, видит только агентство.', pick: 'Выбрать файл', replace: 'Заменить', tooBig: 'Файл больше 15 МБ' },
+  en: { listTitle: 'Applications for your property in the registry', listHint: 'Tap the latest completed application: the registry page opens — tick “I’m not a robot”, download the extract (PDF) and upload it here.', open: 'Open', picked: 'Selected', more: 'Show more', none: 'No applications found for this code.', down: 'The registry is not responding right now.', upload: 'Upload the downloaded extract', extract: 'Public Registry extract (PDF)', extractHow: 'Open the registry, enter the cadastral code, open the latest application and download the extract (ამონაწერი, PDF), then upload it here.', openRegistry: 'Open the registry', copyCode: 'Copy code', copied: 'Copied', passport: 'Passport / ID card', passportHint: 'Photo or PDF (JPG, PNG, HEIC, PDF), up to 15 MB. Stored privately, only the agency sees it.', pick: 'Choose file', replace: 'Replace', tooBig: 'The file is larger than 15 MB' },
 };
+
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Asia/Tbilisi' }) : '');
+interface RegApp { app_id: string; reg_number: string; date: string | null; type: string; address: string; status: string; done: boolean; applicants: string[]; url: string }
+interface RegPage { total: number; page: number; lastpage: number; items: RegApp[] }
+
+/** NAPR applications for the code; a tap opens the application on NAPR (its CAPTCHA, the owner's download) and picks it. */
+function RegistryApps({ token, code, picked, onPick, t }: { token: string; code: string; picked: RegApp | null; onPick: (a: RegApp) => void; t: Docs }) {
+  const q = useInfiniteQuery({
+    queryKey: ['napr', token, code], enabled: !!code, retry: false, staleTime: 3600_000, initialPageParam: 1,
+    queryFn: ({ pageParam }) => http.get<RegPage>(`/public/exclusive/${token}/registry?cadastral=${encodeURIComponent(code)}&page=${pageParam}`),
+    getNextPageParam: (last) => (last.page < last.lastpage ? last.page + 1 : undefined),
+  });
+  if (!code) return null;
+  if (q.isLoading) return <Loading />;
+  const items = q.data?.pages.flatMap((p) => p.items) || [];
+  if (q.isError || !items.length) return <span className="faint" style={{ fontSize: 12 }}>{q.isError ? t.down : t.none}</span>;
+  return (
+    <div className="col gap-sm">
+      <span className="label">{t.listTitle}</span>
+      <span className="faint" style={{ fontSize: 12 }}>{t.listHint}</span>
+      {items.map((a) => {
+        const on = picked?.app_id === a.app_id;
+        return (
+          <a key={a.app_id} href={a.url} target="_blank" rel="noreferrer" onClick={() => onPick(a)} className="card card-pad col"
+            style={{ gap: 2, textDecoration: 'none', color: 'inherit', border: `1.5px solid ${on ? 'var(--ok, #1a7f4b)' : 'var(--line, #e3e8f0)'}`, padding: 12 }}>
+            <span className="row row-between gap-sm">
+              <b>{day(a.date)} · №{a.reg_number}</b>
+              <span className="row gap-sm" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{on ? <><CheckCircle2 size={14} color="var(--ok, #1a7f4b)" />{t.picked}</> : <><ExternalLink size={14} />{t.open}</>}</span>
+            </span>
+            <span style={{ fontSize: 13 }}>{a.type}</span>
+            {a.address && <span className="faint" style={{ fontSize: 12 }}>{a.address}</span>}
+            <span style={{ fontSize: 12, color: a.done ? 'var(--ok, #1a7f4b)' : undefined }} className={a.done ? undefined : 'faint'}>{a.status}</span>
+          </a>
+        );
+      })}
+      {q.hasNextPage && <Button variant="secondary" size="sm" loading={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>{t.more}</Button>}
+    </div>
+  );
+}
 
 function FilePick({ label, hint, accept, file, onFile, t }: { label: string; hint?: React.ReactNode; accept: string; file: File | null; onFile: (f: File | null) => void; t: Docs }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -87,22 +126,31 @@ export function ExclusiveSignPage() {
   const [idDoc, setIdDoc] = useState<File | null>(null);
   const [extract, setExtract] = useState<File | null>(null);
   const [copied, setCopied] = useState(false);
+  const [app, setApp] = useState<RegApp | null>(null);
+  const [lookup, setLookup] = useState('');  // the code the registry list is for: valid and settled for a moment
   const pad = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (q.data) setF((x) => ({ ...x, full_name: q.data.owner_name, phone: q.data.owner_phone, cadastral_code: q.data.cadastral_code }));
   }, [q.data]);
   const t = UI[lang], td = DOCS[lang];
+  useEffect(() => {
+    const c = f.cadastral_code.trim(), ok = c && !cadastralError(c, q.data?.cadastral_code);
+    const h = setTimeout(() => setLookup(ok ? cadastralNorm(c) : ''), 700);
+    return () => clearTimeout(h);
+  }, [f.cadastral_code, q.data?.cadastral_code]);
   const sign = useMutation({
     mutationFn: async () => {
       const v = q.data!;
       const pdf = await buildExclusivePdf(v.id, { ...f, address: v.address, date: tbilisiNow() }, pad.current!, navigator.userAgent,
-        [['პასპორტი / Паспорт (ID)', `загружен: ${idDoc!.name}`], ['ამონაწერი / Выписка из реестра', `загружена: ${extract!.name}`]]);
+        [['პასპორტი / Паспорт (ID)', `загружен: ${idDoc!.name}`], ['ამონაწერი / Выписка из реестра', `загружена: ${extract!.name}`],
+          ...(app ? [['განცხადება / Заявка NAPR', `№${app.reg_number} · ${day(app.date)}`] as [string, string]] : [])]);
       const fd = new FormData();
       Object.entries(f).forEach(([k, val]) => fd.append(k, val.trim()));
       fd.append('consent', 'true');
       fd.append('file', new Blob([pdf], { type: 'application/pdf' }), `exclusive-${v.id}.pdf`);
       fd.append('id_doc', idDoc!);
       fd.append('extract', extract!);
+      if (app) fd.append('registry_app', JSON.stringify(app));
       return http.post<SignView>(`/public/exclusive/${token}`, fd);
     },
     onSuccess: () => q.refetch(),
@@ -127,8 +175,9 @@ export function ExclusiveSignPage() {
       <Field label={t.phone}><Input type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} /></Field>
       <Field label={t.cad} hint={cadBad ? <span style={{ color: 'var(--accent)' }}>{t.cadBad}</span> : undefined}><Input value={f.cadastral_code} placeholder="01.14.12.003.045" onChange={(e) => setF({ ...f, cadastral_code: e.target.value })} onBlur={() => { if (!cadBad && f.cadastral_code !== q.data?.cadastral_code) setF({ ...f, cadastral_code: cadastralNorm(f.cadastral_code) }); }} /></Field>
     </div>
+    <RegistryApps token={token} code={lookup} picked={app} onPick={setApp} t={td} />
     <div className="col gap-sm">
-      <FilePick label={td.extract} accept="application/pdf,.pdf" file={extract} onFile={setExtract} t={td} hint={<>
+      <FilePick label={app ? td.upload : td.extract} accept="application/pdf,.pdf" file={extract} onFile={setExtract} t={td} hint={app ? undefined : <>
         {td.extractHow}
         <span className="row row-wrap gap-sm" style={{ marginTop: 8 }}>
           <a className="btn btn-secondary btn-sm" href={REGISTRY_URL} target="_blank" rel="noreferrer"><ExternalLink size={14} />{td.openRegistry}</a>

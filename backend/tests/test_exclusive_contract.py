@@ -1,4 +1,6 @@
 """Exclusive object: «Отправить оператору» needs the owner's signed contract PDF; the PDF never goes into the post."""
+import json
+
 import pytest
 
 from app.services import properties
@@ -75,13 +77,18 @@ def test_owner_signs_by_public_link(db, client):
     r = client.post(f"/api/public/exclusive/{token}", data=form,
                     files={"file": ("c.pdf", PDF), "id_doc": ("passport.exe", b"MZ"), "extract": docs["extract"]})
     assert r.json()["code"] == "bad_file" and properties.contract(db, p.id) is None
-    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF), **docs})
+    app = {"app_id": "35575905", "reg_number": "882026909236", "date": "2026-10-07T11:34:56+00:00", "type": "ამონაწერი", "x": 1}
+    r = client.post(f"/api/public/exclusive/{token}", data={**form, "registry_app": json.dumps(app)},
+                    files={"file": ("c.pdf", PDF), **docs})
     assert r.status_code == 200 and r.json()["signed_at"]
     db.expire_all()
     assert properties.contract(db, p.id) and _code(db, p.id, ag)[0] == "ok"
     from app.models import Event
     ev = db.query(Event).filter_by(entity_id=str(p.id), action="exclusive_contract_signed").one()
     assert ev.data["personal_id"] == "01001012345" and len(ev.data["pdf_sha256"]) == 64
+    assert ev.data["registry_app"]["reg_number"] == "882026909236" and "x" not in ev.data["registry_app"]
+    d = properties.out(db, p, ag, full=True)
+    assert d["registry_app"]["url"].endswith("#/view/35575905")
     r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF), **docs})
     assert r.json()["code"] == "already_signed"
 
@@ -116,3 +123,31 @@ def test_owner_docs_are_private(db, client):
     assert client.get(url).status_code == 401
     r = client.post(f"/api/properties/{p.id}/owner-docs/nonsense", files={"file": ("a.pdf", PDF)}, headers=auth(ag))
     assert r.status_code == 404
+
+
+def test_registry_lookup_is_scoped_to_a_signing_link(db, client, monkeypatch):
+    """GET /public/exclusive/<token>/registry: NAPR's application list, only for a live link, validated, cached."""
+    import httpx
+    from app.services import registry
+    calls = []
+
+    class R:
+        def raise_for_status(self): pass
+        def json(self): return {"page": 1, "lastpage": 1, "total": 1, "applist": [
+            {"appID": "35575905", "regNumber": "882026909236", "statusId": "10", "status": "done", "appRegDate": "1791386696",
+             "webTransact": "ამონაწერი", "address": "Tbilisi", "applicants": ["X"]}]}
+
+    monkeypatch.setattr(httpx, "post", lambda url, json, **kw: calls.append(json) or R())
+    registry._cache.clear()
+    ag = make_user(db, "agent")
+    p = _ready(db, ag, "ss6", address="Пекини 6")
+    p.is_exclusive = True
+    db.commit()
+    token = properties.sign_token(p.id)
+    assert client.get("/api/public/exclusive/garbage/registry?cadastral=01.10.13.015.029").status_code == 404
+    assert client.get(f"/api/public/exclusive/{token}/registry?cadastral=drop table").json()["code"] == "bad_cadastral"
+    r = client.get(f"/api/public/exclusive/{token}/registry?cadastral=01.10.13.015.029").json()
+    assert r["items"][0]["reg_number"] == "882026909236" and r["items"][0]["done"] and r["items"][0]["date"].startswith("2026-10-07")
+    assert r["items"][0]["url"].endswith("#/view/35575905") and calls[0]["cadcode"] == "01.10.13.015.029"
+    client.get(f"/api/public/exclusive/{token}/registry?cadastral=01.10.13.015.029")
+    assert len(calls) == 1  # cached

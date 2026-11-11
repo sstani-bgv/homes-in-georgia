@@ -320,14 +320,24 @@ def public_exclusive(token: str, db: Session = Depends(get_db, scope="function")
     return P.sign_view(db, token)
 
 
+@router.get("/public/exclusive/{token}/registry")
+def public_exclusive_registry(token: str, cadastral: str, page: int = 1, db: Session = Depends(get_db, scope="function")):
+    """Public Registry applications for the code (services/registry.py): only with a live signing link, not an open proxy."""
+    from app.services import registry
+    P.sign_view(db, token)  # 404 for a bad / dead link
+    return registry.search(cadastral, page, token)
+
+
 @router.post("/public/exclusive/{token}")
 async def public_exclusive_sign(token: str, request: Request, file: UploadFile = File(...),
                                 id_doc: UploadFile | None = File(None), extract: UploadFile | None = File(None), full_name: str = Form(""),
                                 personal_id: str = Form(""), phone: str = Form(""), cadastral_code: str = Form(""),
-                                consent: bool = Form(False), db: Session = Depends(get_db, scope="function")):
+                                consent: bool = Form(False), registry_app: str = Form(""),
+                                db: Session = Depends(get_db, scope="function")):
     ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client and request.client.host)
     P.sign_contract(db, token, {"full_name": full_name, "personal_id": personal_id, "phone": phone,
-                                "cadastral_code": cadastral_code, "consent": consent},
+                                "cadastral_code": cadastral_code, "consent": consent,
+                                "registry_app": registry_app},
                     await file.read(), ip, request.headers.get("user-agent"),
                     {P.OWNER_ID_DOC: (id_doc.filename or "", await id_doc.read()) if id_doc else None,
                      P.REGISTRY_EXTRACT: (extract.filename or "", await extract.read()) if extract else None})

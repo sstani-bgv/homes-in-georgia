@@ -115,6 +115,8 @@ export interface Property {
   /** exclusive object: the owner's signed contract PDF (not a post file) and the token of his signing page /sign/<token> */
   exclusive_contract?: { id: number; url: string; created_at: string } | null;
   /** the owner's passport / registry extract (private): staff and the object's agent only */
+  /** the NAPR application the owner picked when signing (its page on naprweb.reestri.gov.ge) */
+  registry_app?: { app_id: string; reg_number: string; date: string; type: string; url: string } | null;
   owner_docs?: Partial<Record<'owner_id_doc' | 'registry_extract', { id: number; url: string; created_at: string }>>;
   exclusive_sign_token?: string | null;
   missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
