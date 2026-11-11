@@ -12,6 +12,7 @@ import time
 import httpx
 
 log = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO line is the request URL with /bot<TOKEN>/
 
 
 def conf(key, default=""):
