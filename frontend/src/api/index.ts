@@ -34,7 +34,8 @@ export const api = {
     suggestTag: (name: string, uid?: number) => http.get<{ tag: string }>('/users/agent-tag-suggestion', { name, uid }),
   },
 
-  cabinet: () => then(http.get<Cabinet>('/me/cabinet'), normCabinet),
+  /** staff: any agent's cabinet (user_id); the backend refuses another user's for everyone else */
+  cabinet: (userId?: number) => then(http.get<Cabinet>('/me/cabinet', { user_id: userId }), normCabinet),
 
   listings: {
     new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing> & { known_total?: number }>('/listings/new', { ...q, limit }),

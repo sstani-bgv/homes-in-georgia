@@ -23,11 +23,13 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d
 function startOfWeek(d: Date) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 function parseDay(s: string) { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); }
 
-export function useCalendarEvents() {
-  const leads = useQuery({ queryKey: ['leads', 'calendar'], queryFn: () => api.leads.list() });
-  const props = useQuery({ queryKey: ['properties', 'calendar'], queryFn: () => api.properties.list() });
-  const deals = useQuery({ queryKey: ['deals', 'calendar'], queryFn: () => api.deals.list() });
-  const leases = useQuery({ queryKey: ['properties', 'calendar', 'rented'], queryFn: () => api.properties.list({ rented: 1, limit: 500 }) });
+/** agentId: one agent's events (the cabinet opened by staff); agents only ever get their own from the backend */
+export function useCalendarEvents(agentId?: number) {
+  const a = { agent_id: agentId };
+  const leads = useQuery({ queryKey: ['leads', 'calendar', agentId], queryFn: () => api.leads.list(a) });
+  const props = useQuery({ queryKey: ['properties', 'calendar', agentId], queryFn: () => api.properties.list(a) });
+  const deals = useQuery({ queryKey: ['deals', 'calendar', agentId], queryFn: () => api.deals.list(a) });
+  const leases = useQuery({ queryKey: ['properties', 'calendar', 'rented', agentId], queryFn: () => api.properties.list({ ...a, rented: 1, limit: 500 }) });
   const events = useMemo(() => {
     const out: Ev[] = [];
     for (const l of itemsOf(leads.data)) {
@@ -54,8 +56,8 @@ export function useCalendarEvents() {
 
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
-export function CalendarView({ base = '' }: { base?: string }) {
-  const { events, isLoading, error } = useCalendarEvents();
+export function CalendarView({ base = '', agentId }: { base?: string; agentId?: number }) {
+  const { events, isLoading, error } = useCalendarEvents(agentId);
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [sel, setSel] = useState(() => dayKey(new Date()));
   const [filter, setFilter] = useState<'all' | Kind>('all');

@@ -373,18 +373,19 @@ const BASE: PS[] = ['published', 'rented'];
 
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
  * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
-export function PropertyList({ mine, archived, status: only, base = '' }: { mine?: boolean; archived?: boolean; status?: string; base?: string }) {
+export function PropertyList({ mine, archived, status: only, agentId, base = '' }: { mine?: boolean; archived?: boolean; status?: string; agentId?: number; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [agent, setAgent] = useState('');
   const [page, setPage] = useState(0);
   const { isStaff } = useAuth();
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
+  const fixedAgent = agentId !== undefined;  // the cabinet: one agent's objects, no agent select
   // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
-  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine });
+  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine && !fixedAgent });
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ['properties', 'list', scope, q, status, agent, page],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agent ? Number(agent) : undefined, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
+    queryKey: ['properties', 'list', scope, q, status, agentId ?? agent, page],
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agentId ?? (agent ? Number(agent) : undefined), status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: isStaff && (scope === 'all' || scope === 'archive') }); // whole-base totals: staff only
@@ -408,7 +409,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
             {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
-        {isStaff && !mine && (
+        {isStaff && !mine && !fixedAgent && (
           <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => { const v = e.target.value; filter(() => setAgent(v)); }}>
             <option value="">Все агенты</option>
             {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
@@ -434,7 +435,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
           <div className="card hide-mobile">
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>#</th><th>Адрес</th><th>Цена</th><th>Агент</th><th>Статус</th>{archived && <th>Причина</th>}<th>Обновлён</th></tr></thead>
+                <thead><tr><th>#</th><th>Адрес</th><th>Цена</th><th>Агент</th><th>Статус</th>{(archived || only === 'archived') && <th>Причина</th>}<th>Обновлён</th></tr></thead>
                 <tbody>
                   {items.map((p) => (
                     <tr key={p.id} className="clickable" onClick={() => navigate(link(p.id))}>
@@ -443,7 +444,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
                       <td className="num" style={{ fontWeight: 700 }}>{money(p.price, p.currency || 'USD')}</td>
                       <td>{p.agent?.name || '—'}</td>
                       <td><div className="row row-wrap gap-sm"><PropertyStatusBadge status={p.status} /><ExclusiveConflictBadge p={p} /></div></td>
-                      {archived && <td>{ARCHIVE_REASON[p.archive_reason || ''] || '—'}{p.archive_comment && <div className="muted" style={{ fontSize: 12 }}>{p.archive_comment}</div>}</td>}
+                      {(archived || only === 'archived') && <td>{ARCHIVE_REASON[p.archive_reason || ''] || '—'}{p.archive_comment && <div className="muted" style={{ fontSize: 12 }}>{p.archive_comment}</div>}</td>}
                       <td className="muted">{ago(p.updated_at || p.created_at)}</td>
                     </tr>
                   ))}

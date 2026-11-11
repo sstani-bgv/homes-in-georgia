@@ -142,8 +142,9 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   );
 }
 
-export function MyLeadsList({ base = '' }: { base?: string }) {
-  const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'list', 'mine-active'], queryFn: () => api.leads.list({}), refetchInterval: 20_000 });
+/** agentId: the cabinet opened by staff for one agent (agents always get their own, backend leads.query) */
+export function MyLeadsList({ base = '', agentId }: { base?: string; agentId?: number }) {
+  const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'list', 'mine-active', agentId], queryFn: () => api.leads.list({ agent_id: agentId }), refetchInterval: 20_000 });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   const items = itemsOf(data);

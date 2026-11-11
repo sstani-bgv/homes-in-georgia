@@ -1,5 +1,5 @@
 """Users, cabinet, clients."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -110,43 +110,79 @@ def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db,
 
 
 @router.get("/me/cabinet")
-def cabinet(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def cabinet(user_id: int | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """The personal cabinet; staff open any agent's with ?user_id=, everyone else only their own."""
+    if user_id and user_id != user.id and user.role not in STAFF:
+        raise forbidden()
+    me = get_or_404(db, User, user_id, "user") if user_id else user
     y, m = reports.month_bounds(None)
     mo = f"{m}/{y}"
     today = now().astimezone(TZ).date()
-    my_deals = list(db.scalars(deals.query(db, user).where((Deal.agent_id == user.id) | (Deal.recruit_id == user.id))
+    my_deals = list(db.scalars(deals.query(db, user).where((Deal.agent_id == me.id) | (Deal.recruit_id == me.id))
                                .limit(50)))
-    viewing = db.scalars(select(Lead).where(Lead.agent_id == user.id, Lead.status == "time_chosen",
+    viewing = db.scalars(select(Lead).where(Lead.agent_id == me.id, Lead.status == "time_chosen",
                                             Lead.viewing_at >= now()).order_by(Lead.viewing_at).limit(20))
-    my_leads = db.scalars(select(Lead).where(Lead.agent_id == user.id, Lead.status.not_in(("rented", "refused")))
+    my_leads = db.scalars(select(Lead).where(Lead.agent_id == me.id, Lead.status.not_in(("rented", "refused")))
                           .order_by(Lead.created_ts.desc()).limit(50))
-    my_props = db.scalars(select(Property).where(Property.agent_id == user.id, Property.status.not_in(("archived",)))
+    my_props = db.scalars(select(Property).where(Property.agent_id == me.id, Property.status.not_in(("archived",)))
                           .order_by(Property.updated_at.desc()).limit(50))
-    expiring = db.scalars(select(Deal).where(Deal.agent_id == user.id, Deal.status == "confirmed", Deal.rent_to >= today,
+    expiring = db.scalars(select(Deal).where(Deal.agent_id == me.id, Deal.status == "confirmed", Deal.rent_to >= today,
                                              Deal.rent_to <= today + timedelta(days=30)).order_by(Deal.rent_to))
+    # objects whose lease (hand-typed rent_to) ends soon or just ended: the agent re-rents them
+    leases = db.scalars(select(Property).where(Property.agent_id == me.id, Property.rent_to >= today - timedelta(days=14),
+                                               Property.rent_to <= today + timedelta(days=60)).order_by(Property.rent_to))
     month_deals = [d for d in my_deals if d.month == mo and d.status != "cancelled"]
     # apps-script getCabinetData: showings / photo reports / Make-Foto queue where I'm the recruit, mentor or agent
     my_reports = db.scalars(select(Report).where(
         Report.kind.in_(("showing", "photo", "makefoto", "assigned_showing")),
-        or_(Report.author_id == user.id, Report.recruit_id == user.id, Report.mentor_id == user.id),
+        or_(Report.author_id == me.id, Report.recruit_id == me.id, Report.mentor_id == me.id),
         Report.date >= today - timedelta(days=90)).order_by(Report.date.desc(), Report.id.desc()).limit(100))
     week_ago = now() - timedelta(days=7)
     listings = db.execute(select(func.count().filter(ChannelPost.status == "active"),
                                  func.count().filter(ChannelPost.date >= week_ago))
-                          .where(ChannelPost.agent_id == user.id)).one()
+                          .where(ChannelPost.agent_id == me.id)).one()
     return {
-        "user": user_out(user), "level": users.level_info(user), "month": mo,
-        "counters": next((c for c in reports.counters(db, mo) if c["user"]["id"] == user.id), None),
+        "user": user_out(me), "level": users.level_info(me), "month": mo,
+        "counters": next((c for c in reports.counters(db, mo) if c["user"]["id"] == me.id), None),
         "month_summary": {"deals": len(month_deals), "agent_amount": sum(float(d.agent_amount or 0) for d in month_deals),
                           "commission": sum(float(d.commission_total or 0) for d in month_deals)},
+        "monthly": _monthly(db, me.id, y, m),
         "deals": [deals.out(d, user) for d in my_deals],
         "properties": [properties.out(db, p, user) for p in my_props],
         "leads": [leads.card(db, x, user) for x in my_leads],
         "upcoming_viewings": [leads.card(db, x, user) for x in viewing],
         "expiring_contracts": [deals.out(d, user) for d in expiring],
+        "expiring_leases": [{"id": p.id, "address": p.address, "district": p.district, "status": p.status,
+                             "rent_to": p.rent_to.isoformat(), "tenant_name": p.tenant_name} for p in leases],
         "reports": [reports.out(r) for r in my_reports],
         "channel_listings": {"active": listings[0], "last_7_days": listings[1]},
     }
+
+
+def _monthly(db: Session, uid: int, y: int, m: int, n: int = 12) -> list[dict]:
+    """Last n months, newest first: deals (rentals among them) by Deal.month, the agent's money (his share as agent plus
+    as recruit), the platform's share of his deals, objects he added (Property.created_at, Tbilisi time)."""
+    keys = [f"{(m - 1 - i) % 12 + 1}/{y + (m - 1 - i) // 12}" for i in range(n)]
+    rows = {k: {"month": k, "deals": 0, "rentals": 0, "earned": 0.0, "platform": 0.0, "commission": 0.0, "added": 0}
+            for k in keys}
+    for d in db.scalars(select(Deal).where((Deal.agent_id == uid) | (Deal.recruit_id == uid), Deal.month.in_(keys),
+                                           Deal.status != "cancelled")):
+        r = rows[d.month]
+        if d.agent_id == uid:
+            r["deals"] += 1
+            r["rentals"] += d.deal_type == "rent"
+            r["earned"] += float(d.agent_amount or 0)
+            r["platform"] += float(d.platform_amount or 0)
+            r["commission"] += float(d.commission_total or 0)
+        if d.recruit_id == uid:
+            r["earned"] += float(d.recruit_amount or 0)
+    oy, om = y + (m - n) // 12, (m - n) % 12 + 1  # the first day of the oldest month
+    for (ts,) in db.execute(select(Property.created_at).where(Property.agent_id == uid,
+                                                               Property.created_at >= datetime(oy, om, 1, tzinfo=TZ))):
+        t = ts.astimezone(TZ)
+        if (k := f"{t.month}/{t.year}") in rows:
+            rows[k]["added"] += 1
+    return list(rows.values())
 
 
 def client_out(c: Client, full: bool = True) -> dict:

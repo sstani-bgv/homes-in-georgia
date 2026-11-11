@@ -516,6 +516,11 @@ export interface Cabinet {
   leads?: Lead[];
   viewings?: Lead[];
   expiring?: Deal[];
+  month_summary?: { deals: number; agent_amount: number; commission: number };
+  /** last 12 months, newest first (backend api/people.py _monthly) */
+  monthly?: { month: string; deals: number; rentals: number; earned: number; platform: number; commission: number; added: number }[];
+  /** objects whose lease (rent_to) ends within 60 days or ended in the last 14 */
+  expiring_leases?: { id: number; address?: string | null; district?: string | null; status: PropertyStatus; rent_to: string; tenant_name?: string | null }[];
 }
 
 export type Settings = Record<string, unknown>;

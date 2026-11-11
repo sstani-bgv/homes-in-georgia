@@ -107,13 +107,15 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
   );
 }
 
-function DealsList({ onOpen }: { onOpen: (id: number) => void }) {
-  const { isStaff } = useAuth();
-  const [month, setMonth] = useState(monthKey());
+/** agentId: the cabinet: one agent's deals, all months by default, no agent select */
+export function DealsList({ onOpen, agentId }: { onOpen: (id: number) => void; agentId?: number }) {
+  const { isStaff: staff } = useAuth();
+  const isStaff = staff && agentId === undefined;
+  const [month, setMonth] = useState(agentId === undefined ? monthKey() : '');
   const [agent, setAgent] = useState('');
   const [status, setStatus] = useState('');
   const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: isStaff });
-  const { data, isLoading, error } = useQuery({ queryKey: ['deals', month, agent, status], queryFn: () => api.deals.list({ month, agent_id: agent ? Number(agent) : undefined, status }) });
+  const { data, isLoading, error } = useQuery({ queryKey: ['deals', month, agentId ?? agent, status], queryFn: () => api.deals.list({ month, agent_id: agentId ?? (agent ? Number(agent) : undefined), status }) });
   const items = itemsOf(data);
   const nameOf = useUserNames();
   const confirmed = items.filter((d) => d.status === 'confirmed');
