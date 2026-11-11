@@ -13,8 +13,7 @@ import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } fro
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import {
   CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, langsFor, monthsBetween, requiredFields, reviewLabels,
-  type ContractDoc, type CxData, type CxLang, type CxType, type DraftBlock, type DraftCell, type DraftDoc, type DraftKey,
-} from '../features/contracts/templates';
+  type ContractDoc, type CxData, type CxLang, type CxType, type DraftBlock, type DraftCell, type DraftDoc, type DraftKey, ENABLED_TYPES } from '../features/contracts/templates';
 
 const STEPS = ['Тип', 'Язык', 'Данные', 'Проверка', 'Документ'];
 const TYPE_ICON: Record<CxType, typeof Home> = { rent: Home, comm: Building2, sale: KeyRound };
@@ -80,29 +79,49 @@ function blocks(bs: DraftBlock[]): string {
 
 const DOC_CSS = `.contract-doc .cd-p{margin:0 0 3px;text-align:justify;white-space:pre-line}.contract-doc .cd-c{text-align:center}
 .contract-doc .cd-r{text-align:right}.contract-doc .cd-gap{height:.7em}.contract-doc .cd-spread{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.contract-doc{position:relative;background:url(/brand/contract-watermark.png) top center/100% auto repeat-y}
+.contract-doc .cd-wm{display:none}.contract-doc .cd-head .cd-p{display:inline;font-weight:700;text-decoration:underline;color:#111}
+.contract-doc .cd-flag{height:13px;margin-left:6px;vertical-align:-1px}.contract-doc .cd-head{margin-bottom:10px}
 .contract-doc .cd-hf{font-size:8.5pt;color:#444}.contract-doc .cd-hf .cd-p{text-align:left}.contract-doc .cd-foot{margin-top:18px}
 .contract-doc table{width:100%;border-collapse:collapse;margin:6px 0}.contract-doc .cd-cols{table-layout:fixed;font-size:9.5pt}
 .contract-doc .cd-cols td{width:50%;vertical-align:top;padding:0 8px}.contract-doc .cd-grid td{border:1px solid #111;padding:3px 6px;vertical-align:top}
 .contract-doc .cd-grid .cd-p{margin:0}
 @media screen and (max-width:767px){.contract-doc .cd-cols td{display:block;width:auto;padding:0 0 12px}}`;
 
+const FLAG = '<img class="cd-flag" src="/brand/ge-flag.svg" alt="">';
+const WATERMARK = '/brand/contract-watermark.png';  // David's drafts: the round Rent in Tbilisi logo, faint, on every page
+
 function docInner(doc: ContractDoc): string {
-  const hf = (xs: string[], cls: string) => (xs.length ? `<div class="cd-hf ${cls}">${xs.map((x) => para(x)).join('')}</div>` : '');
-  return hf(doc.header, 'cd-head') + blocks(doc.body) + hf(doc.footer, 'cd-foot');
+  const hf = (xs: string[], cls: string, flag = '') => (xs.length ? `<div class="cd-hf ${cls}">${xs.map((x) => para(x)).join('')}${flag}</div>` : '');
+  return `<img class="cd-wm" src="${WATERMARK}" alt="">` + hf(doc.header, 'cd-head', FLAG) + blocks(doc.body) + hf(doc.footer, 'cd-foot');
 }
 
-export function ContractDocument({ doc }: { doc: ContractDoc }) {
+/** Print: the header (+ flag) and the page number in the top margin, the initials line at the bottom of every page;
+ *  the inline copies are hidden then (Chrome @page margin boxes). */
+function pageCss(doc: ContractDoc): string {
+  const str = (x: string) => `"${x.replace(/\*\*/g, '').replace(/ {8,}/g, '        ').replace(/["\\]/g, '\\$&')}"`;
+  const head = doc.header.length ? `@top-left{content:${str(doc.header.join(' '))} url(/brand/ge-flag.svg);font:700 10pt Montserrat,Arial,sans-serif;text-decoration:underline;vertical-align:bottom}` : '';
+  const foot = doc.footer.length ? `@bottom-center{content:${str(doc.footer.join(' '))};font:8.5pt 'Noto Sans Georgian',Arial,sans-serif;color:#444;white-space:pre}` : '';
+  return `@media print{@page{size:A4;margin:18mm 15mm 16mm;${head}@top-right{content:counter(page);font:9pt Arial,sans-serif}${foot}}
+.contract-doc .cd-head,.contract-doc .cd-foot{display:none}.contract-doc .cd-wm{display:block;position:fixed;inset:0;width:100%;height:100%;object-fit:contain;z-index:-1}}`;
+}
+
+export function ContractDocument({ doc, editable }: { doc: ContractDoc; editable?: boolean }) {
   return (
     <article className="contract-doc" lang="ka">
-      <style>{DOC_CSS}</style>
-      <div dangerouslySetInnerHTML={{ __html: docInner(doc) }} />
+      <style>{DOC_CSS + pageCss(doc)}</style>
+      {/* editable before printing / downloading: a clause can be changed for one client without touching the drafts */}
+      <div className="cd-body" contentEditable={editable} suppressContentEditableWarning spellCheck={false}
+           dangerouslySetInnerHTML={{ __html: docInner(doc) }} />
     </article>
   );
 }
 
 /** Standalone HTML (opens in Word / LibreOffice as an editable document, like the old «Редактировать DOC»). */
 function docHtml(doc: ContractDoc): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.45}${DOC_CSS}</style></head><body><div class="contract-doc">${docInner(doc)}</div></body></html>`;
+  // the text as edited in the preview (Irakli: «иногда приходится редактировать договоры»), else as generated
+  const inner = document.querySelector('.contract-doc .cd-body')?.innerHTML || docInner(doc);
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.45}${DOC_CSS}</style></head><body><div class="contract-doc">${inner}</div></body></html>`;
 }
 
 /** David's drafts are ~370 KB of text: loaded only when the contract page needs them (own chunk). */
@@ -122,7 +141,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const draft = useMemo(() => (dealId || leadId ? null : loadDraft()), [dealId, leadId]);
 
   const [step, setStep] = useState(1);
-  const [type, setType] = useState<CxType | ''>(draft?.type || '');
+  const [type, setType] = useState<CxType | ''>(draft?.type && ENABLED_TYPES.includes(draft.type) ? draft.type : '');
   const [lang, setLang] = useState<CxLang | ''>(draft?.lang || '');
   const [d, setD] = useState<CxData>(draft?.data || { ...EMPTY, timestamp: todayStr() });
   const [depTouched, setDepTouched] = useState(!!draft?.depTouched);
@@ -302,7 +321,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
       {step === 1 && (
         <Card label="Шаг 1" title="Тип договора" className="no-print">
           <div className="grid g3">
-            {(Object.keys(CX_TYPES) as CxType[]).map((t) => {
+            {ENABLED_TYPES.map((t) => {
               const Icon = TYPE_ICON[t];
               const on = type === t;
               return (
@@ -412,7 +431,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
             <Button variant="ghost" onClick={() => setStep(3)}>Изменить данные</Button>
             <span className="muted grow" style={{ fontSize: 12, minWidth: 200 }}>В окне печати выберите «Сохранить как PDF», чтобы скачать файл</span>
           </div>
-          <div className="contract-paper-wrap"><ContractDocument doc={doc} /></div>
+          <div className="muted no-print" style={{ fontSize: 12 }}>Текст договора можно поправить прямо здесь: правка уйдёт в печать и в .doc.</div>
+          <div className="contract-paper-wrap"><ContractDocument doc={doc} editable /></div>
         </>
       )}
 

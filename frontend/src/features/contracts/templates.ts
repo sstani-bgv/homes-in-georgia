@@ -138,6 +138,10 @@ export const DRAFT_NAMES: Record<DraftKey, string> = {
 };
 
 /** Languages David has a draft for: no Commercial GEO+ENG, Sale is Georgian only. */
+/** Types the wizard offers. 2026-11-11: rent only (with or without pets); commercial and sale drafts are kept in
+ * templates-david.ts but Irakli finishes them himself — to enable one, see docs/CONTRACTS.md. */
+export const ENABLED_TYPES: CxType[] = ['rent'];
+
 export function langsFor(type: CxType): CxLang[] {
   return type === 'sale' ? ['GEO'] : type === 'comm' ? ['GEO', 'RU'] : ['GEO', 'RU', 'EN'];
 }
