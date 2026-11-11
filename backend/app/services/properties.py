@@ -1160,66 +1160,62 @@ def _human(tag: str) -> str:
 
 
 def post_rich(db: Session, p: Property, media: list[str]) -> str:
-    """The post as a Telegram rich message (Bot API sendRichMessage, Irakli 2026-11-09: as @tbilisi_rent does): photo
-    slideshow, price/beds/district headline, address + metro, the description, «Parameters and amenities» and «Tags»
-    as collapsible blocks, the pin on a map, buttons. Built from the same fields as post_text (English, as the channel).
-    media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
+    """The post as a Telegram rich message (Bot API sendRichMessage) in the @tbilisi_rent style (Irakli's video
+    2026-11-09): photo slideshow, «$price · beds · district» title, «building · m² · floor · ID» line, 📍 address (the
+    map link) and Ⓜ metro, the description, collapsed «Parameters and amenities» (a table + one ✅ line) and «Tags», then
+    two buttons: «On the map» and «I like it» (our bot: a lead). No map block and no footer: the button opens the map,
+    the contacts sit in Tags. media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
     f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
     sale = f.get("deal") == "Sale"
     district = DISTRICT_TAG.get((p.district or "").strip(), "#" + (p.district or "Tbilisi").replace(" ", "")).lstrip("#")
     beds = "Studio" if p.bedrooms == 0 else (f"{p.bedrooms} bedroom{'s' if p.bedrooms != 1 else ''}" if p.bedrooms else None)
+    commercial = f.get("prop_type") not in (None, "Apartment", "House", "Duplex", "Townhouse")
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
-    head = " · ".join(x for x in ((f"${price:,}".replace(",", " ") + ("" if sale else "/mo")) if price else None, beds,
-                                  _human(district)) if x)
-    sub = " · ".join(x for x in (f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
+    head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
+                                  _human(f["prop_type"]).lower() if commercial else beds, _human(district)) if x)
+    marks = [x for x, on in (("Exclusive", p.is_exclusive), ("Discount", f.get("discount"))) if on]
+    sub = " · ".join(x for x in (*marks, f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
                                  p.floor and (f"{p.floor}/{p.total_floors} floor" if p.total_floors else f"{p.floor} floor"),
-                                 f"ID {p.id}") if x)
+                                 f"ID: {p.id}") if x)
     out = []
     if media:
         out.append("<tg-slideshow>" + "".join(f'<video src="{m}"/>' if "video" in m else f'<img src="{m}"/>' for m in media)
                    + "</tg-slideshow>")
-    marks = [x for x, on in (("❗️ Exclusive", p.is_exclusive), ("❗️ Discount", f.get("discount"))) if on]
-    out.append(f"<h2>{h(head)}</h2>")
-    if marks:
-        out.append(f"<p><b>{h(' · '.join(marks))}</b></p>")
-    out.append(f"<p>{h(sub)}</p>")
+    out.append(f"<h2>{h(head)}</h2><p>{h(sub)}</p>")
     url = maps_url(db, p) if p.address else None
     where = [f'📍 <a href="{h(url)}">{h(p.address)}</a>' if url else (p.address and f"📍 {h(p.address)}"),
              f.get("metro") and f"Ⓜ️ {h(_split(f['metro']))}"]
     if any(where):
         out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
-    if f.get("headline"):
-        out.append(f"<p><b>⭐️ {h(f['headline'])}</b></p>")
-    if p.description:
-        out.append("<p>" + h(p.description.strip()).replace("\n", "<br>") + "</p>")
-    rows = [("Bedrooms", beds), ("Area", p.area and f"{float(p.area):g} m²"),
-            ("Floor", p.floor and (f"{p.floor} of {p.total_floors}" if p.total_floors else str(p.floor))),
-            ("Type", f.get("prop_type") and _human(f["prop_type"])), ("Building", f.get("building") and _human(f["building"])),
-            ("Design", f.get("design") and _human(f["design"])), ("Condition", sale and f.get("condition") and _human(f["condition"])),
-            ("Bathrooms", (f.get("bathrooms") or "")[:1] or None), ("Heating", f.get("heating") and _human(f["heating"])),
+    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", (p.description or "").strip()) if x)
+    if text:
+        out.append("<p>" + h(text).replace("\n", "<br>") + "</p>")
+    am = f.get("amenities") or []
+    rows = [("Rooms", p.rooms), ("Bathrooms", (f.get("bathrooms") or "")[:1] or (1 if p.bedrooms is not None else None)),
+            ("Air conditioners", "yes" if "Conditioner" in am else None), ("Balconies", "yes" if "Balcony" in am else None),
+            ("Heating", f.get("heating") and _human(f["heating"])), ("Design", f.get("design") and _human(f["design"])),
+            ("Condition", sale and f.get("condition") and _human(f["condition"])),
             ("Pets", f.get("pets") and _human(f["pets"])), ("Tenants", f.get("tenants") and f"up to {f['tenants']}"),
             ("Lease term", f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
             ("Deposit", not sale and price and (f"${f.get('deposit', price)}" if f.get("deposit", price) else "none")),
             ("Commission", "0%")]
     table = "".join(f"<tr><td>{h(k)}</td><td>{h(v)}</td></tr>" for k, v in rows if v)
-    am = f.get("amenities") or []
-    params = f"<table striped compact>{table}</table>" + (f"<p>✅ {h(' · '.join(_human(a) for a in am))}</p>" if am else "")
-    out.append(f"<details open><summary>Parameters and amenities</summary>{params}</details>")
-    tags = " ".join(hashtags(post_text(db, p)))
-    out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p></details>")
-    listing = db.get(Listing, p.listing_id) if p.listing_id else None
-    if listing is not None and listing.lat is not None and listing.lng is not None:
-        out.append(f'<tg-map lat="{listing.lat}" long="{listing.lng}" zoom="15"/>')
+    rest = [_human(a) for a in am if a not in ("Conditioner", "Balcony")]
+    params = f"<table striped compact>{table}</table>" + (f"<p>✅ {h(' · '.join(rest))}</p>" if rest else "")
+    out.append(f"<details><summary>Parameters and amenities</summary>{params}</details>")
     agent = db.get(User, p.agent_id) if p.agent_id else None
+    tags = " ".join(hashtags(post_text(db, p)))
+    out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p>"
+               f"<p>📲 +995 599 20 67 16 {h(users_svc.tag_of(agent))}<br>"
+               '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 All listings</a> · <a href="https://t.me/reviews_rent_tbilisi">Reviews</a> · '
+               '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">Instagram</a> · '
+               '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">FB</a> · '
+               '<a href="https://youtube.com/@rentintbilisi">YouTube</a></p></details>')
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
     bot = f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}"  # bot.on_start -> journey.on_post_start: a lead
-    out.append("<tg-button-row>" + (btn("📍 On the map", url) if url else "")
-               + btn("❤️ I like it", bot, ' style="primary"') + "</tg-button-row>")
-    out.append(f"<p>📲 +995 599 20 67 16 {h(users_svc.tag_of(agent))}<br>"
-               '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | <a href="https://t.me/reviews_rent_tbilisi">Reviews</a><br>'
-               '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '
-               '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">🗳 FB</a> '
-               '<a href="https://youtube.com/@rentintbilisi">🎥 YouTube</a></p>')
+    if url:
+        out.append("<tg-button-row>" + btn("📍 On the map", url) + "</tg-button-row>")
+    out.append("<tg-button-row>" + btn("❤️ I like it", bot, ' style="primary"') + "</tg-button-row>")
     return "".join(out)
 
 

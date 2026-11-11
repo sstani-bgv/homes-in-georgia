@@ -202,10 +202,13 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     db.commit()
     h = properties.post_rich(db, p, ["tg://photo?id=m0", "tg://video?id=m1"])
     assert '<tg-slideshow><img src="tg://photo?id=m0"/><video src="tg://video?id=m1"/></tg-slideshow>' in h
-    assert "<h2>$1 500/mo · 3 bedrooms · Vake</h2>" in h and "❗️ Discount" in h
+    assert "<h2>$1 500 · 3 bedrooms · Vake</h2><p>Discount · 140 m² · 4/9 floor · ID: " in h  # the @tbilisi_rent title lines
     assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h and "WiFi · Smart TV" in h
-    assert "<summary>Tags</summary>" in h and "#Discount" in h and '<tg-map lat="41.7" long="44.76"' in h
+    assert "<details><summary>Parameters and amenities</summary>" in h  # collapsed, as in Irakli's video
+    assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16" in h  # contacts inside Tags
+    assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
     assert h.count("<tg-button ") == 2 and h.count(f"?start=p{p.id}") == 1 and "RentInTbilisi_bot" not in h and "Contact" not in h
+    assert h.endswith('style="primary" url="https://t.me/' + properties.env.BOT_USERNAME.lstrip("@") + f'?start=p{p.id}">❤️ I like it</tg-button></tg-button-row>')
 
 
 def test_published_object_takes_leads_when_its_source_ad_is_gone(db):
