@@ -917,7 +917,7 @@ WATERMARK = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "
 FOOTER_LINKS = (
     ("🌟 Check all listings | Reviews", '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | '
                                        '<a href="https://t.me/reviews_rent_tbilisi">Reviews</a>'),
-    ("📍APARTMENTS ON MAP📍", '<a href="https://t.me/RentInTbilisi_bot/MAP?startapp=source=sale_in_tbilisi">📍APARTMENTS ON MAP📍</a>'),
+    ("📍APARTMENTS ON MAP📍", '📍<b><a href="https://hge.ge/map/">APARTMENTS ON MAP</a></b>📍'),  # Irakli 11-11
     ("📱 Instagram 🗳 FB 🎥 YouTube", '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '
                                      '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">🗳 FB</a> '
                                      '<a href="https://youtube.com/@rentintbilisi">🎥 YouTube</a>'),
