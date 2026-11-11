@@ -12,8 +12,8 @@ import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import {
-  CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, monthsBetween, requiredFields, reviewLabels,
-  type ContractDoc, type CxData, type CxLang, type CxType,
+  CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, langsFor, monthsBetween, requiredFields, reviewLabels,
+  type ContractDoc, type CxData, type CxLang, type CxType, type DraftBlock, type DraftCell, type DraftDoc, type DraftKey,
 } from '../features/contracts/templates';
 
 const STEPS = ['Тип', 'Язык', 'Данные', 'Проверка', 'Документ'];
@@ -49,48 +49,67 @@ function fromDeal(deal: Deal, prop?: { area?: number | null; floor?: number | nu
 
 // ---------------------------------------------------------------- document
 
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** "**bold**" → <b>; an unclosed ** runs to the end of the piece. */
+const inline = (s: string) => esc(s).split('**').map((x, i) => (i % 2 ? `<b>${x}</b>` : x)).join('');
+
+/** One paragraph. David's drafts push the date / the second signature to the right with long runs of spaces:
+ *  those become a space-between row (bold markers carried across the split). */
+function para(text: string, a?: 'c' | 'r'): string {
+  if (!text) return '<div class="cd-gap"></div>';
+  let open = false;
+  const parts = text.split(/ {8,}/).map((x) => {
+    const y = (open ? '**' : '') + x;
+    open = (y.match(/\*\*/g) || []).length % 2 === 1;
+    return y;
+  }).filter((x) => x.replace(/\*\*/g, '').trim());
+  const body = parts.length > 1 ? `<span class="cd-spread">${parts.map((x) => `<span>${inline(x)}</span>`).join('')}</span>` : inline(parts[0] ?? '');
+  return `<p class="cd-p${a ? ` cd-${a}` : ''}">${body}</p>`;
+}
+
+function blocks(bs: DraftBlock[]): string {
+  return bs.map((b) => {
+    if (typeof b === 'string') return para(b);
+    if ('p' in b) return para(b.p, b.a);
+    // the bilingual drafts are one two-column table (Georgian | Russian/English); others are bordered grids
+    const cols = b.t.every((r) => r.length === 2);
+    const cell = (c: DraftCell) => (Array.isArray(c) ? `<td>${blocks(c)}</td>` : `<td colspan="${c.s}">${blocks(c.c)}</td>`);
+    return `<table class="${cols ? 'cd-cols' : 'cd-grid'}">${b.t.map((r) => `<tr>${r.map(cell).join('')}</tr>`).join('')}</table>`;
+  }).join('');
+}
+
+const DOC_CSS = `.contract-doc .cd-p{margin:0 0 3px;text-align:justify;white-space:pre-line}.contract-doc .cd-c{text-align:center}
+.contract-doc .cd-r{text-align:right}.contract-doc .cd-gap{height:.7em}.contract-doc .cd-spread{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.contract-doc .cd-hf{font-size:8.5pt;color:#444}.contract-doc .cd-hf .cd-p{text-align:left}.contract-doc .cd-foot{margin-top:18px}
+.contract-doc table{width:100%;border-collapse:collapse;margin:6px 0}.contract-doc .cd-cols{table-layout:fixed;font-size:9.5pt}
+.contract-doc .cd-cols td{width:50%;vertical-align:top;padding:0 8px}.contract-doc .cd-grid td{border:1px solid #111;padding:3px 6px;vertical-align:top}
+.contract-doc .cd-grid .cd-p{margin:0}
+@media screen and (max-width:767px){.contract-doc .cd-cols td{display:block;width:auto;padding:0 0 12px}}`;
+
+function docInner(doc: ContractDoc): string {
+  const hf = (xs: string[], cls: string) => (xs.length ? `<div class="cd-hf ${cls}">${xs.map((x) => para(x)).join('')}</div>` : '');
+  return hf(doc.header, 'cd-head') + blocks(doc.body) + hf(doc.footer, 'cd-foot');
+}
+
 export function ContractDocument({ doc }: { doc: ContractDoc }) {
   return (
-    <article className="contract-doc" lang={doc.lang === 'GEO' ? 'ka' : doc.lang === 'RU' ? 'ru' : 'en'}>
-      <h1 className="cd-title">{doc.title}</h1>
-      <div className="cd-meta"><span>{doc.placeLabel}: {doc.place}</span><span>{doc.dateLabel}: {doc.date}</span></div>
-      <p className="cd-p">{doc.preamble}</p>
-      {doc.sections.map((s, i) => (
-        <section key={i} className="cd-section">
-          <h2 className="cd-h">{i + 1}. {s.h}</h2>
-          {s.items.map((t, j) => <p key={j} className="cd-p"><span className="cd-n">{i + 1}.{j + 1}.</span> {t}</p>)}
-        </section>
-      ))}
-      <section className="cd-sign">
-        <h2 className="cd-h">{doc.signTitle}</h2>
-        <div className="cd-sign-grid">
-          {doc.parties.map((p) => (
-            <div key={p.role} className="cd-party">
-              <div className="cd-role">{p.role}</div>
-              <div className="cd-name">{p.name}</div>
-              <div>{p.idLabel}: {p.id}</div>
-              {p.dob && <div>{p.dobLabel}: {p.dob}</div>}
-              <div className="cd-line" />
-              <div className="cd-line-label">{doc.signLabel}</div>
-            </div>
-          ))}
-        </div>
-      </section>
+    <article className="contract-doc" lang="ka">
+      <style>{DOC_CSS}</style>
+      <div dangerouslySetInnerHTML={{ __html: docInner(doc) }} />
     </article>
   );
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 /** Standalone HTML (opens in Word / LibreOffice as an editable document, like the old «Редактировать DOC»). */
 function docHtml(doc: ContractDoc): string {
-  const body = [
-    `<h1 style="text-align:center;font-size:15pt">${esc(doc.title)}</h1>`,
-    `<p style="display:flex;justify-content:space-between"><span>${esc(doc.placeLabel)}: ${esc(doc.place)}</span> &nbsp; <span>${esc(doc.dateLabel)}: ${esc(doc.date)}</span></p>`,
-    `<p>${esc(doc.preamble)}</p>`,
-    ...doc.sections.map((s, i) => `<h2 style="font-size:12pt">${i + 1}. ${esc(s.h)}</h2>${s.items.map((t, j) => `<p>${i + 1}.${j + 1}. ${esc(t)}</p>`).join('')}`),
-    `<h2 style="font-size:12pt">${esc(doc.signTitle)}</h2><table style="width:100%"><tr>${doc.parties.map((p) => `<td style="width:50%;vertical-align:top"><b>${esc(p.role)}</b><br>${esc(p.name)}<br>${esc(p.idLabel)}: ${esc(p.id)}${p.dob ? `<br>${esc(p.dobLabel || '')}: ${esc(p.dob)}` : ''}<br><br>${esc(doc.signLabel)}: ____________________</td>`).join('')}</tr></table>`,
-  ].join('\n');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:11pt;line-height:1.5}p{margin:0 0 6pt;text-align:justify}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.45}${DOC_CSS}</style></head><body><div class="contract-doc">${docInner(doc)}</div></body></html>`;
+}
+
+/** David's drafts are ~370 KB of text: loaded only when the contract page needs them (own chunk). */
+function useDrafts() {
+  const [drafts, setDrafts] = useState<Record<DraftKey, DraftDoc> | null>(null);
+  useEffect(() => { import('../features/contracts/templates-david').then((m) => setDrafts(m.DRAFTS)); }, []);
+  return drafts;
 }
 
 // ---------------------------------------------------------------- wizard
@@ -187,7 +206,10 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   };
   const sale = type === 'sale';
   const req = useMemo(() => new Set(type ? requiredFields(type) : []), [type]);
-  const doc = useMemo(() => (type && lang ? buildContract(type, lang, d) : null), [type, lang, d]);
+  const drafts = useDrafts();
+  const doc = useMemo(() => (drafts && type && lang ? buildContract(drafts, type, lang, d) : null), [drafts, type, lang, d]);
+  // David has no Commercial GEO+ENG and only a Georgian sale draft: drop a language the chosen type doesn't have
+  useEffect(() => { if (type && lang && !langsFor(type).includes(lang)) setLang(''); }, [type, lang]);
 
   function next() {
     setErr('');
@@ -298,9 +320,11 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
           <div className="grid g3">
             {(Object.keys(CX_LANGS) as CxLang[]).map((l) => {
               const on = lang === l;
+              const off = !!type && !langsFor(type).includes(l);
               return (
-                <button key={l} type="button" className={`choice ${on ? 'on' : ''}`} onClick={() => { setLang(l); setErr(''); }} aria-pressed={on}>
-                  <span className="grow"><b lang={l === 'GEO' ? 'ka' : undefined}>{CX_LANGS[l].title}</b><small>{CX_LANGS[l].sub}</small></span><Badge tone={on ? 'solid' : 'blue'}>{l}</Badge>
+                <button key={l} type="button" className={`choice ${on ? 'on' : ''}`} disabled={off} style={off ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                  onClick={() => { setLang(l); setErr(''); }} aria-pressed={on}>
+                  <span className="grow"><b lang={l === 'GEO' ? 'ka' : undefined}>{CX_LANGS[l].title}</b><small>{off ? 'Нет такого шаблона для этого типа договора' : CX_LANGS[l].sub}</small></span><Badge tone={on ? 'solid' : 'blue'}>{l}</Badge>
                 </button>
               );
             })}
@@ -349,15 +373,15 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
                 {F({ k: 'deposit_usd', label: 'Депозит, USD', type: 'number', placeholder: 'Сумма депозита' })}
               </div>
               {d.start_rent && <div className="muted" style={{ fontSize: 13 }}>Первый платёж за период {cxFmt(d.start_rent)} – {cxOnem(d.start_rent)}</div>}
-              <div className="outcome-card col">
+              {type === 'rent' && <div className="outcome-card col">
                 <Switch checked={d.with_pets} onChange={(v) => set('with_pets', v)} label="С животными" />
-                <span className="muted" style={{ fontSize: 12 }}>Добавляет пункт о депозите за животных</span>
+                <span className="muted" style={{ fontSize: 12 }}>Договор по шаблону Pet DRAFT (с депозитом за животных)</span>
                 {d.with_pets && (
                   <Field label="Депозит за животных, USD" hint="По умолчанию 50% основного депозита">
                     <Input type="number" value={d.pet_deposit} onChange={(e) => { setPetTouched(true); set('pet_deposit', e.target.value); }} />
                   </Field>
                 )}
-              </div>
+              </div>}
             </div>
           ))}
         </Card>
@@ -373,11 +397,12 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               if (k !== 'one_month' && DATE_FIELDS.includes(k)) v = cxFmt(v);
               return <div key={k} style={{ display: 'contents' }}><dt>{label}</dt><dd>{v || '—'}</dd></div>;
             })}
-            {!sale && <><dt>С животными</dt><dd>{d.with_pets ? `да, депозит ${d.pet_deposit || 0} USD` : 'нет'}</dd></>}
+            {type === 'rent' && <><dt>С животными</dt><dd>{d.with_pets ? `да, депозит ${d.pet_deposit || 0} USD` : 'нет'}</dd></>}
           </dl>
         </Card>
       )}
 
+      {step === 5 && !doc && <div className="muted no-print">Загрузка шаблона…</div>}
       {step === 5 && doc && (
         <>
           <div className="row row-wrap no-print">
