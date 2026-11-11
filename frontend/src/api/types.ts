@@ -100,6 +100,8 @@ export interface PostFields {
 export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?: string; room?: string | null; position?: number }
 
 export interface Property {
+  /** «Сдан» typed by hand (old-base objects without a deal in the CRM): the lease end goes to the calendar */
+  rent_from?: string | null; rent_to?: string | null; tenant_name?: string | null; tenant_phone?: string | null; tenant_tg?: string | null;
   missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
   id: number;
   listing_id?: string | null;

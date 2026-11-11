@@ -107,6 +107,11 @@ class PropertyIn(BaseModel):
     owner_phone: str | None = None
     owner_id: int | None = None  # picked from the owners list
     post_fields: dict | None = None  # services.properties.POST_ONE / POST_MANY / POST_NUM
+    rent_from: str | None = None  # «Сдан» by hand: YYYY-MM-DD, "" clears
+    rent_to: str | None = None
+    tenant_name: str | None = None
+    tenant_phone: str | None = None
+    tenant_tg: str | None = None
     reason: str | None = None  # why: goes with a «Запрос оператору» for locked fields (stage 6)
 
 
@@ -138,10 +143,10 @@ class DupIn(BaseModel):
 
 @router.get("/properties")
 def properties_list(status: str | None = None, agent_id: int | None = None, q: str | None = None, mine: int = 0,
-                    base: int = 0, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+                    base: int = 0, rented: int = 0, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
                     user: User = Depends(current_user)):
     """base=1: «База объектов» — only objects shot and verified by the operator (P.BASE_STATUSES, published at least once)."""
-    stmt = P.query(db, user, status, agent_id, q, bool(mine), base=bool(base))
+    stmt = P.query(db, user, status, agent_id, q, bool(mine), base=bool(base), rented=bool(rented))
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))
     return {"items": P.outs(db, rows, user), "total": total}

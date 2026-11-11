@@ -113,6 +113,15 @@ def contract_expiry(db: Session, job: Job):
     notify.contract_expiry(deal, int(job.payload.get("days") or 0))
 
 
+@handler("property_lease_expiry")
+def property_lease_expiry(db: Session, job: Job):
+    p = db.get(Property, _ref_id(job))
+    days = int(job.payload.get("days") or 0)
+    if not p or not p.rent_to or job.ref != f"{p.id}:{days}":
+        return "stale"
+    notify.property_lease_expiry(p, days)
+
+
 @handler("review_batch")
 def review_batch(db: Session, job: Job):
     return "noop"  # the bot's own review loop handles catalog moderation cards

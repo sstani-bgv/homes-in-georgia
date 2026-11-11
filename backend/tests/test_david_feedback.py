@@ -2,7 +2,7 @@
 from app.models import Property
 from app.services import properties
 from app.services.errors import DomainError
-from tests.conftest import fill_required, make_client_listing, make_listing, make_user
+from tests.conftest import auth, fill_required, make_client_listing, make_listing, make_user
 
 
 def _obj_listing(db, rows):
@@ -215,3 +215,26 @@ def test_published_object_takes_leads_when_its_source_ad_is_gone(db):
     x.status = "gone"  # the owner took the ad down after signing with us: the channel post is still ours
     db.commit()
     assert leads.client_listing_eligible(db, "tg55")
+
+
+def test_hand_typed_lease_on_an_old_base_object(db, client):
+    """David 2026-11-10: an object from the old base has no deal: the agent types the tenant and the lease dates on the
+    card; the lease end is in the calendar feed (rented=1) and the agent is reminded 30/7/1 days before."""
+    from datetime import date, timedelta
+
+    from app.models import Job, Property
+    agent = make_user(db, "agent")
+    p = Property(agent_id=agent.id, status="published", address="Ваке, Чавчавадзе 53", source_type="legacy")
+    db.add(p)
+    db.commit()
+    end = (date.today() + timedelta(days=90)).isoformat()
+    r = client.patch(f"/api/properties/{p.id}", headers=auth(agent), json={
+        "rent_from": date.today().isoformat(), "rent_to": end, "tenant_name": "Анна", "tenant_phone": "+995 555 12 34 56"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["rent_to"], r.json()["tenant_name"]) == (end, "Анна")
+    jobs = db.query(Job).filter(Job.kind == "property_lease_expiry", Job.done_at.is_(None)).all()
+    assert sorted(j.payload["days"] for j in jobs) == [1, 7, 30]
+    rows = client.get("/api/properties?rented=1", headers=auth(agent)).json()["items"]
+    assert [x["id"] for x in rows] == [p.id]
+    client.patch(f"/api/properties/{p.id}", headers=auth(agent), json={"rent_to": ""})  # cleared: no reminders
+    assert not db.query(Job).filter(Job.kind == "property_lease_expiry", Job.done_at.is_(None)).count()

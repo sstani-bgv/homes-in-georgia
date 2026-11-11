@@ -31,9 +31,10 @@ log = logging.getLogger(__name__)
 
 BOARD = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled", "media_uploaded", "review",
          "returned", "published", "rented")
+LEASE = ("rent_from", "rent_to", "tenant_name", "tenant_phone", "tenant_tg")  # «Сдан» by hand (no deal in the CRM)
 EDITABLE = ("address", "district", "cadastral_code", "price", "currency", "bedrooms", "rooms", "area", "floor",
             "total_floors", "description", "is_exclusive", "source_url", "source_type", "checklist", "shoot_at",
-            "post_fields")
+            "post_fields") + LEASE
 # Stage 6: once the operator has verified the object (verified_at), the agent can't change these himself: everything a
 # cheat could use (owner contact and binding, address, cadastral code, the ad link, exclusive, price and deposit). His
 # edit of them becomes a «Запрос оператору» (services/change_requests.py); archiving does too. deposit / sale_price are
@@ -369,7 +370,22 @@ def _apply(p: Property, data: dict):
             v = aware(v)
         elif k == "post_fields":
             v = clean_post_fields(v)
+        elif k in ("rent_from", "rent_to"):
+            from app.services.deals import parse_date
+            v = parse_date(v) if v not in (None, "") else None
+        elif k in LEASE:
+            v = (str(v).strip() or None) if v is not None else None
         setattr(p, k, v)
+
+
+def schedule_lease_reminders(db: Session, p: Property) -> None:
+    """The agent hears CONTRACT_REMIND_DAYS (30,7,1) before the end of a hand-typed lease, at 10:00 Tbilisi."""
+    from app.services.deals import _at_10
+    jobs.cancel(db, "property_lease_expiry", ref_prefix=f"{p.id}:")
+    for days in env.contract_remind_days if p.rent_to else ():
+        due = _at_10(p.rent_to - timedelta(days=days))
+        if due > now():
+            jobs.schedule(db, "property_lease_expiry", f"{p.id}:{days}", due, {"days": days})
 
 
 def is_locked_for(p: Property, user: User) -> bool:
@@ -442,8 +458,10 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
 
 def apply_update(db: Session, p: Property, data: dict, actor: User) -> None:
     """No commit (an approved change request applies through here too)."""
-    was_exclusive = p.is_exclusive
+    was_exclusive, was_rent_to = p.is_exclusive, p.rent_to
     _apply(p, data)
+    if p.rent_to != was_rent_to:
+        schedule_lease_reminders(db, p)
     _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor)
     if p.is_exclusive and not was_exclusive:
         for a in external_ads(db, [p.id]).get(p.id, []):
@@ -1453,6 +1471,8 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         d[c] = v.isoformat() if v else None
     d["price"] = float(p.price) if p.price is not None else None
     d["area"] = float(p.area) if p.area is not None else None
+    d.update({c: getattr(p, c) for c in LEASE})
+    d["rent_from"], d["rent_to"] = (p.rent_from.isoformat() if p.rent_from else None), (p.rent_to.isoformat() if p.rent_to else None)
     ref = lambda u: {"id": u.id, "name": u.name, "username": u.username, "agent_tag": u.agent_tag} if u else None  # noqa: E731
     d["agent"] = ref(agent)
     d["locked"] = bool(p.agent_id) and p.agent_id != user.id and user.role not in STAFF
@@ -1527,8 +1547,10 @@ BASE_STATUSES = ("published", "rented")
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,
-          mine: bool = False, everyone: bool = False, base: bool = False):
+          mine: bool = False, everyone: bool = False, base: bool = False, rented: bool = False):
     stmt = select(Property)
+    if rented:  # the calendar: objects with a hand-typed lease end
+        stmt = stmt.where(Property.rent_to.isnot(None))
     if base:
         stmt = stmt.where(Property.status.in_(BASE_STATUSES), Property.published_at.isnot(None))
         everyone = True

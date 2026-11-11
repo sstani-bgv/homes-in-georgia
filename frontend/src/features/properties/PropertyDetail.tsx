@@ -600,6 +600,49 @@ function Demand({ p }: { p: Property }) {
   );
 }
 
+/** «Сдан» (David 2026-11-10): for an object whose deal is not in the CRM (the old base) the agent types the tenant and the
+ * lease dates by hand; the end goes to the calendar, the agent is reminded 30 / 7 / 1 days before. */
+function Lease({ p }: { p: Property }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const init = () => ({ rent_from: p.rent_from || '', rent_to: p.rent_to || '', tenant_name: p.tenant_name || '', tenant_phone: p.tenant_phone || '', tenant_tg: p.tenant_tg || '' });
+  const [f, setF] = useState(init);
+  const [edit, setEdit] = useState(false);
+  useEffect(() => setF(init()), [p.id, p.rent_to, p.tenant_name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useMutation({
+    mutationFn: () => api.properties.update(p.id, f),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['property', p.id] }); qc.invalidateQueries({ queryKey: ['properties'] }); setEdit(false); toast(f.rent_to ? 'Сохранено: окончание аренды в календаре, напомним за месяц' : 'Сохранено'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  if ((p as { locked?: boolean }).locked || (p.deals?.length && !p.rent_to)) return null; // a deal in the CRM already has the tenant and the dates
+  const set = (k: keyof ReturnType<typeof init>) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const has = p.rent_to || p.tenant_name;
+  if (!edit) return (
+    <Card label="Аренда" title="Сдан">
+      {has ? (
+        <KV items={[['Срок', p.rent_from || p.rent_to ? `${p.rent_from ? fmtDate(p.rent_from) : '…'} – ${p.rent_to ? fmtDate(p.rent_to) : '…'}` : '—'],
+          ['Арендатор', [p.tenant_name, p.tenant_phone, p.tenant_tg].filter(Boolean).join(' · ') || '—']]} />
+      ) : <div className="muted" style={{ fontSize: 13 }}>Нет данных о сдаче. Если объект сдан не через CRM (например, из старой базы), добавьте клиента и срок: окончание договора попадёт в календарь, за месяц придёт напоминание.</div>}
+      <div className="mt"><Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />{has ? 'Изменить' : 'Добавить'}</Button></div>
+    </Card>
+  );
+  return (
+    <Card label="Аренда" title="Сдан">
+      <div className="form-grid">
+        <Field label="Сдан с"><Input type="date" value={f.rent_from} onChange={set('rent_from')} /></Field>
+        <Field label="Договор до"><Input type="date" value={f.rent_to} onChange={set('rent_to')} /></Field>
+        <Field label="Арендатор"><Input value={f.tenant_name} onChange={set('tenant_name')} placeholder="Имя" /></Field>
+        <Field label="Телефон"><Input value={f.tenant_phone} onChange={set('tenant_phone')} placeholder="+995 …" /></Field>
+        <Field label="Telegram"><Input value={f.tenant_tg} onChange={set('tenant_tg')} placeholder="@username" /></Field>
+      </div>
+      <div className="row mt">
+        <Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button>
+        <Button variant="ghost" onClick={() => { setF(init()); setEdit(false); }}>Отмена</Button>
+      </div>
+    </Card>
+  );
+}
+
 function Deals({ p, compact }: { p: Property; compact?: boolean }) {
   if (!p.deals?.length) return null;
   return (
@@ -1058,6 +1101,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {!mediaInAction && <Gallery p={p} />}
           <Publications p={p} />
           <Ads p={p} />
+          <Lease p={p} />
           <Deals p={p} compact={compact} />
           {!compact && <Card label="История" title="События объекта"><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>

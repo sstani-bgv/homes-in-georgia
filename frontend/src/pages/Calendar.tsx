@@ -27,6 +27,7 @@ export function useCalendarEvents() {
   const leads = useQuery({ queryKey: ['leads', 'calendar'], queryFn: () => api.leads.list() });
   const props = useQuery({ queryKey: ['properties', 'calendar'], queryFn: () => api.properties.list() });
   const deals = useQuery({ queryKey: ['deals', 'calendar'], queryFn: () => api.deals.list() });
+  const leases = useQuery({ queryKey: ['properties', 'calendar', 'rented'], queryFn: () => api.properties.list({ rented: 1, limit: 500 }) });
   const events = useMemo(() => {
     const out: Ev[] = [];
     for (const l of itemsOf(leads.data)) {
@@ -43,8 +44,11 @@ export function useCalendarEvents() {
       if (d.t14_date && d.t14_status !== 'done') out.push({ id: `t${d.id}`, at: parseDay(d.t14_date), allDay: true, kind: 't14', title: d.address || `Сделка #${d.id}`, meta: 'Связаться с клиентом и собственником', to: `/deals?open=${d.id}` });
       if (d.rent_to) out.push({ id: `e${d.id}`, at: parseDay(d.rent_to), allDay: true, kind: 'expiry', title: d.address || `Сделка #${d.id}`, meta: d.client_name || undefined, to: `/deals?open=${d.id}` });
     }
+    for (const p of itemsOf(leases.data)) {
+      if (p.rent_to) out.push({ id: `r${p.id}`, at: parseDay(p.rent_to), allDay: true, kind: 'expiry', title: p.address || `Объект #${p.id}`, meta: p.tenant_name || 'Окончание аренды', to: `/objects/${p.id}` });
+    }
     return out.filter((e) => !Number.isNaN(e.at.getTime())).sort((a, b) => a.at.getTime() - b.at.getTime());
-  }, [leads.data, props.data, deals.data]);
+  }, [leads.data, props.data, deals.data, leases.data]);
   return { events, isLoading: leads.isLoading || props.isLoading || deals.isLoading, error: leads.error || props.error || deals.error };
 }
 

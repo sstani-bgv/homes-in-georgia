@@ -48,7 +48,7 @@ export const api = {
   },
 
   properties: {
-    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number; base?: number; limit?: number; offset?: number }) => then(http.get<L<Property>>('/properties', { limit: LIMIT, ...q }), (d) => normPage(d, normProperty)),
+    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number; base?: number; rented?: number; limit?: number; offset?: number }) => then(http.get<L<Property>>('/properties', { limit: LIMIT, ...q }), (d) => normPage(d, normProperty)),
     counts: () => http.get<Record<string, number>>('/properties/counts'),
     board: () => then(http.get<Record<string, Property[]>>('/properties/board'), (d) => normBoard(d, normProperty)),
     take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),

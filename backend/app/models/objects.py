@@ -1,4 +1,4 @@
-from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, func,
+from sqlalchemy import (Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, func,
                         text)
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -46,6 +46,13 @@ class Property(Base):
     call_attempts = Column(Integer, nullable=False, server_default=text("0"))
     next_call_at = Column(DateTime(timezone=True))
     shoot_at = Column(DateTime(timezone=True))
+    # «Сдан» (David 2026-11-10): who rents it and until when, typed by hand for objects whose deal is not in the CRM
+    # (the old base); rent_to -> the calendar and an agent reminder CONTRACT_REMIND_DAYS before (migration 0002)
+    rent_from = Column(Date)
+    rent_to = Column(Date)
+    tenant_name = Column(Text)
+    tenant_phone = Column(Text)
+    tenant_tg = Column(Text)
     address = Column(Text)
     district = Column(Text)
     cadastral_code = Column(Text)

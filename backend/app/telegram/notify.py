@@ -786,6 +786,16 @@ def contract_expiry(deal, days):
                 kb([[app_btn("📄 Открыть сделку", links.deal_app(g(deal, "id")))]]))
 
 
+@safe
+def property_lease_expiry(prop, days):
+    ag = store.user(g(prop, "agent_id")) or {}
+    if ag.get("tg_id"):
+        tenant = " ".join(str(x) for x in (g(prop, "tenant_name"), g(prop, "tenant_phone"), g(prop, "tenant_tg")) if x) or "—"
+        tg.send(ag["tg_id"], f"🔔 Через <b>{days} дн.</b> заканчивается аренда: {e(g(prop, 'address') or '')} "
+                f"(до {fmt_date(g(prop, 'rent_to'))}).\nАрендатор: {e(tenant)}",
+                kb([[app_btn("🏠 Открыть объект", links.property_app(g(prop, "id")))]]))
+
+
 def prop_title(prop):
     return " · ".join(str(x) for x in (g(prop, "address") or g(prop, "district"), g(prop, "price") and texts.money(g(prop, "price"))) if x)
 
