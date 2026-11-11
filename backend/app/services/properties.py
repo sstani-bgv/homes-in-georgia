@@ -970,6 +970,11 @@ def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | Non
             raise DomainError("missing_fields", f"Загрузите: {label}")
         _check_owner_doc(kind, *docs[kind])  # everything is checked before anything is stored
     app = _registry_app(data.get("registry_app"))
+    from app.services import registry  # the code from the extract beats a typed one; an empty card takes it
+    if code := registry.extract_code(docs[REGISTRY_EXTRACT][1]):
+        f["cadastral_code"] = code
+        if not (p.cadastral_code or "").strip() and not p.verified_at:
+            p.cadastral_code = code
     m = _store_contract(db, p, pdf, None)
     for kind, (name, content) in docs.items():
         if kind in OWNER_DOCS:

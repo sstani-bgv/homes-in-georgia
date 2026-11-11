@@ -11,6 +11,7 @@ import type { Deal, LeadContract } from '../api/types';
 import { insideTelegram } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
+import { REG_RU, RegistryApps, useSettledId } from '../components/RegistryApps';
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import {
   CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, langsFor, monthsBetween, requiredFields, reviewLabels,
@@ -235,6 +236,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   };
   const sale = type === 'sale';
   const req = useMemo(() => new Set(type ? requiredFields(type) : []), [type]);
+  const ownerPid = useSettledId(String(d.owner_personal_number ?? ''));  // → the owner's NAPR applications under the cadastral field
   const drafts = useDrafts();
   const doc = useMemo(() => (drafts && type && lang ? buildContract(drafts, type, lang, d) : null), [drafts, type, lang, d]);
   // David has no Commercial GEO+ENG and only a Georgian sale draft: drop a language the chosen type doesn't have
@@ -380,6 +382,10 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
             <div className="col gap-lg">
               <div className="form-grid">
                 <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.10.02.20.0.01.01.84A' })}</div>
+                <div className="span2">
+                  {ownerPid ? <RegistryApps base="/registry/applications" personalId={ownerPid} t={REG_RU} />
+                    : <span className="faint" style={{ fontSize: 12 }}>Введите личный номер собственника на вкладке «Стороны» — здесь появятся его заявки в Публичном реестре с кадастровым кодом.</span>}
+                </div>
                 <div className="span2">{F({ k: 'street_house', label: 'Адрес', placeholder: 'Улица, номер дома' })}</div>
                 {F({ k: 'floor', label: 'Этаж', placeholder: '2' })}
                 {F({ k: 'apartment_number', label: 'Квартира №', placeholder: 'Номер' })}

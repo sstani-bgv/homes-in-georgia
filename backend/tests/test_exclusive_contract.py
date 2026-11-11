@@ -144,10 +144,53 @@ def test_registry_lookup_is_scoped_to_a_signing_link(db, client, monkeypatch):
     p.is_exclusive = True
     db.commit()
     token = properties.sign_token(p.id)
-    assert client.get("/api/public/exclusive/garbage/registry?cadastral=01.10.13.015.029").status_code == 404
-    assert client.get(f"/api/public/exclusive/{token}/registry?cadastral=drop table").json()["code"] == "bad_cadastral"
-    r = client.get(f"/api/public/exclusive/{token}/registry?cadastral=01.10.13.015.029").json()
+    assert client.get("/api/public/exclusive/garbage/registry?personal_id=01001012345").status_code == 404
+    assert client.get(f"/api/public/exclusive/{token}/registry?personal_id=123").json()["code"] == "bad_personal_id"
+    r = client.get(f"/api/public/exclusive/{token}/registry?personal_id=01001012345").json()
     assert r["items"][0]["reg_number"] == "882026909236" and r["items"][0]["done"] and r["items"][0]["date"].startswith("2026-10-07")
-    assert r["items"][0]["url"].endswith("#/view/35575905") and calls[0]["cadcode"] == "01.10.13.015.029"
-    client.get(f"/api/public/exclusive/{token}/registry?cadastral=01.10.13.015.029")
+    assert r["items"][0]["url"].endswith("#/view/35575905")
+    assert calls[0]["person"] == "01001012345" and calls[0]["cadcode"] == ""
+    client.get(f"/api/public/exclusive/{token}/registry?personal_id=01001012345")
     assert len(calls) == 1  # cached
+    # the contract generator (CRM login): the same search by the owner's personal ID
+    from tests.conftest import auth
+    assert client.get("/api/registry/applications?personal_id=01001012345").status_code == 401
+    assert client.get("/api/registry/applications?personal_id=01001012345", headers=auth(ag)).json()["total"] == 1
+
+
+def _pdf(text: str) -> bytes:
+    """A minimal one-page PDF with an ASCII text line (stands in for a NAPR extract)."""
+    stream = f"BT /F1 12 Tf 40 700 Td ({text}) Tj ET".encode()
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offs = b"%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % x for x in offs)
+    return out + b"trailer << /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF" % (len(objs) + 1, xref)
+
+
+def test_cadastral_code_from_the_extract(db, client):
+    """The owner doesn't type the code: it's read from his extract (the flat's longer code beats the plot's)."""
+    from app.services import registry
+    pdf = _pdf("Plot 01.10.13.015.029 , date 07.10.2026 , flat 01.10.13.015.029.01.123 area 72.5")
+    assert registry.extract_code(pdf) == "01.10.13.015.029.01.123"
+    assert registry.extract_code(_pdf("no code here 12.5")) is None and registry.extract_code(b"%PDF-broken") is None
+
+    ag = make_user(db, "agent")
+    p = _ready(db, ag, "ss7", address="Пекини 7")
+    p.is_exclusive, p.cadastral_code = True, None
+    db.commit()
+    token = properties.sign_token(p.id)
+    assert client.post(f"/api/public/exclusive/{token}/extract-code", files={"file": ("e.pdf", pdf)}).json() == \
+        {"cadastral_code": "01.10.13.015.029.01.123"}
+    form = {"full_name": "Гиорги Беридзе", "personal_id": "01001012345", "phone": "+995 555 12 34 56", "consent": "true"}
+    r = client.post(f"/api/public/exclusive/{token}", data=form,
+                    files={"file": ("c.pdf", PDF), "id_doc": ("id.jpg", JPG), "extract": ("e.pdf", pdf)})
+    assert r.status_code == 200
+    db.expire_all()
+    assert p.cadastral_code == "01.10.13.015.029.01.123"  # the empty card took it

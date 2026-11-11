@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
 from app.db import get_db
 from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
-from app.services.errors import forbidden
+from app.services.errors import DomainError, forbidden
 from app.services import change_requests as CR
 from app.services import demand, geo, matching
 from app.services import properties as P
@@ -321,11 +321,33 @@ def public_exclusive(token: str, db: Session = Depends(get_db, scope="function")
 
 
 @router.get("/public/exclusive/{token}/registry")
-def public_exclusive_registry(token: str, cadastral: str, page: int = 1, db: Session = Depends(get_db, scope="function")):
-    """Public Registry applications for the code (services/registry.py): only with a live signing link, not an open proxy."""
+def public_exclusive_registry(token: str, personal_id: str | None = None, cadastral: str | None = None, page: int = 1,
+                              db: Session = Depends(get_db, scope="function")):
+    """Public Registry applications by the owner's personal ID (services/registry.py): only with a live signing link,
+    not an open proxy."""
     from app.services import registry
     P.sign_view(db, token)  # 404 for a bad / dead link
-    return registry.search(cadastral, page, token)
+    return registry.search(page, token, cadastral=cadastral, personal_id=personal_id)
+
+
+@router.post("/public/exclusive/{token}/extract-code")
+async def public_exclusive_extract_code(token: str, file: UploadFile = File(...), db: Session = Depends(get_db, scope="function")):
+    """The cadastral code read from the extract the owner picked (he doesn't type it); null if the PDF has no text."""
+    from app.services import registry
+    P.sign_view(db, token)
+    content = await file.read()
+    if len(content) > P.MAX_OWNER_DOC or not content.startswith(b"%PDF"):
+        raise DomainError("bad_file", "Выписка — PDF до 15 МБ")
+    return {"cadastral_code": registry.extract_code(content)}
+
+
+@router.get("/registry/applications")
+def registry_applications(personal_id: str | None = None, cadastral: str | None = None, page: int = 1,
+                          user: User = Depends(current_user)):
+    """The contract generator: the owner's NAPR applications by his personal ID; the agent opens one on NAPR (its
+    CAPTCHA) and copies the cadastral code from there."""
+    from app.services import registry
+    return registry.search(page, f"user:{user.id}", cadastral=cadastral, personal_id=personal_id, limit=120)
 
 
 @router.post("/public/exclusive/{token}")

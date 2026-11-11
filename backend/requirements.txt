@@ -8,6 +8,7 @@ pydantic-settings==2.16.2
 pyjwt==2.15.1
 bcrypt==5.0.0
 httpx==0.28.1
+pypdf==7.0.1   # app/services/registry.py: the cadastral code from the owner's registry extract PDF
 python-multipart==0.0.33
 boto3==1.43.125   # app/storage.py: MEDIA_STORAGE=s3 (R2 / Hetzner / MinIO)
 pillow==13.0.0   # app/storage.py: photo previews (same as bot/requirements.txt)
