@@ -55,6 +55,8 @@ class Property(Base):
     tenant_tg = Column(Text)
     address = Column(Text)
     district = Column(Text)
+    lat = Column(Float)  # the address point the agent confirmed on the map (migration 0005)
+    lng = Column(Float)
     cadastral_code = Column(Text)
     price = Column(Numeric(12, 2))
     currency = Column(Text, nullable=False, server_default="USD")

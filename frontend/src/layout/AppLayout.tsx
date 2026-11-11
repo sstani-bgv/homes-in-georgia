@@ -30,21 +30,22 @@ export const NAV: NavItem[] = [
 ];
 
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
-const QUICK: { to: string; title: string; sub: string; icon: LucideIcon }[] = [
-  { to: '/objects?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
-  { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },  // Irakli 2026-11-11: back in «Добавить»
-  { to: '/contracts', title: 'Договор', sub: 'Создать договор', icon: FileText },
-  { to: '/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
-  { to: '/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
-  { to: '/reports?tab=check', title: 'Проверку', sub: 'Найти дубликат', icon: Search },
+/** `m` = the same action inside the Telegram Mini App (/m layout). */
+const QUICK: { to: string; m: string; title: string; sub: string; icon: LucideIcon }[] = [
+  { to: '/objects?new=1', m: '/m/properties?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
+  { to: '/deals/new', m: '/m/deal', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },  // Irakli 2026-11-11: back in «Добавить»
+  { to: '/contracts', m: '/m/contracts', title: 'Договор', sub: 'Создать договор', icon: FileText },
+  { to: '/reports?kind=general', m: '/m/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
+  { to: '/reports?kind=showing', m: '/m/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
+  { to: '/reports?tab=check', m: '/m/reports?tab=check', title: 'Проверку', sub: 'Найти дубликат', icon: Search },
 ];
-export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function QuickAdd({ open, onClose, mobile }: { open: boolean; onClose: () => void; mobile?: boolean }) {
   const navigate = useNavigate();
   return (
     <Modal open={open} onClose={onClose} title="Добавить">
       <div className="add-grid">
         {QUICK.map((q) => (
-          <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(q.to); }}>
+          <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(mobile ? q.m : q.to); }}>
             <q.icon size={20} /><span><b>{q.title}</b><small>{q.sub}</small></span>
           </button>
         ))}

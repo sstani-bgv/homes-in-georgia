@@ -2,12 +2,12 @@
 // /m/leads/<id>, /m/properties/<id>, /m/deals/<id> (T0/T14), /m/deals/new?lead=<id>).
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Building2, CircleUser, ClipboardList, Handshake, Inbox, Sparkles } from 'lucide-react';
+import { ArrowLeft, Building2, CircleUser, ClipboardList, Handshake, Inbox, Plus, Sparkles } from 'lucide-react';
 import type { ReportKind } from '../api/types';
 import { Card, Empty, Seg } from '../components/ui';
 import { DealForm } from '../features/deals/DealForm';
 import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
-import { BrandMark } from '../layout/AppLayout';
+import { BrandMark, QuickAdd } from '../layout/AppLayout';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList } from '../features/properties/lists';
 import { useAuth } from '../auth/AuthContext';
@@ -16,6 +16,8 @@ import { KIND_LABEL, ReportForm, ReportsList } from '../features/reports/ReportF
 import { CabinetView } from './Cabinet';
 import { DealView } from './Deals';
 import { ReportKindPicker } from './Reports';
+import { ManualProperty } from './Funnels';
+import { PropertyCheck } from './Tools';
 
 const TABS = [
   { to: '/m/properties', label: 'Объекты', icon: Building2 },
@@ -34,6 +36,7 @@ export function MobileLayout() {
   const navigate = useNavigate();
   const title = TITLES.find(([re]) => re.test(loc.pathname))?.[1] || 'Панель';
   const isDetail = /\/\d+$/.test(loc.pathname);
+  const [add, setAdd] = useState(false);
   return (
     <div className="m-shell" style={{ minHeight: '100%' }}>
       <header className="mobile-top">
@@ -41,6 +44,7 @@ export function MobileLayout() {
           <button className="btn btn-ghost icon-btn" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate(loc.pathname.replace(/\/\d+$/, '')))} aria-label="Назад"><ArrowLeft size={20} /></button>
         ) : <span style={{ width: 32, height: 32, borderRadius: 9, background: '#fff', display: 'grid', placeItems: 'center', flex: 'none' }}><BrandMark size={20} /></span>}
         <h2 className="grow">{title}</h2>
+        <button className="btn btn-ghost icon-btn" onClick={() => setAdd(true)} aria-label="Добавить"><Plus size={20} /></button>
         <NavLink to="/m/me" className="btn btn-ghost icon-btn" aria-label="Кабинет"><CircleUser size={20} /></NavLink>
       </header>
       <main className="content" style={{ paddingBottom: 'calc(92px + env(safe-area-inset-bottom))' }}>
@@ -49,6 +53,7 @@ export function MobileLayout() {
       <nav className="bottom-nav always">
         {TABS.map((t) => <NavLink key={t.to} to={t.to}><t.icon size={20} />{t.label}</NavLink>)}
       </nav>
+      <QuickAdd open={add} onClose={() => setAdd(false)} mobile />
     </div>
   );
 }
@@ -65,6 +70,7 @@ export function MLeads() {
 export function MLead() { const { id } = useParams(); return <LeadDetail id={Number(id)} compact />; }
 export function MProperties() {
   const { isStaff } = useAuth();
+  const [params, setParams] = useSearchParams();
   const [view, setView] = useState<'new' | 'mine' | 'all' | 'archive'>(isStaff ? 'mine' : 'new');
   return (
     <div className="col">
@@ -72,6 +78,7 @@ export function MProperties() {
         { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' }]} />
       {view === 'new' ? <NewListings base="/m" />
         : view === 'mine' && !isStaff ? <MyProperties base="/m" /> : <PropertyList key={view} mine={view === 'mine'} archived={view === 'archive'} base="/m" />}
+      <ManualProperty open={params.get('new') === '1'} onClose={() => setParams({}, { replace: true })} base="/m" />
     </div>
   );
 }
@@ -102,13 +109,18 @@ export function MNotFound() {
     </div>
   );
 }
+/** ?kind=<ReportKind> preselects the form, ?tab=check opens «Проверка объекта» («+ Добавить» sheet). */
 export function MReports() {
-  const [kind, setKind] = useState<ReportKind>('makefoto');
-  const [view, setView] = useState<'new' | 'list'>('new');
+  const [params] = useSearchParams();
+  return <MReportsInner key={params.toString()} qKind={params.get('kind') as ReportKind | null} qTab={params.get('tab')} />;
+}
+function MReportsInner({ qKind, qTab }: { qKind: ReportKind | null; qTab: string | null }) {
+  const [kind, setKind] = useState<ReportKind>(qKind || 'makefoto');
+  const [view, setView] = useState<'new' | 'list' | 'check'>(qTab === 'check' ? 'check' : 'new');
   return (
     <div className="col">
-      <Seg value={view} onChange={setView} options={[{ value: 'new', label: 'Новый' }, { value: 'list', label: 'Журнал' }]} />
-      {view === 'new' ? (
+      <Seg value={view} onChange={setView} options={[{ value: 'new', label: 'Новый' }, { value: 'list', label: 'Журнал' }, { value: 'check', label: 'Проверка' }]} />
+      {view === 'check' ? <PropertyCheck /> : view === 'new' ? (
         <>
           <ReportKindPicker value={kind} onChange={setKind} />
           <Card label="Отчёт" title={KIND_LABEL[kind]}><ReportForm key={kind} kind={kind} /></Card>

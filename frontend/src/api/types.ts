@@ -99,6 +99,9 @@ export interface PostFields {
 
 export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?: string; room?: string | null; position?: number }
 
+/** GET /geo/search: an OSM candidate (or the pasted Google Maps point) for the address field */
+export interface GeoHit { label: string; lat: number; lng: number; district?: string | null }
+
 export interface Property {
   /** «Сдан» typed by hand (old-base objects without a deal in the CRM): the lease end goes to the calendar */
   rent_from?: string | null; rent_to?: string | null; tenant_name?: string | null; tenant_phone?: string | null; tenant_tg?: string | null;
@@ -124,6 +127,8 @@ export interface Property {
   shoot_at?: string | null;
   address?: string | null;
   district?: string | null;
+  /** the address point the agent confirmed on the map (AddressField) */
+  lat?: number | null; lng?: number | null;
   cadastral_code?: string | null;
   price?: number | null;
   currency?: string | null;

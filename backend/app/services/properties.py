@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 BOARD = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled", "media_uploaded", "review",
          "returned", "published", "rented")
 LEASE = ("rent_from", "rent_to", "tenant_name", "tenant_phone", "tenant_tg")  # «Сдан» by hand (no deal in the CRM)
-EDITABLE = ("address", "district", "cadastral_code", "price", "currency", "bedrooms", "rooms", "area", "floor",
+EDITABLE = ("address", "district", "lat", "lng", "cadastral_code", "price", "currency", "bedrooms", "rooms", "area", "floor",
             "total_floors", "description", "is_exclusive", "source_url", "source_type", "checklist", "shoot_at",
             "post_fields") + LEASE
 # Stage 6: once the operator has verified the object (verified_at), the agent can't change these himself: everything a
@@ -374,6 +374,8 @@ def _apply(p: Property, data: dict):
         v = data[k]
         if k in ("price", "area"):
             v = _num(v)
+        elif k in ("lat", "lng"):
+            v = float(v) if v not in (None, "") else None
         elif k in ("bedrooms", "rooms", "floor", "total_floors"):
             v = int(v) if v not in (None, "") else None
         elif k == "shoot_at":
@@ -1125,10 +1127,15 @@ def _int(v) -> int | None:
         return None
 
 
+def nearest_metro_m(lat: float, lng: float) -> tuple[float, str]:
+    """(metres, POST_ONE metro tag) of the closest station, any distance."""
+    return min((111_000 * math.hypot(lat - a, (lng - b) * 0.75), t) for t, (a, b) in METRO.items())
+
+
 def nearest_metro(lat: float | None, lng: float | None) -> str | None:
     if lat is None or lng is None:
         return None
-    d, tag = min((111_000 * math.hypot(lat - a, (lng - b) * 0.75), t) for t, (a, b) in METRO.items())
+    d, tag = nearest_metro_m(lat, lng)
     return tag if d <= METRO_RADIUS_M else None
 
 
@@ -1173,7 +1180,9 @@ def prefill(p: Property, listing: Listing | None) -> bool:
 
 
 def maps_url(db: Session, p: Property) -> str | None:
-    """Google Maps link for the post address: the origin ad's pin, else a search by the address."""
+    """Google Maps link for the post address: the agent's point, the origin ad's pin, else a search by the address."""
+    if p.lat is not None and p.lng is not None:
+        return f"https://maps.google.com/?q={p.lat},{p.lng}"
     listing = db.get(Listing, p.listing_id) if p.listing_id else None
     if listing is not None and listing.lat is not None and listing.lng is not None:
         return f"https://maps.google.com/?q={listing.lat},{listing.lng}"
@@ -1345,7 +1354,9 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     # plike:<id>); the bot answers with t.me/<bot>?start=p<id> -> the same lead as before (bot.on_button)
     listing = db.get(Listing, p.listing_id) if p.listing_id else None
     pin, at = None, None
-    if listing is not None and listing.lat is not None and listing.lng is not None:
+    if p.lat is not None and p.lng is not None:  # the agent checked it on the map (AddressField)
+        at, prec = (float(p.lat), float(p.lng)), "точный"
+    elif listing is not None and listing.lat is not None and listing.lng is not None:
         at, prec = (float(listing.lat), float(listing.lng)), listing.geo_precision or ""
     elif m := MAPS_POINT.search(p.description or ""):  # an old-base post's Google Maps link: !3d<lat>!4d<lng> or @lat,lng
         at, prec = (float(m[1] or m[3]), float(m[2] or m[4])), "точный"
@@ -1603,7 +1614,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
 
     agent = get(User, p.agent_id)
     d = {c: getattr(p, c) for c in ("id", "listing_id", "source_type", "source_url", "status", "agent_id", "call_attempts",
-                                    "address", "district", "cadastral_code", "currency", "bedrooms", "rooms", "floor",
+                                    "address", "district", "lat", "lng", "cadastral_code", "currency", "bedrooms", "rooms", "floor",
                                     "total_floors", "description", "is_exclusive", "checklist", "ai_flags",
                                     "duplicate_of", "dup_check", "review_comment", "reviewed_by", "post_url",
                                     "post_message_id", "owner_id", "post_fields", "archive_reason", "archive_comment")}

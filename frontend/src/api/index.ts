@@ -7,7 +7,7 @@ import {
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand,
+  Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -16,6 +16,10 @@ const then = <A, B>(p: Promise<A>, f: (a: A) => B) => p.then(f);
 
 export const api = {
   config: () => http.get<AppConfig>('/config'),
+  geo: {
+    search: (q: string) => http.get<{ items: GeoHit[]; point: boolean; error?: boolean }>('/geo/search', { q }),
+    point: (p: { lat: number; lng: number }) => http.get<{ district: string | null; metro: string | null; metro_m: number | null }>('/geo/point', p),
+  },
 
   auth: {
     login: (login: string, password: string) => then(http.post<AuthOut>('/auth/login', { login, password }), normAuth),

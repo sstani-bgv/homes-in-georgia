@@ -11,7 +11,7 @@ from app.db import get_db
 from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
 from app.services.errors import forbidden
 from app.services import change_requests as CR
-from app.services import demand, matching
+from app.services import demand, geo, matching
 from app.services import properties as P
 from app.services.leads import ACTIVE
 from app.services.common import get_or_404, log_event
@@ -91,6 +91,8 @@ class PropertyIn(BaseModel):
     listing_id: str | None = None
     address: str | None = None
     district: str | None = None
+    lat: float | None = None  # the address field's point (OSM / Google Maps link / a dragged marker)
+    lng: float | None = None
     cadastral_code: str | None = None
     price: float | None = None
     currency: str | None = None
@@ -197,6 +199,18 @@ def properties_create(body: PropertyIn, db: Session = Depends(get_db, scope="fun
     if walk_in:  # one transaction: a bad phone leaves no half-made object behind
         p = P.owner_or_agent(db, p.id, user, True, data.get("owner_name"), data["owner_phone"])
     return P.out(db, p, user, full=True)
+
+
+@router.get("/geo/search")
+def geo_search(q: str = Query("", max_length=500), user: User = Depends(current_user)):
+    """The address field's suggestions: up to 5 OSM candidates in Georgia, or the pasted Google Maps point."""
+    return geo.search(q)
+
+
+@router.get("/geo/point")
+def geo_point(lat: float = Query(..., ge=40, le=44), lng: float = Query(..., ge=39, le=47), user: User = Depends(current_user)):
+    """District + nearest metro (≤1.5 km, with metres) for the address field's point; the agent can still change both."""
+    return geo.point_facts(lat, lng)
 
 
 @router.get("/properties/{pid}")

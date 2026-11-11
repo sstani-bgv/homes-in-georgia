@@ -18,6 +18,7 @@ import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
 import { cadastralError, cadastralHint, cadastralNorm } from '../../lib/cadastral';
 import { pool, shrinkPhoto } from '../../lib/upload';
+import { AddressField, type Point } from '../../components/AddressField';
 
 const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
@@ -182,7 +183,7 @@ function ShootStep({ p }: { p: Property }) {
 
 type GenForm = {
   is_exclusive: boolean; district: string; address: string; price: string; bedrooms: string; area: string; floor: string;
-  total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields;
+  total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields; point: Point | null;
 };
 const BEDROOM_CHIPS: Record<string, string> = { 0: 'Студия', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5+' };
 // the old generator's sale block (backend SALE_AMENITIES): its own type order, beds up to 6+, only these amenities
@@ -195,6 +196,8 @@ const genOf = (p: Property): GenForm => ({
   is_exclusive: !!p.is_exclusive, district: str(p.district), address: str(p.address), price: str(p.price), bedrooms: str(p.bedrooms),
   area: str(p.area), floor: str(p.floor), total_floors: str(p.total_floors),
   owner_name: str(p.owner?.name), owner_phone: str(p.owner?.phone), post_fields: { deal: 'Rent', ...(p.post_fields || {}) },
+  // the agent's point, else the origin ad's pin to check (saved only once he moves / picks it)
+  point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : p.listing?.lat != null && p.listing?.lng != null ? { lat: p.listing.lat, lng: p.listing.lng } : null,
 });
 /** what changed in the generator since the last save, in PATCH /properties shape */
 function genDiff(a: GenForm, b: GenForm): Record<string, unknown> {
@@ -202,6 +205,7 @@ function genDiff(a: GenForm, b: GenForm): Record<string, unknown> {
   const num = (x: string) => (x.trim() === '' ? null : Number(x));
   (['district', 'address'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = b[k].trim() || null; });
   (['price', 'bedrooms', 'area', 'floor', 'total_floors'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = num(b[k]); });
+  if (a.point?.lat !== b.point?.lat || a.point?.lng !== b.point?.lng) { out.lat = b.point?.lat ?? null; out.lng = b.point?.lng ?? null; }
   if (a.is_exclusive !== b.is_exclusive) out.is_exclusive = b.is_exclusive;
   if (b.owner_id && b.owner_id !== a.owner_id) out.owner_id = b.owner_id;
   else if (a.owner_name !== b.owner_name || a.owner_phone !== b.owner_phone) { out.owner_name = b.owner_name; out.owner_phone = b.owner_phone; }
@@ -235,6 +239,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const { toast, set, qc } = useProp(p.id);
   const [f, setF] = useState<GenForm>(() => genOf(p));
   const saved = useRef<GenForm>(f);
+  const [metroM, setMetroM] = useState<number | null>(null);  // the auto-picked station's distance, shown by the select
   const fileRef = useRef<HTMLInputElement>(null);
   const media = p.media || [];
   const checklist = p.checklist || {};
@@ -321,8 +326,11 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="❗️ Exclusive listing" />
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
           <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
-          <Field label="🚇 Метро"><Select value={pf.metro || ''} placeholder="—" onChange={(e) => setPf('metro', e.target.value)} options={opts(one('metro'))} /></Field>
-          <Field label="Адрес"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} /></Field>
+          <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${metroM} м от точки на карте` : undefined}>
+            <Select value={pf.metro || ''} placeholder="—" onChange={(e) => { setMetroM(null); setPf('metro', e.target.value); }} options={opts(one('metro'))} /></Field>
+          <div className="field"><span className="label">Адрес</span>
+            <AddressField value={f.address} onChange={(v) => upd('address', v)} point={f.point} onPoint={(v) => upd('point', v)} disabled={ro}
+              onFacts={(r) => { setMetroM(r.metro_m); setF((x) => ({ ...x, district: r.district || x.district, post_fields: { ...x.post_fields, metro: r.metro || undefined } })); }} /></div>
         </div>
 
         <div className="gen-block">
@@ -954,6 +962,7 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
 
 // the old generator's tag groups (backend services/properties.py POST_ONE / POST_MANY), stored without '#'
 const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label]) => ({ value, label }));
+export const metroLabel = (tag?: string | null) => (tag ? POST_ONE.metro[1][tag] || tag : '');
 const POST_ONE: Record<string, [string, Record<string, string>]> = {
   prop_type: ['Тип', { Apartment: 'Квартира', House: 'Дом', Commercial: 'Коммерция', Duplex: 'Дуплекс', Townhouse: 'Таунхаус', Land: 'Земля', Retail: 'Ритейл', Business: 'Бизнес', Cafe: 'Кафе', Restaurant: 'Ресторан', BeautySalon: 'Салон красоты', Warehouses: 'Склад', Manufacture: 'Производство' }],
   metro: ['Метро', { LibertySquare: 'Площадь Свободы', Rustaveli: 'Руставели', Marjanishvili: 'Марджанишвили', StationSquare: 'Вокзальная площадь', Tsereteli: 'Церетели', Gotsiridze: 'Гоциридзе', Nadzaladevi: 'Надзаладеви', Didube: 'Дидубе', Grmagele: 'Грмагеле', Guramishvili: 'Гурамишвили', Sarajishvili: 'Сараджишвили', AhmeteliTheatre: 'Театр Ахметели', STUniversity: 'Техуниверситет', VazhaPshavela: 'Важа-Пшавела', Delisi: 'Делиси', TCUniversity: 'Госуниверситет', MCUniversity: 'Медуниверситет', AvlabariMetro: 'Авлабари', IsaniMetro: 'Исани', '300Aragveli': '300 Арагвели', SamgoriMetro: 'Самгори', Varketili: 'Варкетили' }],
