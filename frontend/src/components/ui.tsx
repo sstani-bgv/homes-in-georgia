@@ -2,7 +2,7 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Inbox, X } from 'lucide-react';
-import { initials } from '../lib/format';
+import { initials, phoneBlur, phoneFocus } from '../lib/format';
 import { mediaUrl } from '../api/client';
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ok';
@@ -59,7 +59,9 @@ export function Field({ label, children, className = '', hint }: { label: string
     </label>
   );
 }
-export const Input = (p: InputHTMLAttributes<HTMLInputElement>) => <input className="input" {...p} />;
+/** inputMode="tel" (the phoneInput fields): «+995 » appears on focus, a bare one is cleared on blur */
+export const Input = (p: InputHTMLAttributes<HTMLInputElement>) => <input className="input" {...p}
+  {...(p.inputMode === 'tel' ? { onFocus: (e) => { phoneFocus(e); p.onFocus?.(e); }, onBlur: (e) => { phoneBlur(e); p.onBlur?.(e); } } : {})} />;
 export const Textarea = (p: TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea className="textarea" {...p} />;
 export function Select({ options, placeholder, ...p }: SelectHTMLAttributes<HTMLSelectElement> & { options: { value: string | number; label: string }[]; placeholder?: string }) {
   return (

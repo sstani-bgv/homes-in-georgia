@@ -149,10 +149,10 @@ export function formatPhone(raw?: string | null): string {
   if (!d) return plus ? '+' : '';
   if (d.length > 15) return s;
   let nat: string | null = null;
-  if (d.startsWith('995')) nat = d.slice(3);
+  if (d.startsWith('995')) nat = d.slice(3).replace(/^0/, '').replace(/^995/, ''); // a trunk 0 / the code again after «+995 »
   else if ('995'.startsWith(d)) return (plus ? '+' : '') + d; // still typing «+99…»
   else if (!plus && d.replace(/^0/, '').length <= 9) nat = d.replace(/^0/, ''); // local Georgian number
-  if (nat !== null) return ['+995', nat.slice(0, 3), nat.slice(3, 6), nat.slice(6)].filter(Boolean).join(' ');
+  if (nat !== null) return nat ? ['+995', nat.slice(0, 3), nat.slice(3, 6), nat.slice(6)].filter(Boolean).join(' ') : '+995 ';
   const ccLen = /^[17]/.test(d) ? 1 : CC3.includes(d.slice(0, 2)) ? 3 : 2;
   const r = d.slice(ccLen);
   const tail = r.length >= 7 ? r.slice(-4) : '';
@@ -182,6 +182,21 @@ export function phoneInput(e: { target: HTMLInputElement; nativeEvent: Event }):
   el.value = f;
   if (document.activeElement === el) el.setSelectionRange(caret, caret);
   return f;
+}
+const setValue = (el: HTMLInputElement, v: string) => {  // as if typed: React's onChange (phoneInput) sees it
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, v);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+};
+/** onFocus of a phone input: an empty one starts with «+995 », the caret after it (Stanislav 11-11). */
+export function phoneFocus(e: { currentTarget: HTMLInputElement }) {
+  const el = e.currentTarget;
+  if (el.value || el.readOnly || el.disabled) return;
+  setValue(el, '+995 ');
+  setTimeout(() => { if (document.activeElement === el) el.setSelectionRange(el.value.length, el.value.length); });
+}
+/** onBlur of a phone input: a bare «+995 » (nothing typed) goes back to empty, so an optional phone isn't saved as «+995». */
+export function phoneBlur(e: { currentTarget: HTMLInputElement }) {
+  if (/^\+(995)?\s*$/.test(e.currentTarget.value)) setValue(e.currentTarget, '');
 }
 /** 640 → «640 м», 2315 → «2,3 км» (the metro distance from the map point). */
 export function distLabel(m: number): string { return m > 1000 ? `${(m / 1000).toFixed(1).replace('.', ',')} км` : `${Math.round(m)} м`; }
