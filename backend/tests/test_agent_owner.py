@@ -125,7 +125,8 @@ def test_post_fields_validated_and_full_rent_post(db, client):
     assert lines.index("👬Tenants: 1-3") < lines.index("💰 500$ + Deposit 500$")  # the generator's order
     html = post_html(text)
     assert '<a href="https://maps.google.com/?q=41.72,44.75">📍3 Ferdinand Tavadze St</a>' in html
-    assert '📍<b><a href="https://hge.ge/map/">APARTMENTS ON MAP</a></b>📍' in html  # Irakli 11-11
+    assert '📍<b><a href="https://hge.ge/map/?q=3+Ferdinand+Tavadze+St">APARTMENTS ON MAP</a></b>📍' in html  # this object
+    assert 'href="https://hge.ge/map/"' in post_html("📍APARTMENTS ON MAP📍")  # no address: the whole map
 
 
 def test_sale_post(db):

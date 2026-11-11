@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import urlencode as _urlencode  # private: the test fixture stubs every public notify.* name
 import secrets
 import tempfile
 from datetime import datetime, timezone
@@ -917,7 +918,6 @@ WATERMARK = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "
 FOOTER_LINKS = (
     ("🌟 Check all listings | Reviews", '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 Check all listings</a> | '
                                        '<a href="https://t.me/reviews_rent_tbilisi">Reviews</a>'),
-    ("📍APARTMENTS ON MAP📍", '📍<b><a href="https://hge.ge/map/">APARTMENTS ON MAP</a></b>📍'),  # Irakli 11-11
     ("📱 Instagram 🗳 FB 🎥 YouTube", '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">📱 Instagram</a> '
                                      '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">🗳 FB</a> '
                                      '<a href="https://youtube.com/@rentintbilisi">🎥 YouTube</a>'),
@@ -930,7 +930,12 @@ def post_html(text):
     out = re.sub(r"📍\[([^\]\n]+)\]\((https?://[^)\s]+)\)", lambda m: f'<a href="{m[2].replace(chr(34), "%22")}">📍{m[1]}</a>', out)
     for plain, linked in FOOTER_LINKS:
         out = out.replace(plain, linked)
-    return out
+    # hge.ge/map/ (Irakli's site map, built from the channel posts) searches its titles = these addresses: ?q=<address>
+    # opens the map on this object, without it the whole map (Irakli 11-11)
+    addr = re.search(r"📍\[([^\]\n]+)\]\(", text or "")
+    q = addr and " ".join(w.strip(",.;") for w in addr[1].split())
+    url = "https://hge.ge/map/" + (f"?{_urlencode({'q': q})}" if q else "")
+    return out.replace("📍APARTMENTS ON MAP📍", f'📍<b><a href="{html.escape(url)}">APARTMENTS ON MAP</a></b>📍')
 
 
 PHOTO_PX = 2560  # Telegram: a photo's width + height at most 10000 and 10 MB (a 48 MP iPhone original is 8064x6048)
