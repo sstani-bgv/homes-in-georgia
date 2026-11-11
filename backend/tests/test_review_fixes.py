@@ -84,7 +84,7 @@ def test_deal_create_is_idempotent_per_lead_and_cancel_reverts(db, client, sent)
 
 def test_deals_find_minimal_for_agents(db, client):
     op, ag = make_user(db, "operator"), make_user(db, "agent")
-    deals.create(db, {"agent_id": op.id, "price": 900, "cadastral": "01.02.03", "owner_name": "Гиорги",
+    deals.create(db, {"agent_id": op.id, "price": 900, "cadastral": "01.02.03.004", "owner_name": "Гиорги",
                       "client_name": "Анна", "rent_from": "2030-01-01"}, op)
     row = client.get("/api/deals/find", params={"cadastral": "01.02"}, headers=auth(ag)).json()[0]
     assert set(row) == {"id", "cadastral", "address", "status", "rent_from", "rent_to"}

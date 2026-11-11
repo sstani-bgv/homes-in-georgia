@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -16,9 +16,13 @@ import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fm
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
+import { cadastralError, cadastralHint, cadastralNorm } from '../../lib/cadastral';
+import { pool, shrinkPhoto } from '../../lib/upload';
 
 const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
+// one Telegram album (backend properties.MAX_MEDIA)
+const MAX_PHOTO = 9, MAX_VIDEO = 1;
 export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Ванная', 'Балкон', 'Вид из окна', 'Подъезд'];
 const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Пост и фото', 'Проверка', 'Публикация'];
 
@@ -253,13 +257,42 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const upd = <K extends keyof GenForm>(k: K, v: GenForm[K]) => setF((x) => ({ ...x, [k]: v }));
   const pf = f.post_fields;
   const setPf = (k: string, v: unknown) => setF((x) => ({ ...x, post_fields: { ...x.post_fields, [k]: v === '' || v === undefined ? undefined : v } }));
+  // the deposit shows the price (empty = as price, backend post_text); a deposit the agent typed equal to the old price
+  // keeps following it, any other one he set stays
+  const setPrice = (v: string) => setF((x) => {
+    const dep = x.post_fields.deposit;
+    const follow = dep !== undefined && String(dep) === x.price;
+    return { ...x, price: v, post_fields: follow ? { ...x.post_fields, deposit: v === '' ? undefined : Number(v) } : x.post_fields };
+  });
   const toggleMany = (k: 'amenities' | 'periods', a: string) => { const cur = pf[k] || []; setPf(k, cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]); };
   const sale = pf.deal === 'Sale';
   const one = (k: string) => POST_ONE[k][1];
   const AMENITY_ALL = Object.keys(POST_MANY.amenities[1]);
   const AMENITY_REST = AMENITY_ALL.filter((a) => !AMENITY_FIXED.includes(a));
 
-  const upload = useMutation({ mutationFn: (files: File[]) => api.properties.uploadMedia(p.id, files), onSuccess: (r) => { set(r); toast('Файлы загружены'); }, onError: (e) => toast(errText(e), true) });
+  const nPhoto = media.filter((m) => m.kind === 'photo').length;
+  const nVideo = media.filter((m) => m.kind === 'video').length;
+  const full = nPhoto >= MAX_PHOTO && nVideo >= MAX_VIDEO;
+  const [queue, setQueue] = useState<{ name: string; state: 'wait' | 'up' | 'done' | 'err'; msg?: string }[]>([]);
+  const busy = queue.some((q) => q.state === 'wait' || q.state === 'up');
+  /** The ones that fit 9 photos + 1 video go up 3 at a time, photos resized first; one request per file. */
+  const uploadFiles = async (picked: File[]) => {
+    let ph = nPhoto, vd = nVideo;
+    const isVideo = (x: File) => x.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(x.name);
+    const fit = picked.filter((x) => (isVideo(x) ? ++vd <= MAX_VIDEO : ++ph <= MAX_PHOTO));
+    if (fit.length < picked.length) toast(`Не добавлено ${picked.length - fit.length}: у объекта максимум ${MAX_PHOTO} фото и ${MAX_VIDEO} видео (столько уходит в пост Telegram)`, true);
+    if (!fit.length) return;
+    setQueue(fit.map((x) => ({ name: x.name, state: 'wait' })));
+    const mark = (i: number, state: 'up' | 'done' | 'err', msg?: string) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, state, msg } : x)));
+    let failed = 0;
+    await pool(fit, 3, async (x, i) => {
+      mark(i, 'up');
+      try { set(await api.properties.uploadMedia(p.id, [await shrinkPhoto(x)])); mark(i, 'done'); }
+      catch (e) { failed++; mark(i, 'err', errText(e)); }
+    });
+    refresh();
+    if (!failed) { toast(fit.length > 1 ? `Загружено файлов: ${fit.length}` : 'Файл загружен'); setQueue([]); }
+  };
   const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
   const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: refresh });
   const room = useMutation({ mutationFn: ([mid, r]: [number, string | null]) => api.properties.mediaRoom(p.id, mid, r), onSuccess: refresh, onError: (e) => toast(errText(e), true) });
@@ -267,6 +300,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const submit = useMutation({ mutationFn: async () => { await flush(); return api.properties.submit(p.id); }, onSuccess: (r) => { set(r); toast('Отправлено на модерацию'); }, onError: (e) => toast(errText(e), true) });
   const post = useQuery({ queryKey: ['property-post', p.id], queryFn: () => api.properties.post(p.id) });
   const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
+  const roomsOn = p.room_picker !== false;
   const missing = p.missing || [];
   const dirty = Object.keys(genDiff(saved.current, f)).length > 0 || save.isPending;
   const ro = !canEdit;
@@ -328,8 +362,8 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <span className="gen-title">3 · Цена</span>
           {sale ? <Field label="Цена ($)" hint="Диапазон цены (#Price…) ставится в пост сам по цене"><Input type="number" inputMode="numeric" value={pf.sale_price ?? ''} onChange={(e) => setPf('sale_price', e.target.value === '' ? undefined : Number(e.target.value))} /></Field> : <>
             <div className="form-grid">
-              <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={f.price} onChange={(e) => upd('price', e.target.value)} /></Field>
-              <Field label="Депозит ($)" hint="Пусто — равен цене, 0 — без депозита"><Input type="number" inputMode="numeric" min={0} value={pf.deposit ?? ''} onChange={(e) => setPf('deposit', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>
+              <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={f.price} onChange={(e) => setPrice(e.target.value)} /></Field>
+              <Field label="Депозит ($)" hint="Равен цене, можно изменить. 0 — без депозита"><Input type="number" inputMode="numeric" min={0} value={pf.deposit ?? f.price} onChange={(e) => setPf('deposit', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>
             </div>
             <Field label="Срок аренды">
               <div className="row row-wrap gap-sm">
@@ -358,22 +392,41 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
       {f.is_exclusive && <ExclusiveContract p={p} canEdit={canEdit} />}
 
       <div className="gen-block">
-        <span className="gen-title">Фото и видео</span>
+        <div className="row row-between row-wrap gap-sm">
+          <span className="gen-title">Фото и видео</span>
+          <span className="media-count num">Фото {nPhoto}/{MAX_PHOTO} · Видео {nVideo}/{MAX_VIDEO}</span>
+        </div>
         {canEdit && (
           <>
-            <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); if (fl.length) upload.mutate(fl); e.target.value = ''; }} />
-            <Button block loading={upload.isPending} onClick={() => fileRef.current?.click()}><Upload size={16} />Загрузить фото и видео</Button>
-            <div className="muted" style={{ fontSize: 12 }}>Выберите в галерее сразу все файлы. Потом под каждым фото можно указать комнату — это необязательно.</div>
+            <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; if (fl.length) uploadFiles(fl); }} />
+            <Button block loading={busy} disabled={full} onClick={() => fileRef.current?.click()}><Upload size={16} />{full ? 'Загружено максимум файлов' : 'Загрузить фото и видео'}</Button>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {full ? `Чтобы заменить файл, удалите его. В пост Telegram уходит до ${MAX_PHOTO} фото и ${MAX_VIDEO} видео.`
+                : `До ${MAX_PHOTO} фото и ${MAX_VIDEO} видео — выберите в галерее сразу все.${roomsOn ? ' Комнату под фото указывать необязательно.' : ''}`}
+            </div>
+            {queue.length > 0 && (
+              <div className="upload-queue">
+                {queue.map((q, i) => (
+                  <div key={i} className={`uq uq-${q.state}`}>
+                    <span className="uq-name">{q.name}</span>
+                    <span className="uq-state">{q.state === 'wait' ? 'в очереди' : q.state === 'up' ? 'загружается…' : q.state === 'done' ? 'готово' : q.msg || 'ошибка'}</span>
+                  </div>
+                ))}
+                {!busy && <Button size="sm" variant="ghost" onClick={() => setQueue([])}>Скрыть</Button>}
+              </div>
+            )}
           </>
         )}
-        <MediaGrid p={p} onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit ? (id, r) => room.mutate([id, r]) : undefined} />
-        <div className="row row-between"><span className="label">Что снято</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
-        <div className="row row-wrap gap-sm">
-          {ROOMS.map((r) => {
-            const on = !!checklist[r] || media.some((m) => m.room === r);
-            return <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit} onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>{on ? <CheckCircle2 size={14} /> : null}{r}</button>;
-          })}
-        </div>
+        <MediaGrid p={p} grouped onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit && roomsOn ? (id, r) => room.mutate([id, r]) : undefined} />
+        {roomsOn && <>
+          <div className="row row-between"><span className="label">Что снято · необязательно</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
+          <div className="row row-wrap gap-sm">
+            {ROOMS.map((r) => {
+              const on = !!checklist[r] || media.some((m) => m.room === r);
+              return <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit} onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>{on ? <CheckCircle2 size={14} /> : null}{r}</button>;
+            })}
+          </div>
+        </>}
       </div>
 
       <div className="gen-block">
@@ -426,29 +479,39 @@ function Lightbox({ items, index, onIndex, onClose }: { items: Shot[]; index: nu
   );
 }
 
-function MediaGrid({ p, items, onDelete, onRoom }: { p?: Property; items?: Shot[]; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void }) {
-  const media = items || (p ? shotsOf(p) : []);
+function MediaGrid({ p, items, grouped, onDelete, onRoom }: { p?: Property; items?: Shot[]; grouped?: boolean; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void }) {
+  const all = items || (p ? shotsOf(p) : []);
+  // photos first, then videos: the lightbox walks them in that order
+  const media = [...all.filter((m) => m.kind !== 'video'), ...all.filter((m) => m.kind === 'video')];
   const [open, setOpen] = useState<number | null>(null);
   if (!media.length) return <div className="muted" style={{ fontSize: 13 }}>Файлов пока нет</div>;
-  return (
-    <div className="photo-strip">
-      {open !== null && <Lightbox items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
-      {media.map((m, i) => (
-        <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
-          {m.kind === 'video' ? <video src={mediaUrl(m.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <img src={thumbUrl(m.src)} alt={m.room || ''} loading="lazy" />}
-          {onRoom ? (
-            <span className="room-pick" onClick={(e) => e.stopPropagation()}>
-              <span className={`badge badge-blue ${m.room ? '' : 'no-room'}`}>{m.room || 'Комната?'}<ChevronDown size={12} /></span>
-              <select value={m.room || ''} aria-label="Комната" onChange={(e) => onRoom(Number(m.id), e.target.value || null)}>
-                <option value="">Не указана</option>
-                {ROOMS.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </span>
-          ) : m.room && <span className="room badge badge-blue">{m.room}</span>}
-          {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
-        </div>
-      ))}
+  const tile = (m: Shot, i: number) => (
+    <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
+      {m.kind === 'video' ? <>
+        <video src={`${mediaUrl(m.src)}#t=0.1`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <span className="video-badge"><Play size={12} fill="currentColor" />Видео</span>
+      </> : <img src={thumbUrl(m.src)} alt={m.room || ''} loading="lazy" />}
+      {onRoom && m.kind !== 'video' ? (
+        <span className="room-pick" onClick={(e) => e.stopPropagation()}>
+          <span className={`badge badge-blue ${m.room ? '' : 'no-room'}`}>{m.room || 'Комната?'}<ChevronDown size={12} /></span>
+          <select value={m.room || ''} aria-label="Комната" onChange={(e) => onRoom(Number(m.id), e.target.value || null)}>
+            <option value="">Не указана</option>
+            {ROOMS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </span>
+      ) : m.room && m.kind !== 'video' && <span className="room badge badge-blue">{m.room}</span>}
+      {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
     </div>
+  );
+  const nPhoto = media.findIndex((m) => m.kind === 'video') === -1 ? media.length : media.findIndex((m) => m.kind === 'video');
+  return (
+    <>
+      {open !== null && <Lightbox items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+      {grouped ? <>
+        {nPhoto > 0 && <><span className="label">Фото · {nPhoto}</span><div className="photo-strip">{media.slice(0, nPhoto).map((m, i) => tile(m, i))}</div></>}
+        {nPhoto < media.length && <><span className="label">Видео · {media.length - nPhoto}</span><div className="photo-strip">{media.slice(nPhoto).map((m, i) => tile(m, nPhoto + i))}</div></>}
+      </> : <div className="photo-strip">{media.map(tile)}</div>}
+    </>
   );
 }
 
@@ -796,7 +859,7 @@ function ReviewStep({ p }: { p: Property }) {
       <div className="col gap-sm">
         <div className="row gap-sm"><AiFlagBadges flags={p.ai_flags} />{!p.ai_flags?.owner && !p.ai_flags?.agent_suspect && !p.ai_flags?.duplicate && <span className="muted">Меток ИИ нет</span>}</div>
         <DupCheck value={p.dup_check} />
-        {missing.length ? <div className="alert alert-warn">Не сняты: {missing.join(', ')}</div> : <div className="alert alert-ok">Все основные комнаты сняты</div>}
+        {p.room_picker !== false && (missing.length ? <div className="alert alert-info">Комнаты не отмечены (необязательно): {missing.join(', ')}</div> : <div className="alert alert-ok">Все основные комнаты отмечены</div>)}
         {p.owner?.is_agent && <div className="alert alert-warn">Телефон собственника отмечен как агентский</div>}
       </div>
       <div className="divider" />
@@ -996,7 +1059,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
           <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name || ''}
             onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>
         )}
-        <Field label="Кадастровый код" className="span2" hint={lockHint('cadastral_code')}><Input value={v.cadastral_code || ''} onChange={(e) => upd('cadastral_code', e.target.value)} /></Field>
+        <Field label="Кадастровый код" className="span2" hint={cadastralHint(v.cadastral_code, p.cadastral_code, lockHint('cadastral_code'))}><Input value={v.cadastral_code || ''} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral_code', e.target.value)} onBlur={() => { if (f.cadastral_code) upd('cadastral_code', cadastralNorm(f.cadastral_code)); }} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
         <div className="span2 col gap-sm">
           <Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" />
@@ -1023,7 +1086,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
           <Field label="Причина изменения" hint="Оператор увидит её в запросе"><Input value={reason} placeholder="Например: собственник сменил номер" onChange={(e) => setReason(e.target.value)} /></Field>
         </div>
       )}
-      <div className="row mt-lg"><Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={onClose}>Отмена</Button></div>
+      <div className="row mt-lg"><Button loading={save.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={onClose}>Отмена</Button></div>
     </Modal>
   );
 }

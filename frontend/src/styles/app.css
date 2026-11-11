@@ -558,3 +558,13 @@ html, body { overflow-x: clip; }
 .tg-login-err { margin-top: 18px; width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: rgba(227, 23, 45, .16); border: 1px solid rgba(227, 23, 45, .4); color: #fff; font-size: 14px; }
 .tg-login-form { width: 100%; margin-top: 24px; padding: 20px; box-sizing: border-box; border-radius: 18px; background: #fff; color: #021F4A; text-align: left; color-scheme: light; }
 .tg-login-copy { margin-top: 48px; color: rgba(255, 255, 255, .45); font-size: 13px; }
+
+/* media upload: counters, per-file queue, video tile badge */
+.media-count { font-size: 13px; font-weight: 700; color: var(--brand); }
+.upload-queue { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.upload-queue .uq { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 8px; background: var(--brand-soft); }
+.upload-queue .uq-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.upload-queue .uq-state { flex: none; font-weight: 600; }
+.upload-queue .uq-done .uq-state { color: var(--ok); }
+.upload-queue .uq-err .uq-state { color: var(--accent); white-space: normal; text-align: right; }
+.photo-strip .ph .video-badge { position: absolute; left: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; font-weight: 600; }

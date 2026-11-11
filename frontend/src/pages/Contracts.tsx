@@ -1,6 +1,7 @@
 // /contracts and /m/contracts — contract generator (port of the old CRM tab «tab-contract»).
 // Output is a printable A4 document (window.print + print CSS) and a .doc file for Word; no external services.
 import { useEffect, useMemo, useState } from 'react';
+import { cadastralError, cadastralHint } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw, Send } from 'lucide-react';
@@ -244,6 +245,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         setTab(miss.some((k) => parties.includes(k)) ? 'parties' : miss.some((k) => property.includes(k)) ? 'property' : 'money');
         return;
       }
+      if (cadastralError(d.cadastral_code)) { setErr('Проверьте кадастровый код'); setTab('property'); return; }
       setStep(4); return;
     }
     if (step === 4) { setStep(5); return; }
@@ -282,7 +284,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
 
   // ---- field helper
   const F = ({ k, label, type: t = 'text', placeholder }: { k: keyof CxData; label: string; type?: string; placeholder?: string }) => (
-    <Field label={`${label}${req.has(k) ? ' *' : ''}`}>
+    <Field label={`${label}${req.has(k) ? ' *' : ''}`} hint={k === 'cadastral_code' ? cadastralHint(String(d[k] ?? '')) : undefined}>
       <Input type={t} value={String(d[k] ?? '')} placeholder={placeholder} inputMode={t === 'number' ? 'decimal' : undefined}
         aria-invalid={missing.has(k) || undefined} style={missing.has(k) ? { borderColor: 'var(--accent)' } : undefined}
         onChange={(e) => set(k, e.target.value)} />

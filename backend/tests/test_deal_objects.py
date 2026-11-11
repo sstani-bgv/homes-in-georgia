@@ -91,7 +91,7 @@ def test_new_object_known_to_matcher_must_be_picked(db, client):
     zaza = make_user(db, "agent", "Zaza Beridze", agent_tag="Zaza")
     pid = _object(db, client, zaza)
     n = db.query(Property).count()
-    for extra in ({"cadastral": "01140500 3017"}, {"ad_link": "https://ss.ge/ss1"},
+    for extra in ({"cadastral": "01 14 05 003 017"}, {"ad_link": "https://ss.ge/ss1"},
                   {"owner_phone": "599203040", "address": "Палиашвили 10"}):
         body = {"new_object": True, "price": 850, "address": "где-то", "rent_from": "2030-01-01", **extra}
         r = client.post("/api/deals", headers=auth(zaza), json=body)

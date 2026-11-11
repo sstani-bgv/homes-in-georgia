@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, object_session
 from app.config import settings as env
 from app.models import FIELD, STAFF, Client, Deal, Evaluation, Lead, Owner, Property, User
 from app.services import evaluations, jobs, users
-from app.services.common import TZ, get_or_404, log_event, now
+from app.services.common import TZ, clean_cadastral, get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
 
@@ -212,6 +212,10 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
             data.setdefault("client_phone", client.phone)
             data.setdefault("client_tg", f"@{client.username}" if client.username else None)
     from app.services import properties
+    if actor is not None and (cad := (data.get("cadastral") or "").strip()):  # the form's code; the object's own one stays
+        known = db.get(Property, int(data["property_id"])) if data.get("property_id") else None
+        if cad != ((known.cadastral_code if known else None) or "").strip():
+            data["cadastral"] = clean_cadastral(cad)
     if data.get("new_object") and not data.get("property_id"):
         data["property_id"] = _new_object(db, data, agent, actor).id
     elif picked and actor is not None and not (lead and lead.property_id == picked):

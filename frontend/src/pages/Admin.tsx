@@ -337,6 +337,12 @@ function SettingsAdmin() {
           <Field label="План сделок в месяц"><Input type="number" value={str('deals_plan')} onChange={(e) => setK('deals_plan', e.target.value)} /></Field>
         </div>
       </Card>
+      <Card label="Объекты" title="Фото и видео">
+        <div className="col">
+          <Switch checked={str('room_picker') !== '0'} onChange={(v) => setK('room_picker', v ? '1' : '0')} label="Выбор комнаты под фото (необязательный)" />
+          <div className="muted" style={{ fontSize: 12 }}>Выключите, чтобы агенты не видели выбор комнаты и «Что снято». Отправку на модерацию комнаты не блокируют в любом случае.</div>
+        </div>
+      </Card>
       <Card label="Главная" title="Метрики дашборда">
         <div className="col">
           {METRICS.map(([k, label]) => <Switch key={k} checked={!!metrics[k]} onChange={(v) => setMetric(k, v)} label={label} />)}

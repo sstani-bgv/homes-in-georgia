@@ -106,6 +106,8 @@ export interface Property {
   exclusive_contract?: { id: number; url: string; created_at: string } | null;
   exclusive_sign_token?: string | null;
   missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
+  room_picker?: boolean; // Управление → Настройки: the per-photo room tag (optional) is shown
+
   id: number;
   listing_id?: string | null;
   source_type?: string | null;

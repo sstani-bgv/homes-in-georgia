@@ -13,6 +13,7 @@ import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from
 import { OwnerSuggest } from '../../components/OwnerSuggest';
 import { levelFor, money, phoneInput, todayStr } from '../../lib/format';
 import { AXES, AXIS_NOTE, PARTICIPATE, PEOPLE_HINT, defaultScenario, peopleRule, type Axis, type DistRow, type Scenario } from '../../lib/scenarios';
+import { cadastralError, cadastralHint, cadastralNorm } from '../../lib/cadastral';
 
 function useDebounced<T>(v: T, ms = 300): T {
   const [d, setD] = useState(v);
@@ -153,7 +154,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   const hasA = Number(f.agent_id) > 0, hasR = !!f.recruit_id;
   const peopleOk = !sc || (rule === 'both' ? hasA && hasR : rule === 'either' ? hasA || hasR : hasA);
   const splitSum = edit ? edit.filter((r) => r.who !== 'platform').reduce((a, r) => a + r.pct, 0) : 0;
-  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from) && peopleOk && splitSum <= 100;
+  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from) && peopleOk && splitSum <= 100 && !cadastralError(f.cadastral, obj?.fields?.cadastral);
   const calcBusy = debouncing || calc.isFetching;
   const missing = [
     !manual && !pid && 'объект (найдите в базе или «Объекта нет в базе»)', manual && !f.address.trim() && 'адрес',
@@ -262,7 +263,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
           </div>
           <div className="form-grid">
             <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} disabled={!manual && (!pid || ro('address'))} /></Field>
-            <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => upd('cadastral', e.target.value)} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
+            <Field label="Кадастровый код" hint={cadastralHint(f.cadastral, obj?.fields?.cadastral)}><Input value={f.cadastral} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral', e.target.value)} onBlur={() => f.cadastral && f.cadastral !== obj?.fields?.cadastral && upd('cadastral', cadastralNorm(f.cadastral))} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
             <Field label="Ссылка на объявление"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} disabled={!manual && (!pid || ro('ad_link'))} /></Field>
             {ro('metro') && <Field label="Метро" className="span2"><Input value={f.metro} disabled /></Field>}
             {f.deal_type === 'rent' && <>

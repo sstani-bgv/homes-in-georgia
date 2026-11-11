@@ -8,13 +8,14 @@ import { errText } from '../components/toast';
 import { Button, ErrorBox, Field, Input, Loading, Seg } from '../components/ui';
 import { LANG_LABEL, buildExclusivePdf, confirmText, tbilisiNow, type Lang } from '../lib/exclusivePdf';
 import { fmtDateTime, phoneInput } from '../lib/format';
+import { cadastralError, cadastralNorm } from '../lib/cadastral';
 
 interface SignView { id: number; address: string; cadastral_code: string; owner_name: string; owner_phone: string; signed_at: string | null }
 
-const UI: Record<Lang, { name: string; pid: string; phone: string; cad: string; sign: string; clear: string; agree: string; send: string; done: string }> = {
-  ru: { name: 'ФИО', pid: 'Личный номер', phone: 'Телефон', cad: 'Кадастровый код', sign: 'Подпишите пальцем', clear: 'Стереть', agree: 'С условиями согласен(на)', send: 'Подписать', done: 'Договор подписан. Спасибо!' },
-  ka: { name: 'სახელი და გვარი', pid: 'პირადი ნომერი', phone: 'ტელეფონი', cad: 'საკადასტრო კოდი', sign: 'მოაწერეთ ხელი თითით', clear: 'წაშლა', agree: 'ვეთანხმები პირობებს', send: 'ხელმოწერა', done: 'ხელშეკრულება ხელმოწერილია. გმადლობთ!' },
-  en: { name: 'Full name', pid: 'Personal ID number', phone: 'Phone', cad: 'Cadastral code', sign: 'Sign with your finger', clear: 'Clear', agree: 'I agree to the terms', send: 'Sign', done: 'Signed. Thank you!' },
+const UI: Record<Lang, { name: string; pid: string; phone: string; cad: string; cadBad: string; sign: string; clear: string; agree: string; send: string; done: string }> = {
+  ru: { name: 'ФИО', pid: 'Личный номер', phone: 'Телефон', cad: 'Кадастровый код', cadBad: 'Проверьте код: цифры через точку, например 01.14.12.003.045', sign: 'Подпишите пальцем', clear: 'Стереть', agree: 'С условиями согласен(на)', send: 'Подписать', done: 'Договор подписан. Спасибо!' },
+  ka: { name: 'სახელი და გვარი', pid: 'პირადი ნომერი', phone: 'ტელეფონი', cad: 'საკადასტრო კოდი', cadBad: 'შეამოწმეთ კოდი: ციფრები წერტილით, მაგ. 01.14.12.003.045', sign: 'მოაწერეთ ხელი თითით', clear: 'წაშლა', agree: 'ვეთანხმები პირობებს', send: 'ხელმოწერა', done: 'ხელშეკრულება ხელმოწერილია. გმადლობთ!' },
+  en: { name: 'Full name', pid: 'Personal ID number', phone: 'Phone', cad: 'Cadastral code', cadBad: 'Check the code: digits separated by dots, e.g. 01.14.12.003.045', sign: 'Sign with your finger', clear: 'Clear', agree: 'I agree to the terms', send: 'Sign', done: 'Signed. Thank you!' },
 };
 
 function SignaturePad({ onInk, padRef, clearLabel }: { onInk: (v: boolean) => void; padRef: React.RefObject<HTMLCanvasElement>; clearLabel: string }) {
@@ -74,7 +75,8 @@ export function ExclusiveSignPage() {
   if (q.error || !q.data) return wrap(<ErrorBox error={q.error} />);
   if (q.data.signed_at) return wrap(<div className="alert alert-ok">{t.done} · {fmtDateTime(q.data.signed_at)}</div>);
   const [title, lines] = confirmText(lang, { ...f, address: q.data.address, date: tbilisiNow().split(',')[0] });
-  const ready = f.full_name.trim() && f.personal_id.trim() && f.phone.trim() && ink && agree;
+  const cadBad = !!cadastralError(f.cadastral_code, q.data?.cadastral_code);
+  const ready = f.full_name.trim() && f.personal_id.trim() && f.phone.trim() && ink && agree && !cadBad;
   return wrap(<>
     <div className="row row-between row-wrap gap-sm">
       <b style={{ color: '#1D3560' }}>Homes in Georgia · Rent in Tbilisi</b>
@@ -84,7 +86,7 @@ export function ExclusiveSignPage() {
       <Field label={t.name}><Input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></Field>
       <Field label={t.pid}><Input inputMode="numeric" value={f.personal_id} onChange={(e) => setF({ ...f, personal_id: e.target.value })} /></Field>
       <Field label={t.phone}><Input type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} /></Field>
-      <Field label={t.cad}><Input value={f.cadastral_code} onChange={(e) => setF({ ...f, cadastral_code: e.target.value })} /></Field>
+      <Field label={t.cad} hint={cadBad ? <span style={{ color: 'var(--accent)' }}>{t.cadBad}</span> : undefined}><Input value={f.cadastral_code} placeholder="01.14.12.003.045" onChange={(e) => setF({ ...f, cadastral_code: e.target.value })} onBlur={() => { if (!cadBad && f.cadastral_code !== q.data?.cadastral_code) setF({ ...f, cadastral_code: cadastralNorm(f.cadastral_code) }); }} /></Field>
     </div>
     <div className="col gap-sm">
       <h2 style={{ fontSize: 18 }}>{title}</h2>

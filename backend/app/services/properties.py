@@ -24,7 +24,8 @@ from app.models import (ARCHIVE_REASONS, FIELD, PUBLICATION_CHANNELS, STAFF, Cha
                         PropertyListing, PropertyMedia, PropertyPublication, User)
 from app.services import jobs
 from app.services import users as users_svc
-from app.services.common import aware, get_or_404, jload, log_event, now, now_text
+from app.services import settings as settings_svc
+from app.services.common import aware, clean_cadastral, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import address_match, extract_phones, norm_address, norm_phone, phone_match
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
@@ -47,6 +48,8 @@ POST_LOCKED = ("deposit", "sale_price")
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif"}
 MAX_UPLOAD = 300 * 1024 * 1024
+# one Telegram album: 9 photos + 1 video per object (the channel post sends ≤10 media)
+MAX_MEDIA = {"photo": 9, "video": 1}
 # the owner's signed exclusive contract (PDF): a property_media row of its own kind, never in a post/album/slideshow
 CONTRACT = "exclusive_contract"
 POST_KINDS = ("photo", "video")
@@ -377,6 +380,8 @@ def _apply(p: Property, data: dict):
             v = aware(v)
         elif k == "post_fields":
             v = clean_post_fields(v)
+        elif k == "cadastral_code":  # only a changed code is checked: old objects keep their legacy codes
+            v = p.cadastral_code if str(v or "").strip() == (p.cadastral_code or "").strip() else clean_cadastral(v)
         elif k in ("rent_from", "rent_to"):
             from app.services.deals import parse_date
             v = parse_date(v) if v not in (None, "") else None
@@ -784,13 +789,22 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
     _require_media_editable(p, actor)
     _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
     pos = db.scalar(select(func.coalesce(func.max(PropertyMedia.position), -1)).where(PropertyMedia.property_id == p.id))
-    out = []
+    have = dict(db.execute(select(PropertyMedia.kind, func.count()).where(PropertyMedia.property_id == p.id)
+                           .group_by(PropertyMedia.kind)).all())
     for name, content in files:
         ext = os.path.splitext(name or "")[1].lower() or ".jpg"
         if ext not in PHOTO_EXT | VIDEO_EXT:
-            raise DomainError("bad_file", f"only photos and videos are allowed: {name}")
+            raise DomainError("bad_file", f"Можно загружать только фото и видео: {name}")
         if len(content) > MAX_UPLOAD:
-            raise DomainError("too_large", f"file is too large: {name}")
+            raise DomainError("too_large", f"Файл слишком большой: {name}")
+        kind = "video" if ext in VIDEO_EXT else "photo"
+        have[kind] = have.get(kind, 0) + 1
+        if have[kind] > MAX_MEDIA[kind]:
+            raise DomainError("media_limit", f"У объекта максимум {MAX_MEDIA['photo']} фото и {MAX_MEDIA['video']} видео "
+                              "(столько уходит в пост Telegram). Удалите лишнее, чтобы добавить новое", 422)
+    out = []
+    for name, content in files:
+        ext = os.path.splitext(name or "")[1].lower() or ".jpg"
         key = f"properties/{p.id}/{uuid.uuid4().hex}{ext}"
         storage.put(key, content)
         storage.put_preview(key, content)
@@ -877,6 +891,8 @@ def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | Non
         raise DomainError("missing_fields", "Заполните ФИО, личный номер и телефон")
     if data.get("consent") is not True:
         raise DomainError("consent_required", "Нужно согласие с условиями")
+    if f["cadastral_code"] != (p.cadastral_code or "").strip():
+        f["cadastral_code"] = clean_cadastral(f["cadastral_code"]) or ""
     m = _store_contract(db, p, pdf, None)
     log_event(db, "property", p.id, "exclusive_contract_signed", None, label=f["full_name"], **f, ip=ip,
               user_agent=(user_agent or "")[:300], pdf_sha256=hashlib.sha256(pdf).hexdigest())
@@ -1622,6 +1638,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                        "preview": f"/api/media/{m.path}?p=1"}
                       for m in media(db, p.id)]
         d["missing"] = missing_fields(p)  # what still blocks «Отправить оператору»
+        d["room_picker"] = settings_svc.get(db, "room_picker") != "0"  # Управление → Настройки; rooms never required
         c = contract(db, p.id) if p.is_exclusive else None
         d["exclusive_contract"] = {"id": c.id, "url": f"/api/media/{c.path}", "created_at": c.created_at} if c else None
         if p.is_exclusive and not c:
