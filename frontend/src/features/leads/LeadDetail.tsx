@@ -1,6 +1,6 @@
 // Lead page: B2–B6 (operator) and C6–C9 (agent). Used by /leads/:id and /m/leads/:id.
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArchiveRestore, CalendarClock, CheckCircle2, FileText, Hand, MessageSquare, Phone, Plus, RotateCcw, Send, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { api } from '../../api';
@@ -10,9 +10,8 @@ import { useAuth } from '../../auth/AuthContext';
 import { CopyPhone, LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Avatar, Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Textarea } from '../../components/ui';
-import { DealForm } from '../deals/DealForm';
 import { DealView } from '../../pages/Deals';
-import { CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, formatPhone, localToIso, money } from '../../lib/format';
+import { CONTRACT_FROM, CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, formatPhone, localToIso, money } from '../../lib/format';
 
 const PETS: Record<string, string> = { none: 'нет', cat: 'кошка', dog: 'собака', other: 'другое' };
 
@@ -33,7 +32,51 @@ export function ProfileView({ profile }: { profile: ClientProfile }) {
 }
 
 const ARCHIVABLE = ['rented', 'refused', 'thinking'];
-const DEAL_STAGES = ['time_chosen', 'viewing_done', 'thinking', 'deal_pending'];  // backend leads.DEAL_STAGES
+
+/** After the viewing (Stanislav 11-11): Просмотр → Договор → Договор подписан → Сделка → Сдано. */
+const STEPS = ['Просмотр', 'Договор', 'Договор подписан', 'Сделка', 'Сдано'];
+function stepOf(lead: Lead): number {
+  if (lead.status === 'rented') return 5;
+  if (lead.status === 'deal_pending' || lead.deal_id) return 3;
+  if (lead.status === 'contract') return ['signed', 'deal'].includes(lead.contract?.status || '') ? 2 : 1;
+  return 0;
+}
+function LeadSteps({ lead }: { lead: Lead }) {
+  const at = stepOf(lead);
+  return (
+    <div className="row row-wrap gap-sm" aria-label="Этапы после просмотра">
+      {STEPS.map((s, i) => (
+        <span key={s} className={`badge ${i < at ? 'badge-ok' : i === at ? 'badge-blue' : 'badge-grey'}`} aria-current={i === at ? 'step' : undefined}>
+          {i < at && <CheckCircle2 size={12} />}{i + 1}. {s}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** «Договор» stage: the contract is drawn up and signed first; «Оформить сделку» appears only once it is signed. */
+function ContractStep({ lead, base }: { lead: Lead; base: string }) {
+  const c = lead.contract?.status === 'closed_no_deal' ? null : lead.contract;  // closed: a new contract is drawn up
+  const signed = c && ['signed', 'deal'].includes(c.status);
+  return (
+    <div className="col">
+      {signed ? (
+        <>
+          <div className="alert alert-ok"><CheckCircle2 size={16} />Договор #{c.id} подписан{c.signed_at ? ` ${fmtDateTime(c.signed_at)}` : ''}. Все его данные перейдут в сделку.</div>
+          <Link className="btn btn-ok btn-lg" to={`${base}/deals/new?lead_id=${lead.id}`}><FileText size={18} />Оформить сделку</Link>
+        </>
+      ) : (
+        <>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {c ? `Договор #${c.id} — черновик. Когда стороны подпишут, отметьте «Договор подписан» в договоре: после этого появится «Оформить сделку».`
+              : 'Договор ещё не составлен: данные заявки и объекта подставятся в мастер договора.'}
+          </div>
+          <Link className="btn btn-primary" to={`${base}/contracts?${c ? `id=${c.id}` : `lead_id=${lead.id}`}`}><FileText size={16} />{c ? 'Открыть договор' : 'Составить договор'}</Link>
+        </>
+      )}
+    </div>
+  );
+}
 
 function useLeadMut() {
   const qc = useQueryClient();
@@ -132,7 +175,7 @@ function AgentOutcome({ lead }: { lead: Lead }) {
   return (
     <div className="col">
       <div className="row row-wrap">
-        <Button variant="ok" onClick={() => m.mutate('rented')} loading={m.isPending && m.variables === 'rented'}>Сдано</Button>
+        <Button variant="ok" onClick={() => m.mutate('rented')} loading={m.isPending && m.variables === 'rented'}>Снимает → договор</Button>
         <Button variant="secondary" onClick={() => setPick('refused')}>Не подошло</Button>
         <Button variant="secondary" onClick={() => m.mutate('thinking')} loading={m.isPending && m.variables === 'thinking'}>Думает</Button>
         <Button variant="ghost" onClick={() => m.mutate('reschedule')} loading={m.isPending && m.variables === 'reschedule'}><RotateCcw size={15} />Перенос</Button>
@@ -168,8 +211,8 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const { user, isStaff } = useAuth();
   const { data: lead, isLoading, error } = useQuery({ queryKey: ['lead', id], queryFn: () => api.leads.get(id), refetchInterval: 20_000 });
   const { done, toast, qc } = useLeadMut();
-  const [params] = useSearchParams();
-  const [dealOpen, setDealOpen] = useState(params.get('deal') === '1');
+  const navigate = useNavigate();
+  const base = compact ? '/m' : '';
   const [assignOpen, setAssignOpen] = useState(false);
   const [listingOpen, setListingOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -177,6 +220,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const take = useMutation({ mutationFn: () => api.leads.take(id), onSuccess: (l) => done(l, 'Заявка ваша'), onError: (e) => toast(errText(e), true) });
   const resched = useMutation({ mutationFn: () => api.leads.reschedule(id), onSuccess: (l) => done(l, 'Агент снова введёт время') , onError: (e) => toast(errText(e), true) });
   const archive = useMutation({ mutationFn: (on: boolean) => api.leads.archive(id, on), onSuccess: (l) => done(l, l.archived_at ? 'Заявка в архиве' : 'Заявка вернулась на доску'), onError: (e) => toast(errText(e), true) });
+  const toContract = useMutation({ mutationFn: () => api.leads.startContract(id), onSuccess: (l) => { done(l); navigate(`${base}/contracts?lead_id=${l.id}`); }, onError: (e) => toast(errText(e), true) });
   const cancel = useMutation({ mutationFn: () => api.leads.cancel(id, reason), onSuccess: (l) => { done(l, 'Заявка отменена'); setCancelOpen(false); }, onError: (e) => toast(errText(e), true) });
 
   if (isLoading) return <Loading />;
@@ -186,7 +230,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const liveContract = lead.contract && lead.contract.status !== 'closed_no_deal' ? lead.contract : null;  // closed: a new one can be made
   const closed = ['rented', 'refused'].includes(lead.status);
   const l = lead.listing;
-  const showOutcome = ['viewing_done', 'deal_pending', 'rented', 'refused', 'thinking'].includes(lead.status) || lead.agent_outcome || lead.client_outcome;
+  const showOutcome = ['viewing_done', 'contract', 'deal_pending', 'rented', 'refused', 'thinking'].includes(lead.status) || lead.agent_outcome || lead.client_outcome;
   const objectHref = lead.property_id ? (compact ? `/m/properties/${lead.property_id}` : `/objects/${lead.property_id}`) : null;
   const ownerPhone = lead.owner?.phone;
 
@@ -216,13 +260,17 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
                 <CopyPhone phone={ownerPhone} />
               </div>
             )}
-            {(isAgent || isStaff) && CONTRACT_STAGES.includes(lead.status) && (
-              <Link className="btn btn-secondary btn-lg" to={`${compact ? '/m' : ''}/contracts?${liveContract ? `id=${liveContract.id}` : `lead_id=${lead.id}`}`}><FileText size={18} />{liveContract ? `Договор: ${liveContract.status_label}` : 'Оформить договор'}</Link>
+            {(isAgent || isStaff) && CONTRACT_FROM.includes(lead.status) && !liveContract && (
+              <Button size="lg" loading={toContract.isPending} onClick={() => toContract.mutate()}><FileText size={18} />Составить договор</Button>
+            )}
+            {(isAgent || isStaff) && liveContract && (
+              <Link className="btn btn-secondary btn-lg" to={`${base}/contracts?id=${liveContract.id}`}><FileText size={18} />Договор: {liveContract.status_label}</Link>
             )}
             {isStaff && lead.status === 'new' && <Button size="lg" loading={take.isPending} onClick={() => take.mutate()}><Hand size={18} />Взять</Button>}
             {isStaff && !closed && <Button size={lead.status === 'operator_taken' ? 'lg' : undefined} variant={lead.status === 'operator_taken' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}><UserPlus size={16} />{lead.agent ? 'Сменить агента' : 'Назначить агента'}</Button>}
           </div>
         </div>
+        {(CONTRACT_STAGES.includes(lead.status) || lead.deal_id) && <><div className="divider" /><LeadSteps lead={lead} /></>}
         <div className="divider" />
         <div className="row row-wrap gap-lg" style={{ fontSize: 13 }}>
           <span><span className="label">Оператор </span><b>{lead.operator?.name || '—'}</b></span>
@@ -247,15 +295,11 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
             <Card label="Шаг C9a" title="Итог просмотра"><AgentOutcome lead={lead} /></Card>
           )}
           {showOutcome && <Card label="Шаг B6" title="Итог: агент и клиент"><OutcomeCompare lead={lead} /></Card>}
-          {(isAgent || isStaff) && !lead.deal_id && !dealOpen && lead.status !== 'deal_pending' && DEAL_STAGES.includes(lead.status) && (
-            <Button variant="secondary" onClick={() => setDealOpen(true)}><FileText size={16} />Оформить сделку</Button>
-          )}
-          {(lead.deal_id || ((lead.status === 'deal_pending' || (dealOpen && DEAL_STAGES.includes(lead.status))) && (isAgent || isStaff))) && (
-            <Card label="Сделка" title={lead.deal_id ? `Сделка #${lead.deal_id}` : 'Форма сделки'}>
-              {lead.deal_id
-                ? <DealView id={lead.deal_id} onClose={() => qc.invalidateQueries({ queryKey: ['lead', lead.id] })} />
-                : <DealForm leadId={lead.id} onDone={() => { qc.invalidateQueries({ queryKey: ['lead', lead.id] }); qc.invalidateQueries({ queryKey: ['leads'] }); toast('Сделка сохранена, ждёт подтверждения оператора'); }} />}
-            </Card>
+          {(isAgent || isStaff) && lead.status === 'contract' && <Card label="Этап" title="Договор"><ContractStep lead={lead} base={base} /></Card>}
+          {lead.deal_id ? (
+            <Card label="Сделка" title={`Сделка #${lead.deal_id}`}><DealView id={lead.deal_id} onClose={() => qc.invalidateQueries({ queryKey: ['lead', lead.id] })} /></Card>
+          ) : lead.status === 'deal_pending' && (isAgent || isStaff) && (
+            <Link className="btn btn-ok btn-lg" to={`${base}/deals/new?lead_id=${lead.id}`}><FileText size={18} />Оформить сделку</Link>
           )}
           {(isAgent || isStaff) && (lead.archived_at || ARCHIVABLE.includes(lead.status)) && (
             <div className="row row-wrap">

@@ -6,7 +6,7 @@ import { ArrowLeft, Building2, CircleUser, ClipboardList, Handshake, Inbox, Plus
 import type { ReportKind } from '../api/types';
 import { Card, Empty, Seg } from '../components/ui';
 import { DealForm } from '../features/deals/DealForm';
-import { LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
+import { LeadStages } from '../features/leads/LeadBoard';
 import { BrandMark, QuickAdd } from '../layout/AppLayout';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList } from '../features/properties/lists';
@@ -63,7 +63,7 @@ export function MLeads() {
   return (
     <div className="col">
       <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
-      {view === 'board' ? <LeadBoard base="/m" /> : <MyLeadsList base="/m" />}
+      <LeadStages key={view} base="/m" list={view === 'list'} />
     </div>
   );
 }
@@ -89,7 +89,7 @@ export function MDeal() {
   const [params] = useSearchParams();
   const leadId = Number(params.get('lead') || params.get('lead_id')) || undefined;
   const navigate = useNavigate();
-  return <DealForm key={leadId ?? 'new'} leadId={leadId} onDone={(d) => navigate(`/m/deals/${d.id}`, { replace: true })} />;
+  return <DealForm key={leadId ?? 'new'} leadId={leadId} onDone={(d) => navigate(leadId ? `/m/leads/${leadId}` : `/m/deals/${d.id}`, { replace: true })} />;
 }
 /** /m/deals/<id> — deal card with T0/T14 forms (bot buttons «T0: оценить сделку», «T14: оценить»). ?eval=t0|t14 opens the form. */
 export function MDealView() {

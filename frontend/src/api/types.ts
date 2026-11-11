@@ -288,7 +288,7 @@ export interface Demand {
 
 export type LeadStatus =
   | 'new' | 'operator_taken' | 'agent_assigned' | 'slots_sent' | 'time_chosen' | 'viewing_done'
-  | 'deal_pending' | 'rented' | 'refused' | 'thinking';
+  | 'contract' | 'deal_pending' | 'rented' | 'refused' | 'thinking';
 
 export interface Slot { id: number; starts_at: string; chosen: boolean }
 
@@ -362,6 +362,18 @@ export interface Contract extends ContractSummary {
 export interface ContractIn {
   kind: Contract['kind']; lang: Contract['lang']; html: string; title?: string; cadastral?: string; address?: string;
   client_name?: string; owner_name?: string; lead_id?: number | null; deal_id?: number | null; property_id?: number | null;
+  /** the wizard's CxData: the deal page prefills from the signed contract */
+  data?: object;
+}
+
+/** GET /leads/{id}/deal-prefill: deal form fields from the signed contract (backend deals.prefill_from_contract) */
+export interface DealPrefill {
+  contract: ContractSummary | null;
+  fields: {
+    deal_type?: 'rent' | 'sale'; sub_type?: string | null; price?: number; address?: string; cadastral?: string;
+    client_name?: string; owner_name?: string; client_birth?: string; owner_birth?: string; rent_from?: string; rent_to?: string;
+    terms?: Partial<Record<'deposit_usd' | 'pay_day' | 'rent_duration_months' | 'transfer_date' | 'pet_deposit' | 'timestamp', string>>;
+  };
 }
 
 /** GET /leads/{id}/contract: ContractWizard prefill (data keys = CxData). */

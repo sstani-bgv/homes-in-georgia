@@ -200,8 +200,8 @@ export function DealsPage({ newDeal }: { newDeal?: boolean }) {
   if (newDeal) {
     return (
       <>
-        <PageHead label="Сделки · C9b" title="Форма сделки" />
-        <DealForm leadId={leadId} onDone={(d) => navigate(`/deals?open=${d.id}`)} />
+        <PageHead label={leadId ? `Заявка #${leadId} · Сделка` : "Сделки · C9b"} title="Оформить сделку" />
+        <DealForm leadId={leadId} onDone={(d) => navigate(leadId ? `/leads/${leadId}` : `/deals?open=${d.id}`)} />
       </>
     );
   }

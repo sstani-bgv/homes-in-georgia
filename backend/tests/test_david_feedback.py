@@ -110,8 +110,10 @@ def test_deal_keeps_owner_and_cadastral_on_the_object_and_contract_gets_them(db,
     op, ag = make_user(db, "operator"), make_user(db, "agent")
     lead = leads.create_from_like(db, make_client(db).id, make_client_listing(db).id)
     leads.assign_agent(db, lead.id, ag.id, op)
-    lead.status = "time_chosen"
+    lead.status = "contract"
     db.commit()
+    from tests.test_lead_stages import signed_contract
+    signed_contract(db, lead, data={})
     r = client.post("/api/deals", headers=auth(ag), json={
         "lead_id": lead.id, "property_id": lead.property_id, "price": 850, "owner_name": "Гиорги",
         "owner_phone": "+995 555 12 34 56", "cadastral": "01.14.12.003.045", "owner_birth": "1980-05-01",

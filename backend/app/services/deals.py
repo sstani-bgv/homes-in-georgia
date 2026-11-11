@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, object_session
 
 from app.config import settings as env
 from app.models import FIELD, STAFF, Client, Deal, Evaluation, Lead, Owner, Property, User
-from app.services import evaluations, jobs, users
+from app.services import evaluations, jobs, leads, users
 from app.services.common import TZ, clean_cadastral, get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
@@ -204,8 +204,12 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
         agent = agent or (db.get(User, lead.agent_id) if lead.agent_id else None)
         data.setdefault("property_id", lead.property_id)
         staff = actor is None or actor.role in STAFF
-        if not staff and lead.status not in ("time_chosen", "viewing_done", "thinking", "deal_pending"):
-            raise DomainError("bad_status", "deal can be filled only after the viewing time is chosen")
+        # «Договор» → «Сделка» (Stanislav 11-11): the deal form opens once the lead's contract is signed
+        signed = leads.signed_contract(db, lead) is not None
+        if actor is not None and lead.status == "contract" and not signed:
+            raise DomainError("contract_not_signed", "Сделку оформляют после подписания договора", 409)
+        if not staff and lead.status != "deal_pending" and not (signed and lead.status in leads.DEAL_STAGES):
+            raise DomainError("bad_status", "deal is filled after the contract is signed (lead stage «Договор»)")
         client = db.get(Client, lead.client_id)
         if client and (staff or lead.contacts_shared_at):
             data.setdefault("client_name", client.name)
@@ -286,7 +290,6 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     if t0 and any(t0.get(k) not in (None, "") for k in ("h2o_client", "h2o_owner", "h2o_process", "result")):
         t0_ev = evaluations.create(db, {"deal_id": deal.id, "kind": "t0", "author": "agent", **t0}, actor, commit=False)
     if lead:
-        from app.services import leads
         leads.attach_deal(db, lead, deal.id, actor)
     log_event(db, "deal", deal.id, "created", actor, price=nums["price"], commission=nums["commission_total"])
     if commit:
@@ -294,6 +297,28 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
         if t0_ev is not None:
             evaluations.notify_if_alarming(t0_ev)
     return deal
+
+
+def _num_or_none(v) -> float | None:
+    try:
+        return float(str(v).replace(" ", "").replace(",", ".")) if str(v or "").strip() else None
+    except ValueError:
+        return None
+
+
+def prefill_from_contract(kind: str | None, data: dict | None) -> dict:
+    """The signed contract's wizard data (CxData keys) → deal form fields, so nothing is typed twice. Terms that the
+    deal has no column for (deposit, pay day, term) come back under `terms` for the deal page to show."""
+    d, sale = data or {}, kind == "sale"
+    out = {"deal_type": "sale" if sale else "rent", "sub_type": None if sale else "commercial" if kind == "comm" else "long",
+           "price": _num_or_none(d.get("sale_price" if sale else "price_usd")),
+           "address": d.get("street_house"), "cadastral": d.get("cadastral_code"),
+           "client_name": d.get("client_full_name"), "owner_name": d.get("owner_full_name"),
+           "client_birth": d.get("client_birth_day"), "owner_birth": d.get("owner_birth_day"),
+           "rent_from": None if sale else d.get("start_rent"), "rent_to": None if sale else d.get("end_rent")}
+    out = {k: v.strip() if isinstance(v, str) else v for k, v in out.items()}
+    terms = {k: d.get(k) for k in ("deposit_usd", "pay_day", "rent_duration_months", "transfer_date", "pet_deposit", "timestamp")}
+    return {**{k: v for k, v in out.items() if v not in (None, "")}, "terms": {k: v for k, v in terms.items() if v not in (None, "")}}
 
 
 def _new_object(db: Session, data: dict, agent: User | None, actor: User | None) -> Property:

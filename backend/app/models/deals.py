@@ -110,5 +110,6 @@ class Contract(Base):
     share_token = Column(Text, unique=True)
     share_expires_at = Column(DateTime(timezone=True))
     drive_file_id = Column(Text)
+    data = Column(JSONB)  # the wizard's fields (frontend CxData): the deal page prefills from the signed contract (0008)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

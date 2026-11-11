@@ -392,6 +392,17 @@ a.brand, a.brand:hover { color: inherit; text-decoration: none; }
 .calc-box .calc-row:last-child { border-bottom: 0; }
 .calc-box .calc-row strong { font-weight: 800; }
 .calc-big { font-size: 30px; font-weight: 900; }
+/* deal page: the money on top, sticky under the top bar (desktop) / the mobile header */
+.deal-money { position: sticky; top: var(--deal-money-top, 64px); z-index: 15; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: var(--r); background: var(--gradient); color: #fff; box-shadow: var(--shadow-sm); }
+.deal-money-tile { flex: 1 1 120px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,.12); }
+.deal-money-tile .label { color: rgba(255,255,255,.75); }
+.deal-money-tile b { font-size: 20px; font-weight: 900; }
+.deal-money-tile small { font-size: 11px; opacity: .75; }
+.deal-money-tile .input { margin-top: 4px; height: 30px; padding: 4px 8px; background: #fff; color: var(--ink); }
+.deal-money .text-red { color: #ffd0d0; }
+.deal-side { position: sticky; top: 200px; }
+@media (max-width: 1099px) { .deal-side { position: static; } }
+@media (max-width: 600px) { .deal-money { --deal-money-top: 60px; padding: 8px; gap: 6px; } .deal-money-tile { flex-basis: calc(50% - 6px); padding: 5px 8px; } .deal-money-tile b { font-size: 17px; } }
 .side-by-side { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .outcome-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--brand-tint); }
 .slot-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 12px; }

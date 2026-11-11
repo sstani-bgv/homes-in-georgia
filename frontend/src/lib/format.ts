@@ -15,15 +15,17 @@ export const PROPERTY_BOARD: PropertyStatus[] = [
 
 export const LEAD_STATUS: Record<LeadStatus, string> = {
   new: 'Новая', operator_taken: 'У оператора', agent_assigned: 'Агент назначен', slots_sent: 'Время отправлено',
-  time_chosen: 'Время выбрано', viewing_done: 'Просмотр', deal_pending: 'Сделка', rented: 'Сдано', refused: 'Отказ', thinking: 'Думает',
+  time_chosen: 'Время выбрано', viewing_done: 'Просмотр', contract: 'Договор', deal_pending: 'Сделка', rented: 'Сдано', refused: 'Отказ', thinking: 'Думает',
 };
 export const LEAD_BOARD: LeadStatus[] = [
-  'new', 'operator_taken', 'agent_assigned', 'slots_sent', 'time_chosen', 'viewing_done', 'deal_pending', 'rented', 'refused', 'thinking',
+  'new', 'operator_taken', 'agent_assigned', 'slots_sent', 'time_chosen', 'viewing_done', 'thinking', 'contract', 'deal_pending', 'rented', 'refused',
 ];
 /** operator stages: an agent's board starts at agent_assigned (backend api/funnel2.py OPERATOR_STAGES) */
 export const OPERATOR_STAGES: LeadStatus[] = ['new', 'operator_taken'];
 /** leads a contract is drawn up for: «Оформить договор» in the lead card and the picker in /contracts */
-export const CONTRACT_STAGES: LeadStatus[] = ['time_chosen', 'viewing_done', 'thinking', 'deal_pending', 'rented'];
+export const CONTRACT_STAGES: LeadStatus[] = ['time_chosen', 'viewing_done', 'thinking', 'contract', 'deal_pending', 'rented'];
+/** «Составить договор» moves the lead to «Договор» from these (backend leads.CONTRACT_FROM) */
+export const CONTRACT_FROM: LeadStatus[] = ['time_chosen', 'viewing_done', 'thinking'];
 
 export const OUTCOME_LABEL: Record<string, string> = {
   rented: 'Снимает', refused: 'Не подошло', thinking: 'Думает', reschedule: 'Перенос',

@@ -387,7 +387,7 @@ on('POST', '/leads/:id/outcome', (m, b) => {
   const u = currentUser(); const l = getLead(Number(m[1]));
   l.agent_outcome = b.outcome as string;
   if (b.reason) l.refusal_reason = b.reason as string;
-  if (b.outcome === 'rented') setLeadStatus(l, 'deal_pending');
+  if (b.outcome === 'rented') setLeadStatus(l, 'contract');
   else if (b.outcome === 'refused') setLeadStatus(l, 'refused');
   else if (b.outcome === 'thinking') setLeadStatus(l, 'thinking');
   else if (b.outcome === 'reschedule') setLeadStatus(l, 'agent_assigned', 'agent_slots');

@@ -1,5 +1,5 @@
 // C9b deal form with live commission calc (/api/deals/calc) and T0 evaluation (as in the old #Rented form).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink, Search } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
@@ -31,6 +31,21 @@ export function H2O({ label, value, onChange }: { label: string; value: number |
   );
 }
 
+/** A $ field that commits on blur / Enter (the calc behind it is debounced; typing must not be overwritten). */
+function AmountInput({ value, onCommit, label }: { value: number | null | undefined; onCommit: (v: number) => void; label: string }) {
+  const [s, setS] = useState('');
+  const [focus, setFocus] = useState(false);
+  const shown = focus ? s : value == null ? '' : String(value);
+  const commit = () => { setFocus(false); const n = Number(s.replace(',', '.')); if (s.trim() !== '' && Number.isFinite(n) && n >= 0 && n !== value) onCommit(n); };
+  return (
+    <input className="input input-sm num" aria-label={label} inputMode="decimal" value={shown}
+      onFocus={() => { setFocus(true); setS(value == null ? '' : String(value)); }} onChange={(e) => setS(e.target.value)}
+      onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
+  );
+}
+const notSignedFlag = (status?: string, pre?: { contract: unknown }) => status === 'contract' && !!pre && !pre.contract;
+const r2 = (x: number) => Math.round(x * 100) / 100;
+
 // staff's manual rows → the API split: the platform is the remainder
 const splitOf = (rows: DistRow[] | null) => rows && [...rows.filter((r) => r.who !== 'platform'), { who: 'platform' as const, role: 'Платформа', pct: 100 - rows.filter((r) => r.who !== 'platform').reduce((a, r) => a + r.pct, 0) }];
 
@@ -43,6 +58,9 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: FIELD_FILTER, active: true }), enabled: isStaff });
   const recruits = useQuery({ queryKey: ['users', 'recruits'], queryFn: () => api.users.list({ role: 'recruit', active: true }) });
   const lead = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.leads.get(leadId!), enabled: !!leadId });
+  // the signed contract's data: everything typed there comes into the deal (Stanislav 11-11)
+  const pre = useQuery({ queryKey: ['deal-prefill', leadId], queryFn: () => api.leads.dealPrefill(leadId!), enabled: !!leadId });
+  const prefilled = useRef(false);
 
   const [f, setF] = useState({
     agent_id: user?.id ?? 0, recruit_id: '' as string | number, deal_type: 'rent' as 'rent' | 'sale', sub_type: 'long',
@@ -78,7 +96,10 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
 
   useEffect(() => {
     const l = lead.data;
-    if (!l) return;
+    if (!l || pre.isLoading || prefilled.current) return;
+    prefilled.current = true;  // once: a refetch must not wipe what was typed
+    const { terms: _t, client_birth: _cb, owner_birth: _ob, ...cx } = pre.data?.fields || {};
+    const sub = cx.sub_type || 'long';
     setF((x) => ({
       ...x,
       agent_id: l.agent?.id ?? l.agent_id ?? x.agent_id,
@@ -88,10 +109,13 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       client_phone: l.client?.phone || x.client_phone,
       client_tg: l.client?.username ? `@${l.client.username}` : x.client_tg,
       ad_link: l.listing?.url || x.ad_link,
+      ...Object.fromEntries(Object.entries(cx).filter(([, v]) => v != null && v !== '')),
+      sub_type: sub,
+      commission_pct: cx.deal_type === 'sale' ? 3 : sub === 'commercial' ? 100 : x.commission_pct,
     }));
     // a lead on a channel post usually has no object in the base yet: start with the object typed by hand (from the ad)
     if (l.property_id) setPid(l.property_id); else setManual(true);
-  }, [lead.data]);
+  }, [lead.data, pre.data, pre.isLoading]);
 
   const agentList = itemsOf(agents.data);
   useEffect(() => {
@@ -129,6 +153,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
         client_name: str(f.client_name), client_phone: str(f.client_phone), client_tg: str(f.client_tg),
         owner_name: str(f.owner_name), owner_phone: str(f.owner_phone), owner_id: f.owner_id || null,
         rent_from: f.deal_type === 'rent' ? f.rent_from || null : null, rent_to: f.deal_type === 'rent' ? f.rent_to || null : null,
+        client_birth: pre.data?.fields.client_birth || null, owner_birth: pre.data?.fields.owner_birth || null,
       };
       const d = await api.deals.create(body);
       if (t0.c !== null || t0.o !== null || t0.p !== null) {
@@ -155,14 +180,60 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   const hasA = Number(f.agent_id) > 0, hasR = !!f.recruit_id;
   const peopleOk = !sc || (rule === 'both' ? hasA && hasR : rule === 'either' ? hasA || hasR : hasA);
   const splitSum = edit ? edit.filter((r) => r.who !== 'platform').reduce((a, r) => a + r.pct, 0) : 0;
-  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from) && peopleOk && splitSum <= 100 && !cadastralError(f.cadastral, obj?.fields?.cadastral);
+  const valid = !edit?.some((x) => x.pct < 0) && !notSignedFlag(lead.data?.status, pre.data) && objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from) && peopleOk && splitSum <= 100 && !cadastralError(f.cadastral, obj?.fields?.cadastral);
   const calcBusy = debouncing || calc.isFetching;
   const missing = [
     !manual && !pid && 'объект (найдите в базе или «Объекта нет в базе»)', manual && !f.address.trim() && 'адрес',
-    !(Number(f.price) > 0) && 'цена', !peopleOk && (rule === 'both' ? 'агента и рекрута (второго участника)' : 'агента или второго участника'), splitSum > 100 && 'доли не больше 100%', !(Number(f.agent_id) > 0) && 'агент', f.deal_type === 'rent' && !f.rent_from && 'дата начала аренды',
+    !(Number(f.price) > 0) && 'цена', !peopleOk && (rule === 'both' ? 'агента и рекрута (второго участника)' : 'агента или второго участника'), splitSum > 100 && 'доли не больше 100%', edit?.some((x) => x.pct < 0) && 'доли не меньше 0', !(Number(f.agent_id) > 0) && 'агент', f.deal_type === 'rent' && !f.rent_from && 'дата начала аренды',
   ].filter(Boolean) as string[];
 
+  const comm = r?.commission_total || 0;
+  const badRows = !!edit?.some((x) => x.pct < 0);
+  const distSum = r?.distribution ? r2(r.distribution.reduce((a, x) => a + x.pct, 0)) : 0;
+  // staff types a row's $: its % of the commission; the platform takes the rest (or the agent, when the platform is typed)
+  const setRowAmount = (i: number, amount: number) => {
+    if (!r?.distribution || !comm) return;
+    const rows = (edit ?? r.distribution.map(({ who, role, pct }) => ({ who, role, pct }))).map((x, j) => (j === i ? { ...x, pct: r2((amount / comm) * 100) } : x));
+    const absorb = rows.findIndex((x) => x.who === (rows[i].who === 'platform' ? 'agent' : 'platform'));
+    if (absorb >= 0) rows[absorb] = { ...rows[absorb], pct: r2(100 - rows.reduce((a, x, j) => (j === absorb ? a : a + x.pct), 0)) };
+    setEdit(rows);
+  };
+  const terms = pre.data?.fields.terms || {};
+  const cx = pre.data?.contract;
+  const notSigned = notSignedFlag(lead.data?.status, pre.data);
+
   return (
+    <div className="col gap-lg">
+      <div className="deal-money" role="region" aria-label="Деньги по сделке">
+        <div className="deal-money-tile">
+          <span className="label">Клиент платит</span>
+          <b className="num">{r ? money(r.commission_total) : '—'}</b>
+          <small>{Number(f.price) > 0 ? `${f.commission_pct}% от ${money(Number(f.price))}` : 'введите цену'}</small>
+          {isStaff && r && <AmountInput label="Клиент платит, $" value={r.commission_total} onCommit={(v) => upd('commission_total', v)} />}
+        </div>
+        {r?.distribution?.map((x, i) => (
+          <div key={i} className="deal-money-tile">
+            <span className="label">{x.role}</span>
+            <b className="num">{money(x.amount)}</b>
+            <small>{r2(x.pct)}%</small>
+            {isStaff && <AmountInput label={`${x.role}, $`} value={x.amount} onCommit={(v) => setRowAmount(i, v)} />}
+          </div>
+        ))}
+        <div className="deal-money-tile">
+          <span className="label">Итого</span>
+          <b className={`num ${r && (Math.abs(distSum - 100) > 0.01 || badRows) ? 'text-red' : ''}`}>{r ? `${distSum}%` : '—'}</b>
+          <small>{calcBusy ? 'пересчёт…' : badRows ? 'доля < 0' : edit ? 'вручную' : 'по сценарию'}</small>
+          {isStaff && (edit || f.commission_total !== '') && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setEdit(null); upd('commission_total', ''); }}>Сбросить</button>}
+        </div>
+      </div>
+      {notSigned && <div className="alert alert-warn">Договор по заявке #{leadId} ещё не подписан: сделку оформляют после «Договор подписан».</div>}
+      {cx && (
+        <div className="alert alert-ok" style={{ fontSize: 13 }}>
+          <CheckCircle2 size={16} />
+          <span>Данные из договора #{cx.id}{cx.signed_at ? ` (подписан ${cx.signed_at.slice(0, 10).split('-').reverse().join('.')})` : ''} подставлены.
+            {[terms.deposit_usd && `Депозит $${terms.deposit_usd}`, terms.pay_day && `оплата ${terms.pay_day}-го числа`, terms.rent_duration_months && `срок ${terms.rent_duration_months} мес`, terms.transfer_date && `передача ${terms.transfer_date}`].filter(Boolean).map((t) => ` ${t}.`).join('')}</span>
+        </div>
+      )}
     <div className="split">
       <div className="col gap-lg">
         <Card label="1" title={leadId ? `База расчёта · заявка #${leadId}` : 'База расчёта'}>
@@ -291,15 +362,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
           </div>
         </Card>
       </div>
-      <div className="col gap-lg" style={{ position: 'sticky', top: 80 }}>
-        <div className="calc-box">
-          <div className="row row-between"><span className="label" style={{ color: 'rgba(255,255,255,.7)' }}>Ваша доля</span>{r?.distribution && <span className="badge" style={{ background: 'rgba(255,255,255,.18)', color: '#fff' }}>Итого {Math.round(r.distribution.reduce((a, x) => a + x.pct, 0))}%</span>}</div>
-          <div className="calc-big num">{r ? money(r.agent_amount) : '—'}</div>
-          <div className="divider" style={{ background: 'rgba(255,255,255,.15)' }} />
-          <div className="calc-row"><span>Комиссия</span><strong>{r ? money(r.commission_total) : '—'}</strong></div>
-          {r?.distribution?.map((x, i) => <div key={i} className="calc-row"><span>{x.role} · {x.pct}%</span><strong>{money(x.amount)}</strong></div>)}
-          {calcBusy && <div style={{ fontSize: 11, opacity: .6, marginTop: 6 }}>пересчёт…</div>}
-        </div>
+      <div className="col gap-lg deal-side">
         {isStaff && r?.distribution && (
           <Card label="Оператор" title="Ручная правка распределения">
             <div className="col gap-sm">
@@ -316,6 +379,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
         {missing.length > 0 && <div className="alert alert-warn" style={{ fontSize: 13 }}>Чтобы отправить, заполните: {missing.join(', ')}</div>}
         <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором заявка станет «Сдано», бот поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>
       </div>
+    </div>
     </div>
   );
 }

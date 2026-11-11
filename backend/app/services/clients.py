@@ -11,7 +11,7 @@ from app.telegram import texts
 
 LEAD_STATUS = {"new": "Новая", "operator_taken": "У оператора", "agent_assigned": "Назначен агент", "slots_sent": "Время отправлено",
                "time_chosen": "Просмотр назначен", "viewing_done": "Просмотр прошёл", "thinking": "Думает",
-               "deal_pending": "Оформление сделки", "rented": "Сдано", "refused": "Отказ"}
+               "contract": "Договор", "deal_pending": "Оформление сделки", "rented": "Сдано", "refused": "Отказ"}
 REASON = {k: v["ru"] for k, v in texts.REFUSAL.items()} | {"cancelled": "Отменена оператором"}
 OUTCOME = {"rented": "снимает", "refused": "отказ", "thinking": "думает", "reschedule": "перенос"}
 LABEL = {"client": "Клиент", "bot": "Бот", "operator": "Оператор", "agent": "Агент", "system": "Система"}
@@ -174,7 +174,7 @@ def status_line(leads: list[Lead], users: dict, deals: list[Deal], listings: dic
     s = {"new": "заявка ждёт оператора", "operator_taken": "оператор подбирает агента",
          "agent_assigned": f"агент {ag} договаривается с собственником", "slots_sent": "выбирает время просмотра",
          "time_chosen": f"ждёт просмотра {when} с агентом {ag}", "viewing_done": f"просмотр с агентом {ag} прошёл, ждём итог",
-         "thinking": "думает после просмотра", "deal_pending": f"оформляется сделка{f' #{deal.id}' if deal else ''}",
+         "thinking": "думает после просмотра", "contract": "готовится договор аренды", "deal_pending": f"оформляется сделка{f' #{deal.id}' if deal else ''}",
          "rented": f"снял квартиру{f' (сделка #{deal.id})' if deal else ''}",
          "refused": f"отказ: {REASON.get(lead.refusal_reason, lead.refusal_reason or 'без причины')}"}.get(lead.status, lead.status)
     obj = f"объект #{lead.property_id}, " if lead.property_id else ""

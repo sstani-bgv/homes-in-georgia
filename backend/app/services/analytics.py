@@ -94,7 +94,7 @@ def funnel(db: Session, date_from: date | None = None, date_to: date | None = No
     leads = dict(db.execute(lq).all())
     props = dict(db.execute(pq).all())
     order = ["new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done", "thinking",
-             "deal_pending", "rented", "refused"]
+             "contract", "deal_pending", "rented", "refused"]
     reached = {}
     for i, st in enumerate(order[:-1]):  # leads that reached at least this stage (refused counted separately)
         reached[st] = sum(n for s, n in leads.items() if s in order[i:-1])

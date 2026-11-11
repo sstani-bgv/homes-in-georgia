@@ -18,8 +18,10 @@ from app.telegram import notify, texts
 log = logging.getLogger(__name__)
 
 ACTIVE = ("new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done", "thinking",
-          "deal_pending")
-DEAL_STAGES = ("time_chosen", "viewing_done", "thinking", "deal_pending")  # a deal may be filled from these
+          "contract", "deal_pending")
+# after the viewing: «Договор» (contract drawn up, then signed) → «Сделка» (deal form, operator confirms) → rented
+CONTRACT_FROM = ("time_chosen", "viewing_done", "thinking")
+DEAL_STAGES = CONTRACT_FROM + ("contract", "deal_pending")  # attach_deal moves these to deal_pending
 BOARD_COLUMNS = ACTIVE + ("rented", "refused")
 OUTCOMES = {"client": ("rented", "refused", "thinking"), "agent": ("rented", "refused", "thinking", "reschedule")}
 REFUSAL_REASONS = ("price", "location", "condition", "other")
@@ -489,7 +491,7 @@ def add_slots(db: Session, lead_id: int, starts: list[datetime], actor: User | N
 
 def set_outcome(db: Session, lead_id: int, by: str, outcome: str, reason: str | None = None,
                 actor: User | None = None) -> Lead:
-    """A5a / C9a. Agent "rented" → deal_pending (deal form C9b); refused → refused (+reason ask);
+    """A5a / C9a. Agent "rented" → contract (then the deal form C9b once it is signed); refused → refused (+reason ask);
     thinking → remind tomorrow; reschedule → slots again."""
     if by not in OUTCOMES or outcome not in OUTCOMES[by]:
         raise DomainError("bad_outcome", f"outcome for {by} must be one of {OUTCOMES.get(by)}")
@@ -499,7 +501,7 @@ def set_outcome(db: Session, lead_id: int, by: str, outcome: str, reason: str | 
     if outcome == "reschedule":
         db.rollback()
         return request_reschedule(db, lead_id, "agent", actor)
-    _require_status(lead, "time_chosen", "viewing_done", "thinking", "deal_pending", "refused")
+    _require_status(lead, "time_chosen", "viewing_done", "thinking", "contract", "deal_pending", "refused")
     if lead.status == "refused" and (_was_cancelled(db, lead) or (by == "client" and outcome == "rented")):
         raise DomainError("bad_status", "lead is closed")
     if by == "client":
@@ -510,17 +512,17 @@ def set_outcome(db: Session, lead_id: int, by: str, outcome: str, reason: str | 
         lead.refusal_reason = reason
     ask_reason = False
     if outcome == "refused":
-        if lead.status != "deal_pending" or by == "agent":
+        if lead.status not in ("contract", "deal_pending") or by == "agent":
             _touch(lead, "refused")
         ask_reason = by == "client" and not reason
         jobs.cancel(db, "thinking_followup", lead.id)
     elif outcome == "thinking":
-        if lead.status not in ("deal_pending", "refused"):
+        if lead.status not in ("contract", "deal_pending", "refused"):
             _touch(lead, "thinking")
         jobs.schedule(db, "thinking_followup", lead.id, now() + timedelta(days=1), {"by": by})
-    elif outcome == "rented":
-        if by == "agent" or lead.status == "refused":
-            _touch(lead, "deal_pending")
+    elif outcome == "rented":  # the contract comes first (Stanislav 11-11): «Договор», then «Сделка»
+        if (by == "agent" or lead.status == "refused") and lead.status not in ("contract", "deal_pending"):
+            _touch(lead, "contract")
         jobs.cancel(db, "thinking_followup", lead.id)
     if lead.status != "time_chosen":
         jobs.cancel(db, "viewing_reminder", lead.id)
@@ -545,6 +547,27 @@ def mark_viewing_done(db: Session, lead_id: int) -> Lead | None:
     return lead
 
 
+def signed_contract(db: Session, lead: Lead):
+    """The lead's live contract once «Договор подписан» (contracts lifecycle draft → signed → deal | closed_no_deal)."""
+    from app.services import contracts  # noqa: PLC0415 (contracts → jobs; leads stays import-light)
+    c = contracts.for_lead(db, lead.id)
+    return c if c is not None and c.status in ("signed", "deal") else None
+
+
+def start_contract(db: Session, lead_id: int, actor: User | None) -> Lead:
+    """«Составить договор» after the viewing: the lead moves to «Договор» (the wizard opens prefilled from the lead)."""
+    lead = _lead(db, lead_id, lock=True)
+    _require_agent_or_staff(lead, actor)
+    if lead.status != "contract":
+        _require_status(lead, *CONTRACT_FROM)
+        _touch(lead, "contract")
+        jobs.cancel(db, "viewing_reminder", lead.id)
+        jobs.cancel(db, "thinking_followup", lead.id)
+        _event(db, lead, "contract_started", actor)
+    db.commit()
+    return lead
+
+
 def attach_deal(db: Session, lead: Lead, deal_id: int, actor: User | None):
     lead.deal_id = deal_id
     if lead.status in DEAL_STAGES:
@@ -554,7 +577,7 @@ def attach_deal(db: Session, lead: Lead, deal_id: int, actor: User | None):
 
 
 def detach_deal(db: Session, lead: Lead, deal, actor: User | None, was_confirmed: bool):
-    """Deal cancelled: a rented lead goes back to deal_pending (a new deal form can be filled)."""
+    """Deal cancelled: a rented lead goes back to deal_pending (a new deal form can be filled; its contract stays signed)."""
     if lead.deal_id == deal.id:
         lead.deal_id = None
     if was_confirmed and lead.status == "rented":
@@ -702,6 +725,12 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
             (Client.name.ilike(like)) | (Client.username.ilike(like)) | (Listing.district.ilike(like))
             | (Listing.address.ilike(like)) | (cast(Lead.id, Text).ilike(like)))
     return stmt.order_by(Lead.created_ts.desc())
+
+
+def counts(db: Session, user: User) -> dict[str, int]:
+    """Stage chips: leads per status on the board (an agent's own, staff all; archived ones aside)."""
+    sub = query(db, user).order_by(None).subquery()
+    return dict(db.execute(select(sub.c.status, func.count()).group_by(sub.c.status)).all())
 
 
 def board(db: Session, user: User, per_column: int = 100) -> dict[str, list[dict]]:

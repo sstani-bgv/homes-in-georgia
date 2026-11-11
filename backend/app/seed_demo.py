@@ -10,7 +10,7 @@ from unittest.mock import patch
 from sqlalchemy import select, update
 
 from app.db import SessionLocal
-from app.models import Client, Job, Lead, LeadSlot, Listing, Property, TickerMessage, User
+from app.models import Client, Contract, Job, Lead, LeadSlot, Listing, Property, TickerMessage, User
 from app.services import deals, evaluations, leads, properties, reports, users
 from app.services.common import jdump, now, now_text
 from app.telegram import notify
@@ -152,7 +152,7 @@ def seed():
         if status == "agent_assigned":
             _age(db, lead, minutes_ago)
             return lead
-        past = status in ("viewing_done", "thinking", "deal_pending", "rented", "refused")
+        past = status in ("viewing_done", "thinking", "contract", "deal_pending", "rented", "refused")
         base = now() - timedelta(hours=3) if past else now() + timedelta(days=1)
         with patch.object(notify, "slots_to_client", lambda lead: None):  # demo clients aren't real: no userbot send
             leads.add_slots(db, lead.id, [base.replace(minute=0, second=0, microsecond=0),
@@ -171,7 +171,13 @@ def seed():
         if status == "refused":
             return leads.set_outcome(db, lead.id, "client", "refused", "price")
         leads.set_outcome(db, lead.id, "client", "rented")
-        return leads.set_outcome(db, lead.id, "agent", "rented", actor=agent)
+        lead = leads.set_outcome(db, lead.id, "agent", "rented", actor=agent)  # → «Договор»
+        if status == "deal_pending":  # the contract signed: the deal form opens
+            db.add(Contract(lead_id=lead.id, property_id=lead.property_id, created_by=agent.id, kind="rent", lang="RU",
+                            html="<p>Демо-договор</p>", status="signed", signed_at=now(), signed_by=agent.id,
+                            client_name=client.name, data={"client_full_name": client.name or "", "price_usd": "850"}))
+            db.commit()
+        return lead
 
     lead_to(anna, "ss5012", "new", minutes_ago=1)
     lead_to(extra[0], "ss5010", "new", minutes_ago=4)
@@ -181,6 +187,7 @@ def seed():
     lead_to(anna, "ss5010", "time_chosen")
     lead_to(extra[2], "ss5012", "viewing_done", agent=levan)
     lead_to(extra[3], "ss5011", "thinking", agent=levan)
+    lead_to(tamar, "ss5012", "contract")
     pending = lead_to(anna, "ss5011", "deal_pending")
     rented = lead_to(extra[4], "ss5011", "deal_pending")
     lead_to(extra[5], "ss5012", "refused", agent=levan)

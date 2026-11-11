@@ -47,7 +47,7 @@ export function SlaChip({ lead }: { lead: Pick<Lead, 'sla_due_at' | 'sla_stage' 
 }
 
 export function LeadStatusBadge({ status }: { status: LeadStatus }) {
-  const tone = status === 'rented' ? 'ok' : status === 'refused' ? 'grey' : status === 'new' ? 'redsoft' : status === 'deal_pending' ? 'warn' : 'blue';
+  const tone = status === 'rented' ? 'ok' : status === 'refused' ? 'grey' : status === 'new' ? 'redsoft' : status === 'deal_pending' || status === 'contract' ? 'warn' : 'blue';
   return <Badge tone={tone}>{LEAD_STATUS[status] || status}</Badge>;
 }
 
@@ -320,7 +320,7 @@ const ACTION_TEXT: Record<string, string> = {
   agent_outcome: 'Итог агента', client_outcome: 'Ответ клиента', deal_confirmed: 'Сделка подтверждена', cancelled: 'Отменено',
   // backend lead event names (services/leads.py _event): outcome_<by>, deal_*, rented, reschedule ...
   outcome_agent: 'Итог агента', outcome_client: 'Ответ клиента', deal_created: 'Заполнена форма сделки', deal_cancelled: 'Сделка отменена',
-  rented: 'Сделка подтверждена · сдано', reopened: 'Заявка снова открыта', reschedule: 'Перенос просмотра', client_late: 'Клиент опаздывает',
+  contract_started: 'Этап «Договор»: составляют договор', rented: 'Сделка подтверждена · сдано', reopened: 'Заявка снова открыта', reschedule: 'Перенос просмотра', client_late: 'Клиент опаздывает',
   client_own_time: 'Клиент предложил своё время', message_to_client: 'Оператор написал клиенту в личку', message_from_client: 'Клиент написал оператору в личку', slots_not_delivered: 'Время не отправлено клиенту: userbot оператора', client_card_not_delivered: 'Не отправлено клиенту: userbot оператора', client_confirmed: 'Клиент подтвердил просмотр', client_comment: 'Комментарий клиента', sla_overdue: 'Срок шага истёк',
   taken: 'Беру в работу', call: 'Звонок', call_reached: 'Дозвонился', call_failed: 'Не дозвонился', updated: 'Поля объекта изменены', dismissed: 'Неактуально', owner_refused: 'Собственник не хочет работать · объект вернулся в ленту', owner_thinking: 'Собственник думает', owner_rented_self: 'Собственник сдал сам', owner_confirmed: 'Собственник подтвердил', agent_marked: 'Ответил агент',
   shoot_scheduled: 'Съёмка назначена', media_uploaded: 'Загружены фото', submitted: 'Отправлено на проверку', review: 'На проверке',

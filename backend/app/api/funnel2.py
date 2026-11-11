@@ -10,6 +10,7 @@ from app.api.deps import STAFF_ROLES, current_user, require_roles
 from app.db import get_db
 from app.models import Client, Deal, Lead, Listing, Property, User
 from app.services import catalog, contracts
+from app.services import deals as deals_svc
 from app.services import leads as L
 from app.services.common import get_or_404
 from app.services.errors import forbidden
@@ -59,6 +60,12 @@ def leads_board(db: Session = Depends(get_db, scope="function"), user: User = De
         for st in OPERATOR_STAGES:
             board.pop(st, None)
     return board
+
+
+@router.get("/leads/counts")
+def leads_counts(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    c = L.counts(db, user)
+    return c if user.role in STAFF_ROLES else {k: v for k, v in c.items() if k not in OPERATOR_STAGES}
 
 
 def _num(v) -> str:
@@ -114,6 +121,21 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
     }
 
 
+@router.get("/leads/{lead_id}/deal-prefill")
+def leads_deal_prefill(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """Deal page («Оформить сделку»): the fields of the lead's signed contract; the form's own lead/object prefill
+    covers the rest (contacts, agent, object)."""
+    lead = _visible(db, lead_id, user)
+    c = L.signed_contract(db, lead)
+    if c is None:
+        return {"contract": None, "fields": {}}
+    data = dict(c.data or {})
+    for k, v in (("street_house", c.address), ("cadastral_code", c.cadastral), ("client_full_name", c.client_name),
+                 ("owner_full_name", c.owner_name)):
+        data[k] = data.get(k) or v
+    return {"contract": contracts.summary(c), "fields": deals_svc.prefill_from_contract(c.kind, data)}
+
+
 @router.get("/leads/{lead_id}")
 def leads_get(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     lead = _visible(db, lead_id, user)
@@ -163,6 +185,12 @@ def leads_reschedule(lead_id: int, db: Session = Depends(get_db, scope="function
 def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
     return L.detail(db, L.set_outcome(db, lead_id, "agent", body.outcome, body.reason, user), user)
+
+
+@router.post("/leads/{lead_id}/start-contract")
+def leads_start_contract(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    _visible(db, lead_id, user)
+    return L.detail(db, L.start_contract(db, lead_id, user), user)
 
 
 class ArchiveIn(BaseModel):

@@ -11,6 +11,7 @@ from app.services import deals, jobs, leads, properties
 from app.services.dedup import address_match, extract_phones, phone_match
 from app.services.errors import DomainError
 from tests.conftest import auth, make_client, make_client_listing, make_listing, make_user
+from tests.test_lead_stages import signed_contract
 
 
 def _soon(hours=3):
@@ -49,6 +50,8 @@ def test_attach_deal_only_after_viewing_and_clears_sla(db, sent):
 
     lead2 = _to_time_chosen(db, op, ag, client=make_client(db, external_id=2), listing=make_client_listing(db, "ss2"))
     leads.set_outcome(db, lead2.id, "client", "thinking")
+    leads.start_contract(db, lead2.id, ag)  # «Договор» first, the deal after it is signed
+    signed_contract(db, lead2)
     deals.create(db, {"lead_id": lead2.id, "price": 500}, ag)
     db.refresh(lead2)
     assert lead2.status == "deal_pending" and lead2.sla_stage is None and not jobs.pending(db, "lead_sla", lead2.id)
@@ -62,6 +65,8 @@ def test_deal_create_is_idempotent_per_lead_and_cancel_reverts(db, client, sent)
     prop.post_url, prop.post_message_id = "https://t.me/rent_tbilisi_ge/1", "1"
     db.commit()
     lead = _to_time_chosen(db, op, ag, listing=listing)
+    leads.start_contract(db, lead.id, ag)
+    signed_contract(db, lead)
     body = {"lead_id": lead.id, "price": 1000, "is_exclusive": True, "rent_from": "2030-01-10", "rent_to": "2031-01-10"}
     first = client.post("/api/deals", json=body, headers=auth(ag)).json()
     second = client.post("/api/deals", json=body, headers=auth(ag)).json()
@@ -101,7 +106,7 @@ def test_closed_leads_stay_closed(db, sent):
         leads.set_outcome(db, lead.id, "client", "rented")
     assert e.value.code == "bad_status"
     leads.set_outcome(db, lead.id, "agent", "rented", actor=ag)  # the agent can still revive a refusal
-    assert db.get(Lead, lead.id).status == "deal_pending"
+    assert db.get(Lead, lead.id).status == "contract"
 
     lead2 = _to_time_chosen(db, op, ag, client=make_client(db, external_id=2), listing=make_client_listing(db, "ss2"))
     leads.cancel(db, lead2.id, op, "клиент пропал")

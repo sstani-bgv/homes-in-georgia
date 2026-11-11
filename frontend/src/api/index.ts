@@ -6,7 +6,7 @@ import {
 } from './normalize';
 import type {
   AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
-  EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
+  EventItem, Evaluation, Lead, LeadContract, LeadStatus, DealPrefill, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
   Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
 } from './types';
 
@@ -140,6 +140,9 @@ export const api = {
     cancel: (id: number, reason: string) => http.post<Lead>(`/leads/${id}/cancel`, { reason }),
     archive: (id: number, archived = true) => http.post<Lead>(`/leads/${id}/archive`, { archived }),
     contract: (id: number) => http.get<LeadContract>(`/leads/${id}/contract`),
+    counts: () => http.get<Partial<Record<LeadStatus, number>>>('/leads/counts'),
+    startContract: (id: number) => http.post<Lead>(`/leads/${id}/start-contract`),
+    dealPrefill: (id: number) => http.get<DealPrefill>(`/leads/${id}/deal-prefill`),
   },
 
   clients: {

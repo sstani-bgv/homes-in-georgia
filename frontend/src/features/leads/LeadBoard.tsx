@@ -81,9 +81,13 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   const act = useMutation({
     mutationFn: ({ lead, to }: { lead: Lead; to: LeadStatus }) =>
       to === 'operator_taken' ? api.leads.take(lead.id)
+        : to === 'contract' ? api.leads.startContract(lead.id)
         : to === 'refused' ? (BEFORE_VIEWING.includes(lead.status) ? api.leads.cancel(lead.id, reason) : api.leads.outcome(lead.id, 'refused', reason))
           : api.leads.outcome(lead.id, to),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); toast('Заявка перенесена'); setRefuse(null); },
+    onSuccess: (l) => {
+      qc.invalidateQueries({ queryKey: ['leads'] }); toast('Заявка перенесена'); setRefuse(null);
+      if (l.status === 'contract') navigate(`${base}/contracts?lead_id=${l.id}`);
+    },
     onError: (e) => toast(errText(e), true),
   });
   if (isLoading) return <Loading />;
@@ -96,10 +100,11 @@ export function LeadBoard({ base = '' }: { base?: string }) {
     if (!stages.includes(to)) { toast(`«${LEAD_STATUS[to]}» — этап оператора`, true); return; }
     if (!isStaff && to === 'refused' && BEFORE_VIEWING.includes(lead.status)) { toast('До просмотра заявку отменяет оператор', true); return; }
     if (!isStaff && to === 'agent_assigned') { toast('Агента назначает оператор; перенос просмотра — в карточке заявки'); navigate(`${base}/leads/${lead.id}`); return; }
-    if (to === 'operator_taken' || to === 'rented' || to === 'thinking') act.mutate({ lead, to });
+    if (to === 'operator_taken' || to === 'thinking' || to === 'contract') act.mutate({ lead, to });
     else if (to === 'agent_assigned') setAssign(lead);
     else if (to === 'refused') setRefuse(lead);
-    else if (to === 'deal_pending') navigate(`${base}/leads/${lead.id}?deal=1`);
+    else if (to === 'deal_pending') navigate(`${base}/deals/new?lead_id=${lead.id}`);
+    else if (to === 'rented') { toast('«Сдано» — когда оператор подтвердит сделку'); navigate(`${base}/leads/${lead.id}`); }
     else { toast(`«${LEAD_STATUS[to]}»: этот шаг делается в карточке заявки`); navigate(`${base}/leads/${lead.id}`); }
   };
   return (
@@ -142,13 +147,44 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   );
 }
 
+/** Stage chips with counts (GET /leads/counts: an agent's own leads, staff all), wrapping on a phone: a tap shows only
+ * that stage, the same chip again (or «Все») goes back to the board / list. */
+export function LeadStages({ base = '', list }: { base?: string; list?: boolean }) {
+  const { isStaff } = useAuth();
+  const [stage, setStage] = useState<LeadStatus | ''>('');
+  const counts = useQuery({ queryKey: ['leads', 'counts'], queryFn: api.leads.counts, refetchInterval: 15_000 });
+  const stages = isStaff ? LEAD_BOARD : LEAD_BOARD.filter((s) => !OPERATOR_STAGES.includes(s));
+  const c = counts.data || {};
+  const total = stages.reduce((a, s) => a + (c[s] || 0), 0);
+  const label = (t: string, n: number) => <>{t} <span className="tab-count">{n}</span></>;
+  return (
+    <div className="col">
+      <Seg value={stage} onChange={(s) => setStage(s === stage ? '' : s)}
+        options={[{ value: '' as const, label: label('Все', total) }, ...stages.map((s) => ({ value: s, label: label(LEAD_STATUS[s], c[s] || 0) }))]} />
+      {stage ? <StageLeads key={stage} stage={stage} base={base} /> : list ? <div style={{ maxWidth: 640 }}><MyLeadsList base={base} /></div> : <LeadBoard base={base} />}
+    </div>
+  );
+}
+
+function StageLeads({ stage, base }: { stage: LeadStatus; base: string }) {
+  const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'list', 'stage', stage], queryFn: () => api.leads.list({ status: stage }), refetchInterval: 20_000 });
+  if (isLoading) return <Loading />;
+  if (error) return <ErrorBox error={error} />;
+  const items = itemsOf(data);
+  return (
+    <div className="col" style={{ maxWidth: 640 }}>
+      {items.length === 0 ? <Empty text={`«${LEAD_STATUS[stage]}»: заявок нет`} /> : items.map((l) => <LeadCard key={l.id} lead={l} to={`${base}/leads/${l.id}`} />)}
+    </div>
+  );
+}
+
 /** agentId: the cabinet opened by staff for one agent (agents always get their own, backend leads.query) */
 export function MyLeadsList({ base = '', agentId }: { base?: string; agentId?: number }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'list', 'mine-active', agentId], queryFn: () => api.leads.list({ agent_id: agentId }), refetchInterval: 20_000 });
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   const items = itemsOf(data);
-  const order = ['agent_assigned', 'time_chosen', 'viewing_done', 'slots_sent', 'thinking', 'deal_pending'];
+  const order = ['agent_assigned', 'time_chosen', 'viewing_done', 'slots_sent', 'thinking', 'contract', 'deal_pending'];
   const active = items.filter((l) => order.includes(l.status)).sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const closed = items.filter((l) => !order.includes(l.status));
   return (

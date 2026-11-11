@@ -51,6 +51,7 @@ class ContractIn(BaseModel):
     lead_id: int | None = None
     deal_id: int | None = None
     property_id: int | None = None
+    data: dict | None = None  # the wizard's CxData (deal prefill); omitted = kept
 
 
 class CloseIn(BaseModel):

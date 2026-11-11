@@ -5,7 +5,7 @@ from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Column, DateTime, 
 from app.db import Base
 
 LEAD_STATUSES = ("new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done",
-                 "deal_pending", "rented", "refused", "thinking", "in_work", "viewing")  # last two: prototype bot
+                 "contract", "deal_pending", "rented", "refused", "thinking", "in_work", "viewing")  # last two: prototype bot
 
 
 class Setting(Base):

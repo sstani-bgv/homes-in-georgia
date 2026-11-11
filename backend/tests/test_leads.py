@@ -8,6 +8,7 @@ from app.models import Deal, Job, Lead, LeadEvent, LeadSlot, Property
 from app.services import jobs, leads
 from app.services.errors import DomainError
 from tests.conftest import auth, make_client, make_client_listing as make_listing, make_user
+from tests.test_lead_stages import signed_contract
 
 
 def _due_now(db, kind, ref):
@@ -80,10 +81,13 @@ def test_lead_journey_end_to_end(db, client, sent):
     db.expire_all()
     assert db.get(Lead, lead.id).status == "viewing_done" and sent.of("post_viewing_survey")
 
-    # A5a / C9a: both say rented → deal_pending
+    # A5a / C9a: both say rented → «Договор»; the deal form opens once the contract is signed
     leads.set_outcome(db, lead.id, "client", "rented")
     r = client.post(f"/api/leads/{lead.id}/outcome", json={"outcome": "rented"}, headers=auth(georgiy))
-    assert r.json()["status"] == "deal_pending" and r.json()["client_outcome"] == "rented"
+    assert r.json()["status"] == "contract" and r.json()["client_outcome"] == "rented"
+    r = client.post("/api/deals", headers=auth(georgiy), json={"lead_id": lead.id, "price": 850})
+    assert r.status_code == 409 and r.json()["code"] == "contract_not_signed"
+    signed_contract(db, lead)
 
     # C9b: deal form → pending; B6: operator confirms → rented, T14 + contract jobs
     db.get(Property, lead.property_id).is_exclusive = True  # the deal takes «exclusive» from the object

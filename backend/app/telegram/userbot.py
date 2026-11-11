@@ -49,7 +49,7 @@ from app.telegram import store, texts
 from app.telegram.client import conf
 
 log = logging.getLogger(__name__)
-OPEN = ("new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done", "deal_pending", "thinking",
+OPEN = ("new", "operator_taken", "agent_assigned", "slots_sent", "time_chosen", "viewing_done", "contract", "deal_pending", "thinking",
         "in_work", "viewing")
 PICK_HINT = {"ru": "Ответьте цифрой варианта.", "en": "Reply with the option number.", "ka": "უპასუხეთ ვარიანტის ნომრით."}
 TIME_PICK_HINT = {"ru": "Ответьте цифрой варианта или напишите своё время.", "en": "Reply with the option number or write your own time.",

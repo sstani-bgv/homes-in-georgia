@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import { AddressField, type Point, type PointFacts } from '../components/AddressField';
 import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Tabs, DistrictSelect } from '../components/ui';
-import { ArchivedLeads, LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
+import { ArchivedLeads, LeadStages } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
 import { metroLabel, PropertyDetail } from '../features/properties/PropertyDetail';
@@ -97,7 +97,7 @@ export function LeadsPage() {
     <>
       <PageHead title="Заявки" />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'board', label: 'Доска' }, { value: 'mine', label: isStaff ? 'Списком' : 'Мои заявки' }, { value: 'archive', label: 'Архив' }]} />
-      {tab === 'board' ? <LeadBoard /> : tab === 'archive' ? <ArchivedLeads /> : <div style={{ maxWidth: 640 }}><MyLeadsList /></div>}
+      {tab === 'archive' ? <ArchivedLeads /> : <LeadStages key={tab} list={tab === 'mine'} />}
     </>
   );
 }

@@ -243,6 +243,9 @@ def _fields(db: Session, body: dict, user: User) -> dict:
         if user.role not in STAFF and deal.agent_id != user.id:
             raise DomainError("not_found", "deal not found")
         lead_id, prop_id = lead_id or deal.lead_id, prop_id or deal.property_id
+    data = body.get("data")  # the wizard's CxData (scalars only), kept for the deal prefill; absent = left as is
+    if isinstance(data, dict):
+        f["data"] = {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 500}
     return {**f, "kind": kind, "lang": lang, "html": clean_html(page), "lead_id": lead_id, "deal_id": deal_id,
             "property_id": prop_id}
 
