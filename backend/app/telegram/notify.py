@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import re
-from urllib.parse import urlencode as _urlencode  # private: the test fixture stubs every public notify.* name
 import secrets
 import tempfile
 from datetime import datetime, timezone
@@ -932,9 +931,9 @@ def post_html(text):
         out = out.replace(plain, linked)
     # hge.ge/map/ (Irakli's site map, built from the channel posts) searches its titles = these addresses: ?q=<address>
     # opens the map on this object, without it the whole map (Irakli 11-11)
+    from app.services.properties import hge_map_url
     addr = re.search(r"📍\[([^\]\n]+)\]\(", text or "")
-    q = addr and " ".join(w.strip(",.;") for w in addr[1].split())
-    url = "https://hge.ge/map/" + (f"?{_urlencode({'q': q})}" if q else "")
+    url = hge_map_url(addr and addr[1])
     return out.replace("📍APARTMENTS ON MAP📍", f'📍<b><a href="{html.escape(url)}">APARTMENTS ON MAP</a></b>📍')
 
 

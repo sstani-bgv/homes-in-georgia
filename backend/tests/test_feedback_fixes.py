@@ -24,9 +24,8 @@ def test_agent_cannot_set_commission(db, client):
 
 
 def test_base_lists_only_published_objects(db, client):
-    agent = make_user(db, "agent", "Зураб")
-    other = make_user(db, "agent", "Гиорги")
-    rows = {k: Property(status=st, agent_id=other.id, published_at=pub) for k, (st, pub) in {
+    agent = make_user(db, "agent", "Зураб")  # his own objects: an agent sees no one else's (test_board_hide)
+    rows = {k: Property(status=st, agent_id=agent.id, published_at=pub) for k, (st, pub) in {
         "published": ("published", now()), "rented_after_post": ("rented", now()), "rented_never_posted": ("rented", None),
         "taken": ("taken", None), "review": ("review", None), "archived": ("archived", now())}.items()}
     db.add_all(rows.values())

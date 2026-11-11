@@ -372,18 +372,22 @@ type PS = keyof typeof PROPERTY_STATUS;
 const BASE: PS[] = ['published', 'rented'];
 
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
- * otherwise «База объектов» — published / rented objects, for everyone (owner contacts stay hidden by the API for other agents' objects). */
+ * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
 export function PropertyList({ mine, archived, status: only, base = '' }: { mine?: boolean; archived?: boolean; status?: string; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [agent, setAgent] = useState('');
   const [page, setPage] = useState(0);
+  const { isStaff } = useAuth();
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
+  // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
+  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine });
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ['properties', 'list', scope, q, status, page],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
+    queryKey: ['properties', 'list', scope, q, status, agent, page],
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agent ? Number(agent) : undefined, status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
-  const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: scope === 'all' || scope === 'archive' });
+  const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: isStaff && (scope === 'all' || scope === 'archive') }); // whole-base totals: staff only
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const filter = (f: () => void) => { f(); setPage(0); };
@@ -402,6 +406,14 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
           <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => { const v = e.target.value; filter(() => setStatus(v)); }}>
             <option value="">Все статусы</option>
             {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
+          </select>
+        )}
+        {isStaff && !mine && (
+          <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => { const v = e.target.value; filter(() => setAgent(v)); }}>
+            <option value="">Все агенты</option>
+            {itemsOf(agents.data).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((u) => (
+              <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>
+            ))}
           </select>
         )}
       </div>

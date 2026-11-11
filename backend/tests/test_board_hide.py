@@ -20,3 +20,17 @@ def test_board_hide_published_keeps_status_and_comes_back_on_next_step(db, clien
     properties._status(db, db.get(Property, mine.id), "rented", ag)
     db.commit()
     assert [x["id"] for x in client.get("/api/properties/board", headers=auth(op)).json()["rented"]] == [mine.id]
+
+
+def test_agent_sees_only_own_objects_in_the_base(db, client):
+    """Stanislav 11-11: «База объектов» — an agent sees his own objects only, staff see all."""
+    ag, other, op = make_user(db, "agent"), make_user(db, "agent"), make_user(db, "operator")
+    mine, theirs = (properties.take(db, make_listing(db, lid).id, a) for lid, a in (("ss3", ag), ("ss4", other)))
+    for p in (mine, theirs):
+        p.status, p.published_at = "published", properties.now()
+    db.commit()
+    ids = lambda u, qs: sorted(x["id"] for x in client.get(f"/api/properties?{qs}", headers=auth(u)).json()["items"])
+    assert ids(op, "base=1&status=published,rented") == sorted([mine.id, theirs.id])
+    assert ids(ag, "base=1&status=published,rented") == [mine.id]
+    assert ids(ag, f"base=1&agent_id={other.id}") == [mine.id]  # no way around it
+    assert ids(ag, "status=published") == [mine.id]

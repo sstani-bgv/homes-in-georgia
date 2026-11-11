@@ -207,9 +207,11 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert "<details><summary>Parameters and amenities</summary>" in h  # collapsed, as in Irakli's video
     assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16" in h  # contacts inside Tags
     assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
-    assert h.count("<tg-button ") == 2 and "RentInTbilisi_bot" not in h and "Contact" not in h and "hge.ge/map" not in h
-    # «On the map»: our /map page with the object's pin; «I like it»: a plain bot button (callback), no link arrow
-    assert '<tg-button type="url" url="' + properties.env.PUBLIC_URL.rstrip("/") + '/map?pin=41.700000%2C44.760000&amp;' in h
+    assert h.count("<tg-button ") == 2 and "RentInTbilisi_bot" not in h and "Contact" not in h
+    # «On the map»: Irakli's hge.ge map filtered to this address; «I like it»: a plain bot button (callback), no link arrow
+    assert '<tg-button type="url" url="https://hge.ge/map/?q=%D1%83%D0%BB+%D0%A7%D0%B0%D0%B2%D1%87%D0%B0%D0%B2%D0%B0%D0%B4%D0%B7%D0%B5+33">' in h
+    p.address = None
+    assert '/map?pin=41.700000%2C44.760000&amp;' in properties.post_rich(db, p, [])  # no address: our pin map
     assert h.endswith(f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button></tg-button-row>')
 
 

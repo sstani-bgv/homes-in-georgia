@@ -1239,8 +1239,16 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
         pin = f"{env.PUBLIC_URL.rstrip('/')}/map?" + urlencode({"pin": f"{at[0]:.6f},{at[1]:.6f}", "prec": prec,
                                                                 "title": head, "lang": "en"})
     like = f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button>'
-    out.append("<tg-button-row>" + (btn("📍 On the map", pin or url) if pin or url else "") + like + "</tg-button-row>")
+    where = hge_map_url(p.address) if p.address else pin or url  # Irakli's map on this object, else our pin map
+    out.append("<tg-button-row>" + (btn("📍 On the map", where) if where else "") + like + "</tg-button-row>")
     return "".join(out)
+
+
+def hge_map_url(address: str | None) -> str:
+    """Irakli's site map (hge.ge/map/, built from the channel posts, whose titles are these addresses) filtered to one
+    object: ?q=<address> shows it alone and zooms in; without an address, the whole map (Irakli / Stanislav 11-11)."""
+    q = " ".join(w.strip(",.;") for w in (address or "").split())
+    return "https://hge.ge/map/" + (f"?{urlencode({'q': q})}" if q else "")
 
 
 def record_publication(db: Session, p: Property, channel: str, url: str | None, message_id: str | None) -> PropertyPublication:
@@ -1573,8 +1581,9 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
         stmt = stmt.where(Property.rent_to.isnot(None))
     if base:
         stmt = stmt.where(Property.status.in_(BASE_STATUSES), Property.published_at.isnot(None))
-        everyone = True
-    if mine or (user.role not in STAFF and agent_id is None and not status and not everyone):
+    # agents see only their own objects in every list, «База объектов» too (Stanislav 11-11); staff see all.
+    # everyone: the deal form's picker only (deal_search), where another agent's object comes blocked, without data
+    if mine or (user.role not in STAFF and not everyone):
         stmt = stmt.where(Property.agent_id == user.id)
     elif agent_id:
         stmt = stmt.where(Property.agent_id == agent_id)
