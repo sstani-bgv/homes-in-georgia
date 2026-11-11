@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Building2, CalendarDays, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
@@ -88,13 +88,13 @@ export function AppLayout() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand">
+        <Link to="/" className="brand" aria-label="Главная" title="Главная">
           <span className="brand-mark"><BrandMark /></span>
           <span className="brand-text">
             <div className="brand-name">Homes in Georgia</div>
             <div className="brand-sub">CRM{IS_MOCK ? ' · demo' : ''}</div>
           </span>
-        </div>
+        </Link>
         <nav className="nav">
           {items.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.to === '/'} title={n.label}>
@@ -115,9 +115,9 @@ export function AppLayout() {
       </aside>
       <div className="main">
         <header className="topbar">
-          <span className="only-mobile brand-mark" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--brand)', display: 'grid', placeItems: 'center' }}>
+          <Link to="/" aria-label="Главная" title="Главная" className="only-mobile brand-mark" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--brand)', display: 'grid', placeItems: 'center' }}>
             <svg width="18" height="18" viewBox="0 0 64 64"><path d="M10 34 32 14l22 20v18H40V40H24v12H10z" fill="#fff" /><rect x="42" y="8" width="12" height="7" rx="2" fill="#E3172D" /></svg>
-          </span>
+          </Link>
           <Ticker />
           {IS_MOCK && <Badge tone="warn">demo-данные</Badge>}
           <button className="btn btn-sm" onClick={() => setAdd(true)} aria-label="Добавить"><Plus size={16} /><span className="hide-mobile">Добавить</span></button>

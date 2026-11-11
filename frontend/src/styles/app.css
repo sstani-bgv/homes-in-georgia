@@ -75,6 +75,7 @@ p { margin: 0; }
   background: var(--gradient); color: #fff; display: flex; flex-direction: column; padding: 20px 14px;
   overflow-y: auto; overflow-x: hidden;
 }
+a.brand, a.brand:hover { color: inherit; text-decoration: none; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
 .brand-mark { width: 36px; height: 36px; border-radius: 10px; background: #fff; display: grid; place-items: center; flex: none; }
 .brand-name { font-weight: 900; font-size: 15px; letter-spacing: .02em; line-height: 1.1; text-transform: uppercase; }
