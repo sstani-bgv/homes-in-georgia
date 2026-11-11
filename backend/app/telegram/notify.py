@@ -960,6 +960,46 @@ def watermarked(path, tmp):
         return path
 
 
+BOT_UPLOAD_MAX = 48 * 1024 * 1024  # Bot API takes ≤ 50 MB per request; a phone video is often 150 MB+
+
+
+def _bot_media(media, tmp):
+    """[(kind, path)] ready for the Bot API: photos watermarked; videos squeezed with ffmpeg (720p, H.264) into what the
+    photos left of BOT_UPLOAD_MAX, dropped (logged) if they still don't fit — else the whole post (rich or album) failed
+    with «Request Entity Too Large» (2026-11-11: a 157 MB video)."""
+    out = [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media]
+    budget = BOT_UPLOAD_MAX - sum(os.path.getsize(p) for k, p in out if k != "video")
+    videos = [i for i, (k, _) in enumerate(out) if k == "video"]
+    for i in videos:
+        share = budget // len(videos)
+        path = out[i][1]
+        if os.path.getsize(path) > share:
+            path = _squeeze_video(path, tmp, share)
+        out[i] = ("video", path) if path else None
+    return [x for x in out if x]
+
+
+def _squeeze_video(path, tmp, max_bytes):
+    """ffmpeg re-encode to fit max_bytes (bitrate from the duration, 720p, AAC 64k) -> the new path or None."""
+    import subprocess
+    try:
+        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                   capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+        kbps = int(max_bytes * 8 / 1000 / max(dur, 1) * 0.9) - 64
+        if dur <= 0 or kbps < 300:  # too long for the budget: a mush is worse than no video
+            raise ValueError(f"{dur:.0f} s does not fit {max_bytes // 2**20} MB")
+        out = os.path.join(tmp, "v_" + os.path.basename(path) + ".mp4")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", path, "-vf", "scale=-2:'min(720,ih)'", "-c:v", "libx264",
+                        "-preset", "veryfast", "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
+                        "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", out], check=True, timeout=900)
+        if os.path.getsize(out) <= max_bytes:
+            return out
+        raise ValueError(f"{os.path.getsize(out) // 2**20} MB after re-encoding")
+    except Exception as ex:  # noqa: BLE001
+        log.warning("video %s left out of the post: %s", os.path.basename(path), ex)
+        return None
+
+
 def post_link(m, chat):
     uname = (m.get("chat") or {}).get("username") or (chat.lstrip("@") if str(chat).startswith("@") else None)
     if uname:
@@ -1009,14 +1049,15 @@ def publish_post(prop):
         if media and originals_topic:
             send_group(chat, originals_topic, [("document", p) for _, p in media])
         m = None
+        ready = _bot_media(media, tmp)  # once: a squeezed video is reused by the album fallback
         # RICH_POSTS=1: the post as a rich message (Irakli 2026-11-09), unless the operator rewrote the caption by hand;
         # Telegram refusing it falls back to the album below
         if conf("RICH_POSTS").strip() in ("1", "true") and callable(getattr(prop, "post_rich", None)):
-            m = send_rich(chat, album_topic, prop, [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media])
+            m = send_rich(chat, album_topic, prop, ready)
         if m:
             pass  # the rich post went out
         elif media:
-            res = send_group(chat, album_topic, [(k, p if k == "video" else watermarked(p, tmp)) for k, p in media], caption)
+            res = send_group(chat, album_topic, ready, caption)
             m = res[0] if res else None
         else:
             m = tg.send(chat, caption, thread_id=album_topic)

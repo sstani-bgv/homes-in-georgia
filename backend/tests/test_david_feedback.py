@@ -241,3 +241,23 @@ def test_hand_typed_lease_on_an_old_base_object(db, client):
     assert [x["id"] for x in rows] == [p.id]
     client.patch(f"/api/properties/{p.id}", headers=auth(agent), json={"rent_to": ""})  # cleared: no reminders
     assert not db.query(Job).filter(Job.kind == "property_lease_expiry", Job.done_at.is_(None)).count()
+
+
+def test_post_media_fit_the_bot_api_upload_limit(tmp_path, monkeypatch):
+    """2026-11-11: a 157 MB phone video made the whole post fail (Request Entity Too Large): a video over what the
+    photos leave of 48 MB is squeezed by ffmpeg, or left out when that fails."""
+    from app.telegram import notify
+    photo, big = tmp_path / "a.jpg", tmp_path / "b.mov"
+    photo.write_bytes(b"x" * 1000)
+    with open(big, "wb") as fh:
+        fh.truncate(60 * 2**20)
+    small = tmp_path / "b_small.mp4"
+    small.write_bytes(b"v" * 1000)
+    monkeypatch.setattr(notify, "watermarked", lambda p, tmp: p)  # also a stub by the autouse fixture
+    asked = []
+    monkeypatch.setattr(notify, "_squeeze_video", lambda p, tmp, n: asked.append(n) or str(small))
+    assert notify._bot_media([("photo", str(photo)), ("video", str(big))], str(tmp_path)) == [("photo", str(photo)), ("video", str(small))]
+    assert asked == [notify.BOT_UPLOAD_MAX - 1000]
+    monkeypatch.setattr(notify, "_squeeze_video", lambda p, tmp, n: None)
+    assert notify._bot_media([("photo", str(photo)), ("video", str(big))], str(tmp_path)) == [("photo", str(photo))]
+    assert notify._bot_media([("video", str(small))], str(tmp_path)) == [("video", str(small))]  # small: untouched
