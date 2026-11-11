@@ -170,10 +170,10 @@ def _count(db: Session, model, *where) -> int:
     return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
 
-def stats(db: Session, user: User) -> dict:
+def stats(db: Session, user: User, mine: bool = False) -> dict:
     """«Статистика» on «Главная» (Stanislav 11-11): where the objects / leads / deals are. Staff: the agency; an agent:
     his own (same scoping as the lists the numbers link to). The parsed-ads feed is shared, so it is never scoped."""
-    staff = user.role in STAFF
+    staff = user.role in STAFF and not mine  # mine: a superagent's own numbers next to the agency's
     t = now().astimezone(TZ)
     day = t.replace(hour=0, minute=0, second=0, microsecond=0)
     utc = lambda d: d.astimezone(timezone.utc).isoformat(timespec="seconds")  # listings/leads keep UTC ISO text

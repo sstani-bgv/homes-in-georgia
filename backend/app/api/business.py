@@ -170,7 +170,8 @@ def counters(month: str | None = None, db: Session = Depends(get_db, scope="func
 
 @router.get("/analytics/dashboard")
 def analytics_dashboard(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return {**analytics.dashboard(db, month), "stats": analytics.stats(db, user)}
+    mine = {"stats_mine": analytics.stats(db, user, mine=True)} if user.role == "superagent" else {}
+    return {**analytics.dashboard(db, month), "stats": analytics.stats(db, user), **mine}
 
 
 @router.get("/analytics/funnel")

@@ -50,6 +50,13 @@ def test_superagent_is_superadmin_and_agent(db, client):
     db.expire_all()
     assert db.get(Property, theirs["id"]).agent_id == david.id
 
+    # «Главная»: the agency numbers plus his own; operators/agents get only one block
+    dash = client.get("/api/analytics/dashboard", headers=h).json()
+    assert dash["stats"]["scope"] == "agency" and dash["stats_mine"]["scope"] == "mine"
+    assert dash["stats_mine"]["objects"]["work"] == 2  # both objects are his after the transfer
+    assert client.get("/api/analytics/dashboard", headers=auth(zaza)).json()["stats"]["objects"]["work"] == 0
+    assert "stats_mine" not in client.get("/api/analytics/dashboard", headers=auth(nino)).json()
+
 
 def test_superagent_counts_for_bootstrap(db, monkeypatch):
     """A superagent owner must not be re-promoted to superadmin by the env bootstrap on restart."""

@@ -95,8 +95,10 @@ function TaskRow({ to, title, meta, right }: { to: string; title: string; meta?:
   );
 }
 
-function MyTasks() {
-  const { user, isStaff } = useAuth();
+/** agent: a superagent's own agent tasks (his leads / objects) next to the staff queue. */
+function MyTasks({ agent = false }: { agent?: boolean }) {
+  const { user, isStaff: staff } = useAuth();
+  const isStaff = staff && !agent;
   const leads = useQuery({ queryKey: ['leads', 'list', isStaff ? 'all' : 'mine'], queryFn: () => api.leads.list(isStaff ? {} : { agent_id: user?.id }) });
   const props = useQuery({ queryKey: ['properties', 'list', isStaff ? 'review' : 'mine'], queryFn: () => api.properties.list(isStaff ? { status: 'review' } : { mine: 1 }) });
   const ls = itemsOf(leads.data);
@@ -114,7 +116,7 @@ function MyTasks() {
   const total = leadTasks.length + propTasks.length;
 
   return (
-    <Card label="Мои задачи" title={total ? `${total} в работе` : 'Всё сделано'}>
+    <Card label={agent ? 'Мои задачи · агент' : 'Мои задачи'} title={total ? `${total} в работе` : 'Всё сделано'}>
       {leads.isLoading || props.isLoading ? <Loading /> : total === 0 ? <Empty text="Срочных задач нет" /> : (
         <div>
           {leadTasks.slice(0, 6).map((l) => (
@@ -162,10 +164,12 @@ export function DashboardPage() {
           </div>
 
           {data.stats && !metrics?.stats_off && <div className="section"><StatsBlock s={data.stats as Stats} staff={isStaff} /></div>}
+          {data.stats_mine && !metrics?.stats_off && <div className="section"><StatsBlock s={data.stats_mine as Stats} staff={false} /></div>}
 
           <div className="split section">
             <div className="col gap-lg">
               <MyTasks />
+              {user?.role === 'superagent' && <MyTasks agent />}
               {show('funnel') && (
                 <div className="grid g2">
                   <Card title="Объекты">
