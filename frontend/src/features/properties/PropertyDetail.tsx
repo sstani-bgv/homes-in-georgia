@@ -241,6 +241,8 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const saved = useRef<GenForm>(f);
   const [metroM, setMetroM] = useState<number | null>(null);  // the auto-picked station's distance, shown by the select
   const fileRef = useRef<HTMLInputElement>(null);
+  const exRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (f.is_exclusive && !p.is_exclusive) exRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [f.is_exclusive]); // eslint-disable-line react-hooks/exhaustive-deps
   const media = p.media || [];
   const checklist = p.checklist || {};
   const save = useMutation({
@@ -256,7 +258,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   };
   useEffect(() => {
     if (!canEdit) return;
-    const t = setTimeout(() => { flush().catch(() => undefined); }, 700);
+    const t = setTimeout(() => { flush().catch(() => undefined); }, f.is_exclusive !== saved.current.is_exclusive ? 0 : 700); // the exclusive toggle at once: its signing link comes from the save
     return () => clearTimeout(t);
   }, [f]); // eslint-disable-line react-hooks/exhaustive-deps
   const upd = <K extends keyof GenForm>(k: K, v: GenForm[K]) => setF((x) => ({ ...x, [k]: v }));
@@ -324,6 +326,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
         <div className="gen-block">
           <span className="gen-title">1 · Основное</span>
           <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="❗️ Exclusive listing" />
+          {f.is_exclusive && <div ref={exRef} className="outcome-card"><ExclusiveContract p={p} canEdit={canEdit} nested /></div>}
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
           <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
           <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${metroM} м от точки на карте` : undefined}>
@@ -397,7 +400,6 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
         </div>
       </fieldset>
 
-      {f.is_exclusive && <ExclusiveContract p={p} canEdit={canEdit} />}
 
       <div className="gen-block">
         <div className="row row-between row-wrap gap-sm">
@@ -823,7 +825,7 @@ function PostComposer({ p }: { p: Property }) {
 /** Exclusive object: the owner signs the exclusivity confirmation by the link (/sign/<token>, pages/ExclusiveSign) and the
  * PDF lands here by itself; or the agent uploads one signed elsewhere. Without it «Отправить на модерацию» is blocked
  * (backend submit_for_review). The PDF is not a post file. */
-function ExclusiveContract({ p, canEdit }: { p: Property; canEdit: boolean }) {
+function ExclusiveContract({ p, canEdit, nested }: { p: Property; canEdit: boolean; nested?: boolean }) {
   const { toast, set } = useProp(p.id);
   const ref = useRef<HTMLInputElement>(null);
   const c = p.exclusive_contract;
@@ -832,11 +834,12 @@ function ExclusiveContract({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(link || '') : Promise.reject()).then(() => toast('Ссылка скопирована'), () => toast('Не удалось скопировать', true));
   const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('Подтвердите, пожалуйста, эксклюзивное сотрудничество с Rent in Tbilisi и подпишите по ссылке')}`;
   return (
-    <div className="gen-block">
-      <span className="gen-title">Эксклюзивный договор</span>
+    <div className={nested ? 'col gap-sm' : 'gen-block'}>
+      <span className={nested ? 'label' : 'gen-title'}>Эксклюзивный договор</span>
       {c ? <div className="alert alert-ok">Договор подписан {fmtDateTime(c.created_at)} · <a href={mediaUrl(c.url)} target="_blank" rel="noreferrer"><FileText size={14} /> скачать PDF</a></div>
         : <div className="alert alert-warn">Нет договора: без подписанного PDF объект нельзя отправить оператору</div>}
       {canEdit && <>
+        {!link && !c && !p.is_exclusive && <div className="muted" style={{ fontSize: 12 }}>Сохраняем — ссылка для собственника появится через секунду…</div>}
         {link && !c && <>
           <div className="muted" style={{ fontSize: 12 }}>Отправьте собственнику ссылку: он заполнит данные и распишется, PDF появится здесь сам. Обновите карточку после подписи.</div>
           <div className="row row-wrap gap-sm">
@@ -994,7 +997,7 @@ function postFieldRows(f?: PostFields | null): [string, React.ReactNode][] {
 }
 
 /** The post fields the agent fills (the old HTML generator's groups): one-of selects, amenity / term checkboxes, numbers. */
-function PostFieldsForm({ value: f, onChange }: { value: PostFields; onChange: (f: PostFields) => void }) {
+function PostFieldsForm({ value: f, onChange, price }: { value: PostFields; onChange: (f: PostFields) => void; price?: number | null }) {
   const sale = f.deal === 'Sale';
   const set = (k: string, x: unknown) => onChange({ ...f, [k]: x === '' || x === null ? undefined : x });
   const num = (s: string) => (s === '' ? undefined : Number(s));
@@ -1012,7 +1015,7 @@ function PostFieldsForm({ value: f, onChange }: { value: PostFields; onChange: (
         {sale ? <Field label="Цена продажи, $"><Input type="number" value={f.sale_price ?? ''} onChange={(e) => set('sale_price', num(e.target.value))} /></Field> : (
           <>
             <Field label="Жильцов, до"><Input type="number" min={1} value={f.tenants ?? ''} onChange={(e) => set('tenants', num(e.target.value))} /></Field>
-            <Field label="Залог, $" hint="Пусто — как цена, 0 — без залога"><Input type="number" min={0} value={f.deposit ?? ''} onChange={(e) => set('deposit', num(e.target.value))} /></Field>
+            <Field label="Залог, $" hint="Равен цене, можно изменить. 0 — без залога"><Input type="number" min={0} value={f.deposit ?? price ?? ''} onChange={(e) => set('deposit', num(e.target.value))} /></Field>
           </>
         )}
         <Field label="Заголовок" className="span2"><Input value={f.headline || ''} placeholder="Например: No one lived" onChange={(e) => set('headline', e.target.value)} /></Field>
@@ -1088,7 +1091,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         </div>
       </div>
       <div className="divider" />
-      <PostFieldsForm value={v.post_fields || {}} onChange={(pf) => upd('post_fields', pf)} />
+      <PostFieldsForm value={v.post_fields || {}} price={v.price} onChange={(pf) => upd('post_fields', pf)} />
       {locked.size > 0 && (
         <div className="col gap-sm mt-lg">
           <div className="alert alert-info" style={{ fontSize: 13 }}>Объект проверен оператором: собственник и телефон, адрес, кадастр, ссылка, эксклюзив, цена и залог меняются только через «Запрос оператору». Остальное сохранится сразу.</div>

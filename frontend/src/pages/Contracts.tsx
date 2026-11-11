@@ -20,7 +20,7 @@ const STEPS = ['Тип', 'Язык', 'Данные', 'Проверка', 'Док
 const TYPE_ICON: Record<CxType, typeof Home> = { rent: Home, comm: Building2, sale: KeyRound };
 const DRAFT_KEY = 'hig-contract-draft';
 
-interface Draft { type: CxType | ''; lang: CxLang | ''; data: CxData; depTouched: boolean }
+interface Draft { type: CxType | ''; lang: CxLang | ''; data: CxData; depTouched: boolean; endTouched?: boolean }
 
 function loadDraft(): Draft | null {
   try { const s = localStorage.getItem(DRAFT_KEY); return s ? JSON.parse(s) as Draft : null; } catch { return null; }
@@ -146,13 +146,14 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const [lang, setLang] = useState<CxLang | ''>(draft?.lang || '');
   const [d, setD] = useState<CxData>(draft?.data || { ...EMPTY, timestamp: todayStr() });
   const [depTouched, setDepTouched] = useState(!!draft?.depTouched);
+  const [endTouched, setEndTouched] = useState(!!draft?.endTouched); // the agent typed the end date: no more auto end
   const [tab, setTab] = useState<'parties' | 'property' | 'money'>('parties');
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState<Set<keyof CxData>>(new Set());
   const [prefilled, setPrefilled] = useState<{ key: string; text: string } | null>(null);
   const [petTouched, setPetTouched] = useState(false);
 
-  useEffect(() => { saveDraft({ type, lang, data: d, depTouched }); }, [type, lang, d, depTouched]);
+  useEffect(() => { saveDraft({ type, lang, data: d, depTouched, endTouched }); }, [type, lang, d, depTouched, endTouched]);
 
   // ---- prefill from /contracts?deal_id=
   const deal = useQuery({ queryKey: ['deal', dealId], queryFn: () => api.deals.get(dealId), enabled: !!dealId });
@@ -170,6 +171,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     if (filled.with_pets && !filled.pet_deposit && Number(filled.deposit_usd) > 0) filled.pet_deposit = String(Math.round(Number(filled.deposit_usd) * 0.5));
     setD((cur) => ({ ...EMPTY, timestamp: cur.timestamp || todayStr(), ...filled }));
     setDepTouched(false);
+    setEndTouched(false);
     setPrefilled({ key, text });
     setStep((s) => (s < 2 ? 2 : s));
     toast(`Данные подставлены из ${key.startsWith('lead') ? 'заявки' : 'сделки'} #${key.split(':')[1]}`);
@@ -215,14 +217,21 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         const dep = parseFloat(n.deposit_usd) || 0;
         if (dep > 0) n.pet_deposit = String(Math.round(dep * 0.5));
       }
-      if (k === 'start_rent' || k === 'end_rent') {
+      // the term drives the dates: start defaults to today, end = start + term until the agent types the end himself
+      if (k === 'rent_duration_months' && !n.start_rent && Number(v) > 0) n.start_rent = new Date().toLocaleDateString('sv');
+      if ((k === 'rent_duration_months' || k === 'start_rent') && !endTouched && Number(n.rent_duration_months) > 0 && n.start_rent) {
+        n.end_rent = addMonthsIso(n.start_rent, Number(n.rent_duration_months));
+      } else if (k === 'start_rent' || k === 'end_rent') {
         const m = monthsBetween(n.start_rent, n.end_rent);
         if (m) n.rent_duration_months = m;
       }
-      if (k === 'rent_duration_months' && n.start_rent && Number(v) > 0) n.end_rent = addMonthsIso(n.start_rent, Number(v));
+      // pay day = the start's day, while it is empty or still the old start's day
+      const dayOf = (iso: string) => (iso ? String(Number(iso.slice(8, 10))) : '');
+      if (n.start_rent !== x.start_rent && (!x.pay_day || x.pay_day === dayOf(x.start_rent))) n.pay_day = dayOf(n.start_rent);
       return n;
     });
     if (k === 'deposit_usd') setDepTouched(true);
+    if (k === 'end_rent') setEndTouched(!!v);
   };
   const sale = type === 'sale';
   const req = useMemo(() => new Set(type ? requiredFields(type) : []), [type]);
@@ -386,14 +395,11 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
           ) : (
             <div className="col gap-lg">
               <div className="form-grid">
-                {F({ k: 'start_rent', label: 'Начало аренды', type: 'date' })}
-                {F({ k: 'end_rent', label: 'Окончание аренды', type: 'date' })}
                 {F({ k: 'rent_duration_months', label: 'Срок, месяцев', type: 'number', placeholder: 'Количество месяцев' })}
                 {F({ k: 'pay_day', label: 'День оплаты (1–31)', type: 'number', placeholder: 'Число месяца' })}
                 {F({ k: 'price_usd', label: 'Цена в месяц, USD', type: 'number', placeholder: 'Ежемесячная плата' })}
-                {F({ k: 'deposit_usd', label: 'Депозит, USD', type: 'number', placeholder: 'Сумма депозита' })}
+                {F({ k: 'deposit_usd', label: 'Депозит, USD', type: 'number', placeholder: 'Равен цене, можно изменить' })}
               </div>
-              {d.start_rent && <div className="muted" style={{ fontSize: 13 }}>Первый платёж за период {cxFmt(d.start_rent)} – {cxOnem(d.start_rent)}</div>}
               {type === 'rent' && <div className="outcome-card col">
                 <Switch checked={d.with_pets} onChange={(v) => set('with_pets', v)} label="С животными" />
                 <span className="muted" style={{ fontSize: 12 }}>Договор по шаблону Pet DRAFT (с депозитом за животных)</span>
@@ -403,6 +409,14 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
                   </Field>
                 )}
               </div>}
+              <div className="form-grid">
+                {F({ k: 'start_rent', label: 'Начало аренды', type: 'date' })}
+                {F({ k: 'end_rent', label: 'Окончание аренды', type: 'date' })}
+              </div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {d.start_rent ? `Первый платёж за период ${cxFmt(d.start_rent)} – ${cxOnem(d.start_rent)}. ` : ''}
+                {endTouched ? 'Окончание введено вручную.' : 'Окончание = начало + срок.'}
+              </div>
             </div>
           ))}
         </Card>
