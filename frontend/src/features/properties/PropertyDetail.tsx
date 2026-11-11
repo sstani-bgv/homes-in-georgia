@@ -17,7 +17,7 @@ import { ARCHIVE_REASON, DISTRICTS, distLabel, SOURCE_LABEL, bedroomsLabel, dema
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
-import { cadastralError, cadastralHint, cadastralNorm } from '../../lib/cadastral';
+import { cadastralError, cadastralHint, cadastralInput, cadastralNorm } from '../../lib/cadastral';
 import { pool, shrinkPhoto } from '../../lib/upload';
 import { AddressField, type Point } from '../../components/AddressField';
 
@@ -1205,7 +1205,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
           <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name || ''}
             onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>
         )}
-        <Field label="Кадастровый код" className="span2" hint={cadastralHint(v.cadastral_code, p.cadastral_code, lockHint('cadastral_code'))}><Input value={v.cadastral_code || ''} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral_code', e.target.value)} onBlur={() => { if (f.cadastral_code) upd('cadastral_code', cadastralNorm(f.cadastral_code)); }} /></Field>
+        <Field label="Кадастровый код" className="span2" hint={cadastralHint(v.cadastral_code, p.cadastral_code, lockHint('cadastral_code'))}><Input value={v.cadastral_code || ''} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral_code', cadastralInput(e))} onBlur={() => { if (f.cadastral_code) upd('cadastral_code', cadastralNorm(f.cadastral_code)); }} /></Field>
         <Field label="Описание" className="span2"><Textarea value={v.description || ''} onChange={(e) => upd('description', e.target.value)} /></Field>
         <div className="span2 col gap-sm">
           <Switch checked={!!v.is_exclusive} onChange={(x) => upd('is_exclusive', x)} label="Эксклюзив" />

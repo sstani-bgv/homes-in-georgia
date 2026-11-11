@@ -1,7 +1,7 @@
 // /contracts and /m/contracts — contract generator (port of the old CRM tab «tab-contract»).
 // Output is a printable A4 document (window.print + print CSS) and a .doc file for Word; no external services.
 import { useEffect, useMemo, useState } from 'react';
-import { cadastralError, cadastralHint } from '../lib/cadastral';
+import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw, Send } from 'lucide-react';
@@ -298,7 +298,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     <Field label={`${label}${req.has(k) ? ' *' : ''}`} hint={k === 'cadastral_code' ? cadastralHint(String(d[k] ?? '')) : undefined}>
       <Input type={t} value={String(d[k] ?? '')} placeholder={placeholder} inputMode={t === 'number' ? 'decimal' : undefined}
         aria-invalid={missing.has(k) || undefined} style={missing.has(k) ? { borderColor: 'var(--accent)' } : undefined}
-        onChange={(e) => set(k, e.target.value)} />
+        onChange={(e) => set(k, k === 'cadastral_code' ? cadastralInput(e) : e.target.value)} />
     </Field>
   );
 
@@ -381,7 +381,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
           {tab === 'property' && (
             <div className="col gap-lg">
               <div className="form-grid">
-                <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.10.02.20.0.01.01.84A' })}</div>
+                <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.13.015.029.01.150' })}</div>
                 <div className="span2">
                   {ownerPid ? <RegistryApps base="/registry/applications" personalId={ownerPid} t={REG_RU} />
                     : <span className="faint" style={{ fontSize: 12 }}>Введите личный номер собственника на вкладке «Стороны» — здесь появятся его заявки в Публичном реестре с кадастровым кодом.</span>}

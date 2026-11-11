@@ -8,7 +8,7 @@ import { errText } from '../components/toast';
 import { Button, ErrorBox, Field, Input, Loading, Seg } from '../components/ui';
 import { LANG_LABEL, buildExclusivePdf, confirmText, tbilisiNow, type Lang } from '../lib/exclusivePdf';
 import { fmtDateTime, phoneInput } from '../lib/format';
-import { cadastralError, cadastralNorm } from '../lib/cadastral';
+import { cadastralError, cadastralInput, cadastralNorm } from '../lib/cadastral';
 import { CheckCircle2, Copy, ExternalLink, Upload } from 'lucide-react';
 import { RegistryApps, day, useSettledId, type RegApp, type RegTexts } from '../components/RegistryApps';
 
@@ -152,7 +152,7 @@ export function ExclusiveSignPage() {
         </span>
       </>} />
       {extract && fromExtract && <div className="alert alert-ok">{td.fromExtract}: <b>{fromExtract}</b></div>}
-      {extract && fromExtract === null && !q.data.cadastral_code && <div className="form-grid"><Field label={t.cad} hint={cadBad ? <span style={{ color: 'var(--accent)' }}>{t.cadBad}</span> : undefined}><Input value={f.cadastral_code} placeholder="01.14.12.003.045" onChange={(e) => setF({ ...f, cadastral_code: e.target.value })} onBlur={() => { if (!cadBad && f.cadastral_code !== q.data?.cadastral_code) setF({ ...f, cadastral_code: cadastralNorm(f.cadastral_code) }); }} /></Field></div>}
+      {extract && fromExtract === null && !q.data.cadastral_code && <div className="form-grid"><Field label={t.cad} hint={cadBad ? <span style={{ color: 'var(--accent)' }}>{t.cadBad}</span> : undefined}><Input value={f.cadastral_code} placeholder="01.14.12.003.045" onChange={(e) => setF({ ...f, cadastral_code: cadastralInput(e) })} onBlur={() => { if (!cadBad && f.cadastral_code !== q.data?.cadastral_code) setF({ ...f, cadastral_code: cadastralNorm(f.cadastral_code) }); }} /></Field></div>}
     </div>
     <FilePick label={td.passport} hint={td.passportHint} accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf,.pdf" file={idDoc} onFile={setIdDoc} t={td} />
     <div className="col gap-sm">

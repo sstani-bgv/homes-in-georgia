@@ -14,7 +14,7 @@ import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from
 import { OwnerSuggest } from '../../components/OwnerSuggest';
 import { levelFor, money, phoneInput, todayStr } from '../../lib/format';
 import { AXES, AXIS_NOTE, PARTICIPATE, PEOPLE_HINT, defaultScenario, peopleRule, type Axis, type DistRow, type Scenario } from '../../lib/scenarios';
-import { cadastralError, cadastralHint, cadastralNorm } from '../../lib/cadastral';
+import { cadastralError, cadastralHint, cadastralInput, cadastralNorm } from '../../lib/cadastral';
 
 function useDebounced<T>(v: T, ms = 300): T {
   const [d, setD] = useState(v);
@@ -264,7 +264,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
           </div>
           <div className="form-grid">
             <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} disabled={!manual && (!pid || ro('address'))} /></Field>
-            <Field label="Кадастровый код" hint={cadastralHint(f.cadastral, obj?.fields?.cadastral)}><Input value={f.cadastral} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral', e.target.value)} onBlur={() => f.cadastral && f.cadastral !== obj?.fields?.cadastral && upd('cadastral', cadastralNorm(f.cadastral))} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
+            <Field label="Кадастровый код" hint={cadastralHint(f.cadastral, obj?.fields?.cadastral)}><Input value={f.cadastral} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral', cadastralInput(e))} onBlur={() => f.cadastral && f.cadastral !== obj?.fields?.cadastral && upd('cadastral', cadastralNorm(f.cadastral))} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
             <Field label="Ссылка на объявление"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} disabled={!manual && (!pid || ro('ad_link'))} /></Field>
             {ro('metro') && <Field label="Метро" className="span2"><Input value={f.metro} disabled /></Field>}
             {f.deal_type === 'rent' && <>

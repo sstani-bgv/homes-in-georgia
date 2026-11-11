@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Search } from 'lucide-react';
 import { api } from '../api';
+import { cadastralInput } from '../lib/cadastral';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input } from '../components/ui';
 import { fmtDate, phoneInput } from '../lib/format';
@@ -37,7 +38,7 @@ export function PropertyCheck() {
           <Field label="Телефон собственника" hint="Любой формат, с кодом страны или без"><Input value={f.phone} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} inputMode="tel" /></Field>
           <Field label="Адрес объекта" hint="Улица и номер, частичное совпадение работает"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
           <Field label="Ссылка на объявление"><Input value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} /></Field>
-          <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => setF({ ...f, cadastral: e.target.value })} /></Field>
+          <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => setF({ ...f, cadastral: cadastralInput(e) })} /></Field>
         </div>
         <div className="row mt">
           <Button disabled={empty} loading={busy} onClick={run}><Search size={16} />Искать в базе</Button>
