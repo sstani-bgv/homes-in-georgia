@@ -54,7 +54,7 @@ export const api = {
     board: () => then(http.get<Record<string, Property[]>>('/properties/board'), (d) => normBoard(d, normProperty)),
     boardHide: (status: 'published' | 'rented') => http.post<{ hidden: number }>('/properties/board/hide', { status }),
     take: (listing_id: string) => http.post<Property>('/properties', { listing_id }),
-    create: (b: Partial<Property>) => http.post<Property>('/properties', b),
+    create: (b: Partial<Property> & { owner_name?: string }) => http.post<Property>('/properties', b),
     get: (id: number) => then(http.get<Property>(`/properties/${id}`), normProperty),
     update: (id: number, b: Partial<Property> & { owner_name?: string; owner_phone?: string; reason?: string }) => http.patch<Property>(`/properties/${id}`, b),
     call: (id: number, reached: boolean) => http.post<Property>(`/properties/${id}/call`, { reached }),

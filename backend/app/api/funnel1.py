@@ -191,7 +191,11 @@ def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function")
 @router.post("/properties")
 def properties_create(body: PropertyIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     data = body.model_dump(exclude_none=True)
-    p = P.take(db, data.pop("listing_id", None), user, data)
+    listing_id = data.pop("listing_id", None)
+    walk_in = not listing_id and data.get("owner_phone")  # «Объект вручную»: the owner came himself, no call step
+    p = P.take(db, listing_id, user, data, commit=not walk_in)
+    if walk_in:  # one transaction: a bad phone leaves no half-made object behind
+        p = P.owner_or_agent(db, p.id, user, True, data.get("owner_name"), data["owner_phone"])
     return P.out(db, p, user, full=True)
 
 

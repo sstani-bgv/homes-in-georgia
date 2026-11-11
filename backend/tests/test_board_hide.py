@@ -34,3 +34,15 @@ def test_agent_sees_only_own_objects_in_the_base(db, client):
     assert ids(ag, "base=1&status=published,rented") == [mine.id]
     assert ids(ag, f"base=1&agent_id={other.id}") == [mine.id]  # no way around it
     assert ids(ag, "status=published") == [mine.id]
+
+
+def test_manual_object_with_owner_skips_the_call(db, client):
+    """Stanislav 11-11: «Объект вручную» — the owner came himself: straight to «Собственник», no call step."""
+    ag = make_user(db, "agent")
+    r = client.post("/api/properties", json={"district": "Ваке", "source_type": "direct", "owner_name": "Нино",
+                                             "owner_phone": "+995 555 11 22 33"}, headers=auth(ag))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "owner_confirmed" and r.json()["owner"]["name"] == "Нино"
+    bad = client.post("/api/properties", json={"source_type": "direct", "owner_name": "X", "owner_phone": "12"}, headers=auth(ag))
+    if bad.status_code >= 400:  # a rejected phone leaves no half-made object
+        assert db.query(Property).count() == 1

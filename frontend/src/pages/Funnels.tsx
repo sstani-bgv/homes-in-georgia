@@ -9,7 +9,7 @@ import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Select, Tabs } from '../components/ui';
 import { ArchivedLeads, LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
-import { MyProperties, NewListings, PropertyBoard, PropertyList } from '../features/properties/lists';
+import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
 import { DISTRICTS } from '../lib/format';
@@ -17,26 +17,28 @@ import { useNavigate } from 'react-router-dom';
 
 type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archive';
 
+/** «Объект вручную»: the owner came to the office himself. His contact makes the object «Собственник» at once (no call
+ * step); the card then opens the post generator, where the agent fills everything (address, price, photos...). */
 function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [f, setF] = useState({ address: '', district: '', price: '', bedrooms: '', source_url: '' });
+  const [f, setF] = useState({ owner_name: '', owner_phone: '', address: '', district: '' });
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
   const m = useMutation({
-    mutationFn: () => api.properties.create({ address: f.address, district: f.district, price: Number(f.price) || null, bedrooms: Number(f.bedrooms) || null, source_url: f.source_url || null, source_type: 'direct' }),
-    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); navigate(`/objects/${p.id}`); },
+    mutationFn: () => api.properties.create({ address: f.address || null, district: f.district || null, source_type: 'direct', owner_name: f.owner_name, owner_phone: f.owner_phone }),
+    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF({ owner_name: '', owner_phone: '', address: '', district: '' }); navigate(`/objects/${p.id}`); },
     onError: (e) => toast(errText(e), true),
   });
   return (
     <Modal open={open} onClose={onClose} title="Объект вручную">
+      <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Собственник пришёл сам: объект сразу в статусе «Собственник», дальше откроется пост-генератор — там цена, параметры и фото.</div>
       <div className="form-grid">
-        <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
+        <Field label="Имя собственника"><Input value={f.owner_name} onChange={(e) => setF({ ...f, owner_name: e.target.value })} /></Field>
+        <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XX XX XX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: e.target.value })} /></Field>
+        <Field label="Адрес (можно позже)" className="span2"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
         <Field label="Район"><Select value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })} placeholder="—" options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
-        <Field label="Цена, $"><Input type="number" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></Field>
-        <Field label="Спальни"><Input type="number" value={f.bedrooms} onChange={(e) => setF({ ...f, bedrooms: e.target.value })} /></Field>
-        <Field label="Ссылка"><Input value={f.source_url} onChange={(e) => setF({ ...f, source_url: e.target.value })} /></Field>
       </div>
-      <Button className="mt-lg" disabled={!f.address} loading={m.isPending} onClick={() => m.mutate()}>Создать и взять в работу</Button>
+      <Button className="mt-lg" disabled={!f.owner_name.trim() || !f.owner_phone.trim()} loading={m.isPending} onClick={() => m.mutate()}>Создать и заполнить пост</Button>
     </Modal>
   );
 }
@@ -62,7 +64,7 @@ export function ObjectsPage() {
         { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
       ]} />
       {tab === 'new' && <NewListings />}
-      {tab === 'board' && <PropertyBoard />}
+      {tab === 'board' && <WorkProperties />}
       {tab === 'review' && <PropertyList key="review" status="review" />}
       {tab === 'requests' && <ChangeRequestQueue />}
       {tab === 'mine' && (isStaff ? <PropertyList mine /> : <MyProperties />)}

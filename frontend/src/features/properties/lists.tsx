@@ -367,6 +367,17 @@ export function MyProperties({ base = '' }: { base?: string }) {
   );
 }
 
+/** «В работе»: the board, or the same objects as a table (Stanislav 11-11); published / rented live in «База объектов» */
+export function WorkProperties() {
+  const [view, setView] = useState<'board' | 'list'>('board');
+  return (
+    <div className="col">
+      <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
+      {view === 'board' ? <PropertyBoard /> : <PropertyList key="work" status={PROPERTY_BOARD.filter((s) => s !== 'published' && s !== 'rented').join(',')} />}
+    </div>
+  );
+}
+
 type PS = keyof typeof PROPERTY_STATUS;
 /** «База объектов»: shot and verified by the operator (backend properties.BASE_STATUSES + published_at, ?base=1) */
 const BASE: PS[] = ['published', 'rented'];

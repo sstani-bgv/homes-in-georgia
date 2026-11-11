@@ -27,7 +27,7 @@ function stepOf(p: Property): number {
     case 'new': return 0;
     case 'taken': case 'call_failed': return 1;
     case 'agent_marked': return 2;
-    case 'owner_confirmed': return 3;
+    case 'owner_confirmed': return p.source_type === 'direct' ? 4 : 3; // walk-in owner: no shoot booking, the post is next
     case 'shoot_scheduled': case 'media_uploaded': case 'returned': return 4;
     case 'review': return 5;
     case 'published': case 'rented': return 7;
@@ -1028,10 +1028,12 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const mine = p.agent_id === user?.id || p.agent?.id === user?.id;
   const canWork = mine || isStaff;
 
+  // «Объект вручную»: the owner came himself, no call and no shoot booking: straight to the post generator
+  const walkIn = p.status === 'owner_confirmed' && p.source_type === 'direct';
   let action: React.ReactNode = null;
   if (['taken', 'call_failed'].includes(p.status)) action = canWork ? <CallStep p={p} /> : null;
-  else if (p.status === 'owner_confirmed') action = canWork ? <ShootStep p={p} /> : null;
-  else if (['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <PostGeneratorStep key={p.id} p={p} canEdit={canWork} />;
+  else if (p.status === 'owner_confirmed' && !walkIn) action = canWork ? <ShootStep p={p} /> : null;
+  else if (walkIn || ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status)) action = <PostGeneratorStep key={p.id} p={p} canEdit={canWork} />;
   else if (p.status === 'review') action = isStaff ? <ReviewStep p={p} /> : <div className="alert alert-info">Отправлено оператору · фото и чек-лист закрыты. Оператор проверит и опубликует, обычно до 1 часа. Если нужно что-то переснять, объект вернётся к вам с комментарием.</div>;
   else if (p.status === 'agent_marked') action = <div className="alert alert-info">Ответил агент · объект остаётся в базе с пометкой «агент»</div>;
   else if (['published', 'rented'].includes(p.status)) action = (
@@ -1045,7 +1047,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
     </div>
   );
   // the media / review steps show the files with their own controls
-  const mediaInAction = ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status) || (p.status === 'review' && isStaff);
+  const mediaInAction = walkIn || ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status) || (p.status === 'review' && isStaff);
   const ownerVisible = !!(p.owner?.phone || p.owner_phone);
   const objLink = (oid: number) => (compact ? `/m/properties/${oid}` : `/objects/${oid}`);
 
