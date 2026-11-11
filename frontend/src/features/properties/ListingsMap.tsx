@@ -1,12 +1,12 @@
-// «Новые объявления» as a map (David 2026-11-09): the same filtered feed, a price pin per ad with a pin; a tap shows the ad's
-// card under the map (with «Беру в работу»), «Рядом со мной» centres on the agent so he sees what came out around him.
+// «Новые объявления» as a map (David 2026-11-09): the same filtered feed, a price pin per ad with a pin; a tap opens the ad's
+// card in a popup (with «Беру в работу»; Stanislav 11-11, it was under the map), «Рядом со мной» centres on the agent so he sees what came out around him.
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { LocateFixed } from 'lucide-react';
 import type { Listing } from '../../api/types';
-import { Button } from '../../components/ui';
+import { Button, Modal } from '../../components/ui';
 
 const TBILISI: L.LatLngTuple = [41.7151, 44.8271];
 const price = (l: Listing) => (l.price != null ? `$${Math.round(Number(l.price))}` : '?');
@@ -19,8 +19,8 @@ export function ListingsMap({ items, card }: { items: Listing[]; card: (l: Listi
   const [me, setMe] = useState<string>('');
   const fit = useRef<() => void>(() => {});  // pins → view, until the agent moves the map himself
   const moved = useRef(false);
-  const cardBox = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (sel) cardBox.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [sel?.id]);
+  // taken / marked as agent: the ad leaves the feed, so the popup closes with it
+  useEffect(() => { if (sel && !items.some((l) => l.id === sel.id)) setSel(null); }, [items, sel]);
   const pinned = items.filter((l) => l.lat != null && l.lng != null);
 
   useEffect(() => {
@@ -71,7 +71,9 @@ export function ListingsMap({ items, card }: { items: Listing[]; card: (l: Listi
       </div>
       {me && <div className="muted" style={{ fontSize: 12 }}>{me}</div>}
       <div ref={box} style={{ height: '60vh', minHeight: 320, borderRadius: 12, overflow: 'hidden', zIndex: 0 }} />
-      {sel && <div ref={cardBox} style={{ maxWidth: 420 }}>{card(sel)}</div>}
+      <Modal open={!!sel} onClose={() => setSel(null)} title={sel ? `${price(sel)} · ${sel.district || sel.address || 'Объявление'}` : ''}>
+        {sel && card(sel)}
+      </Modal>
     </div>
   );
 }
