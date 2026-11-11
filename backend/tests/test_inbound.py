@@ -79,6 +79,12 @@ def chan(text, mid=500, edited=False):
 
 # ---------------------------------------------------------------- parsers
 
+def test_parse_listing_takes_the_agent_after_david():
+    """Our posts print «+995 599 20 67 16 #David · Agent #Zaza»: the agent is the last tag of the phone line."""
+    post = CHANNEL_POST.split("+995")[0] + "+995 599 20 67 16 #David · Agent #Zaza\n" + "x" * 100
+    assert inbound.parse_listing(post, "channel")["agent_tag"] == "Zaza"
+
+
 def test_parse_listing_channel_and_topic():
     p = inbound.parse_listing(CHANNEL_POST, "channel")
     assert p["agent_tag"] == "Nika" and p["district"] == "Vake" and p["price"] == 1200

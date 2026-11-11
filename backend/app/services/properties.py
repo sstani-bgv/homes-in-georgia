@@ -1210,6 +1210,13 @@ def maps_url(db: Session, p: Property) -> str | None:
     return "https://www.google.com/maps/search/?api=1&query=" + "".join(c if ord(c) > 127 else quote(c, safe=",+") for c in q)
 
 
+def phone_line(agent: User | None) -> str:
+    """The number is David's, so #David sits next to it; the object's agent follows as the LAST hashtag of the line
+    (inbound.parse_listing attributes a channel post to the last tag on the +995 line)."""
+    tag = users_svc.tag_of(agent)
+    return "+995 599 20 67 16 #David" + (f" · Agent {tag}" if tag and tag.lower() != "#david" else "")
+
+
 def post_text(db: Session, p: Property) -> str:
     """Channel caption in the agency's own format: a port of buildRentPost() / buildSalePost() from the agency's old HTML
     post generator, fed by the object's fields and post_fields (empty ones are left out, as the generator does). The
@@ -1281,7 +1288,7 @@ def post_text(db: Session, p: Property) -> str:
         if p.price is not None:
             lines.append(next((t for top, t in PRICE_TAGS if int(p.price) <= top), "#Price1200plus"))
     agent = db.get(User, p.agent_id) if p.agent_id else None
-    lines += ["", f"📲 @David_Tibelashvili | \n+995 599 20 67 16 {users_svc.tag_of(agent)}", "", "🌟 Check all listings | Reviews",
+    lines += ["", f"📲 @David_Tibelashvili | \n{phone_line(agent)}", "", "🌟 Check all listings | Reviews",
               "", "📍APARTMENTS ON MAP📍", "", "📱 Instagram 🗳 FB 🎥 YouTube"]
     if sale:
         lines += ["", "SALE IN TBILISI🇬🇪"]
@@ -1361,7 +1368,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     agent = db.get(User, p.agent_id) if p.agent_id else None
     tags = " ".join(hashtags(post_text(db, p)))
     out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p>"
-               f"<p>📲 +995 599 20 67 16 {h(users_svc.tag_of(agent))}<br>"
+               f"<p>📲 {h(phone_line(agent))}<br>"
                '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 All listings</a> · <a href="https://t.me/reviews_rent_tbilisi">Reviews</a> · '
                '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">Instagram</a> · '
                '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">FB</a> · '
@@ -1384,6 +1391,9 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     like = f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button>'
     where = hge_map_url(p.address) if p.address else pin or url  # Irakli's map on this object, else our pin map
     out.append("<tg-button-row>" + (btn("📍 On the map", where) if where else "") + like + "</tg-button-row>")
+    # «Contact» (back by Stanislav 11-11, own full-width row): /start p<id> -> journey.on_post_start, a lead as before
+    out.append("<tg-button-row>" + btn("💬 Contact", f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}")
+               + "</tg-button-row>")
     return "".join(out)
 
 

@@ -120,7 +120,7 @@ def test_post_fields_validated_and_full_rent_post(db, client):
     for line in ("⭐️ No one lived ⭐️", "❗️#Exclusive", "🏢 #1Bed #Apartment for #Rent", "✨ #OldBuilding | #Mixed",
                  "🏠 60 sq.m | 10/12 Floor | #CentralHeating", "✅ #Balcony  ✅ #WiFi  ✅ #Stove", "✅ #Conditioner",
                  "✖️ #Elevator  ✖️ #Oven  ✖️ #ParkingPlace", "👬Tenants: 1-3", "🐕Pets: #ByAgreement",
-                 "🕐 #6Month #12Month", "💰 500$ + Deposit 500$", "0% Commission", "#Price300to500", "+995 599 20 67 16 #Zaza"):
+                 "🕐 #6Month #12Month", "💰 500$ + Deposit 500$", "0% Commission", "#Price300to500", "+995 599 20 67 16 #David · Agent #Zaza"):
         assert line in lines, line
     assert lines.index("👬Tenants: 1-3") < lines.index("💰 500$ + Deposit 500$")  # the generator's order
     html = post_html(text)

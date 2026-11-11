@@ -191,8 +191,9 @@ def parse_listing(text: str, mode: str = "channel") -> dict | None:
     if mode == "topic" and len(text) < 50:
         return None
     before = text.split("[Check all listings]")[0] or text
-    m = (re.search(r"\+995[^\n#]*#([A-Za-zА-Яа-я']+)", before) if mode == "channel"
-         else re.search(r"[+]995[^\r\n#]*#([A-Za-zА-Яа-я]+)", before))
+    # the last hashtag of the first +995 line: «+995 … #Zaza» (old posts) and «+995 … #David · Agent #Zaza» (ours)
+    m = (re.search(r"\+995[^\n]*#([A-Za-zА-Яа-я']+)", before) if mode == "channel"
+         else re.search(r"[+]995[^\r\n]*#([A-Za-zА-Яа-я]+)", before))
     tag = m[1].replace("'", "") if m else ""
     candidates = [] if tag else [t for t in reversed(re.findall(r"#([A-Z][a-z]+)", before)) if t.lower() not in NON_AGENT_TAGS]
     district = next((d for d in DISTRICTS if "#" + d.replace(" ", "") in text), "")

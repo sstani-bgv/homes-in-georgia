@@ -1,4 +1,5 @@
 """David 2026-11-07: twin beats a closer flat in the channel; agent submit needs full params and no existing object."""
+from app.config import settings as env
 from app.models import Property
 from app.services import properties
 from app.services.errors import DomainError
@@ -205,14 +206,17 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert "<h2>$1 500 · 3 bedrooms · Vake</h2><p>Discount · 140 m² · 4/9 floor · ID: " in h  # the @tbilisi_rent title lines
     assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h and "WiFi · Smart TV" in h
     assert "<details><summary>Parameters and amenities</summary>" in h  # collapsed, as in Irakli's video
-    assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16" in h  # contacts inside Tags
+    assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16 #David" in h  # contacts inside Tags
     assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
-    assert h.count("<tg-button ") == 2 and "RentInTbilisi_bot" not in h and "Contact" not in h
+    assert h.count("<tg-button ") == 3 and "RentInTbilisi_bot" not in h
+    # «Contact» is back (Stanislav 11-11): its own full-width row, a link to our bot -> /start p<id> (a lead)
+    assert h.endswith(f'<tg-button-row><tg-button type="url" url="https://t.me/{env.BOT_USERNAME.lstrip("@")}?start=p{p.id}">'
+                      '💬 Contact</tg-button></tg-button-row>')
     # «On the map»: Irakli's hge.ge map filtered to this address; «I like it»: a plain bot button (callback), no link arrow
     assert '<tg-button type="url" url="https://hge.ge/map/?q=%D1%83%D0%BB+%D0%A7%D0%B0%D0%B2%D1%87%D0%B0%D0%B2%D0%B0%D0%B4%D0%B7%D0%B5+33">' in h
     p.address = None
     assert '/map?pin=41.700000%2C44.760000&amp;' in properties.post_rich(db, p, [])  # no address: our pin map
-    assert h.endswith(f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button></tg-button-row>')
+    assert f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button></tg-button-row>' in h
 
 
 def test_rich_post_keeps_only_the_description_prose_of_an_old_post():
