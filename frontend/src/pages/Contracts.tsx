@@ -304,7 +304,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     mutationFn: () => {
       const b = { kind: type as CxType, lang: lang as CxLang, html: pdfHtml(doc!), title: doc!.title, cadastral: d.cadastral_code,
         address: d.street_house, client_name: d.client_full_name, owner_name: d.owner_full_name,
-        lead_id: leadId || leadC.data?.lead_id || null, deal_id: dealId || leadC.data?.deal_id || null };
+        lead_id: leadId || leadC.data?.lead_id || null, deal_id: dealId || leadC.data?.deal_id || null,
+        data: d };  // the wizard's CxData: the deal page prefills from the signed contract (contracts.data, leads session)
       return saved && saved.status === 'draft' ? api.contracts.update(saved.id, b) : api.contracts.create(b);
     },
     onSuccess: (c) => { setSaved(c); toast(`PDF сохранён: договор #${c.id}`); },
