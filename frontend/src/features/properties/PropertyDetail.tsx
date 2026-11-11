@@ -12,8 +12,8 @@ import { FIELD_FILTER } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { ARCHIVE_REASON, DISTRICTS, distLabel, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
+import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea, DistrictSelect } from '../../components/ui';
+import { ARCHIVE_REASON, distLabel, districtLabel, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
@@ -355,7 +355,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="❗️ Exclusive listing" />
           {f.is_exclusive && <div ref={exRef} className="outcome-card"><ExclusiveContract p={p} canEdit={canEdit} nested /></div>}
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
-          <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
+          <Field label="Район"><DistrictSelect value={f.district} onChange={(v) => upd('district', v)} /></Field>
           <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${distLabel(metroM)} от точки на карте` : undefined}>
             <Select value={pf.metro || ''} placeholder="—" onChange={(e) => { setMetroM(null); setPf('metro', e.target.value); }} options={opts(one('metro'))} /></Field>
           <div className="field"><span className="label">Адрес</span>
@@ -1192,7 +1192,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
     <Modal open={open} onClose={onClose} title="Поля объекта">
       <div className="form-grid">
         {(p.missing || []).length > 0 && <div className="alert alert-warn span2" style={{ fontSize: 13, display: 'block' }}>Для отправки оператору не хватает: <b>{(p.missing || []).join(', ')}</b></div>}
-        <Field label="Район"><Select value={v.district || ''} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
+        <Field label="Район"><DistrictSelect value={v.district} onChange={(x) => upd('district', x)} /></Field>
         <Field label="Адрес" hint={lockHint('address')}><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
         <Field label="Цена, $" hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
         <Field label="Спальни"><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
@@ -1314,7 +1314,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           </div>
           <div className="price-col">
             <div className="price" style={{ fontSize: 24 }}>{money(p.price, p.currency || 'USD')}<span className="muted" style={{ fontSize: 12 }}>/мес</span></div>
-            <div className="muted" style={{ fontSize: 13 }}>{[p.district, bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ')}</div>
+            <div className="muted" style={{ fontSize: 13 }}>{[districtLabel(p.district), bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ')}</div>
           </div>
         </div>
         <div className="divider" />
@@ -1367,7 +1367,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           <Card label="Объект" title="Параметры" actions={canWork ? <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil size={14} />Править</Button> : undefined}>
             <KV items={[
               ['Адрес', p.address || '—'],
-              ['Район', p.district || '—'],
+              ['Район', districtLabel(p.district) || '—'],
               ['Цена', money(p.price, p.currency || 'USD')],
               ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
               ['Комнат', p.rooms ?? '—'],

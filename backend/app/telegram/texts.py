@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app import districts
+
 # questionnaire options (A1a-A1c); the codes are what clients.profile stores (ARCHITECTURE §4.3)
 def _same(x):
     return {"ru": x, "en": x, "ka": x}
@@ -15,14 +17,12 @@ TERMS = [("1-3", {"ru": "до 3 мес", "en": "up to 3 mo", "ka": "3 თვე�
 BUDGETS = [("0-500", {"ru": "$ до 500", "en": "up to $500", "ka": "$500-მდე"}), ("500-800", {"ru": "500-800", "en": "$500-800", "ka": "$500-800"}),
            ("800-1200", {"ru": "800-1200", "en": "$800-1200", "ka": "$800-1200"}), ("1200-", {"ru": "1200+", "en": "$1200+", "ka": "$1200+"})]
 BEDROOMS = [("0", {"ru": "Студия", "en": "Studio", "ka": "სტუდიო"}), ("1", _same("1")), ("2", _same("2")), ("3", _same("3+"))]
-# district names as listings.district stores them (ru) + English and Georgian labels
-DISTRICTS = [("Ваке", "Vake", "ვაკე"), ("Сабуртало", "Saburtalo", "საბურთალო"), ("Мтацминда", "Mtatsminda", "მთაწმინდა"),
-             ("Сололаки", "Sololaki", "სოლოლაკი"), ("Вера", "Vera", "ვერა"), ("Дидубе", "Didube", "დიდუბე"),
-             ("Дигоми", "Digomi", "დიღომი"), ("Исани", "Isani", "ისანი"), ("Глдани", "Gldani", "გლდანი"),
-             ("Старый Тбилиси", "Old Tbilisi", "ძველი თბილისი"), ("Надзаладеви", "Nadzaladevi", "ნაძალადევი"),
-             ("Чугурети", "Chughureti", "ჩუღურეთი")]
-DISTRICT_EN = {ru: en for ru, en, _ in DISTRICTS}
-DISTRICT_KA = {ru: ka for ru, _, ka in DISTRICTS}
+# district names as listings.district stores them (ru) + English and Georgian labels: the channel's list (app/districts.py)
+DISTRICTS = [(ru, en, ka) for _, ru, en, ka, _ in districts.DISTRICTS]
+_OLD = [("Старый Тбилиси", "Old Tbilisi", "ძველი თბილისი"), ("Старый город", "Old Tbilisi", "ძველი თბილისი"),
+        ("Вере", "Vera", "ვერა")]  # older profile / listing values: still named, no longer offered
+DISTRICT_EN = {ru: en for ru, en, _ in DISTRICTS + _OLD}
+DISTRICT_KA = {ru: ka for ru, _, ka in DISTRICTS + _OLD}
 
 T14_QUESTIONS = {"ru": ["Квартира соответствует объявлению?", "Собственник: всё в порядке?", "Как работал агент и агентство?"],
                  "en": ["Does the flat match the listing?", "Is everything fine with the owner?", "How did the agent and the agency do?"],

@@ -9,8 +9,8 @@ import type { ReportKind } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { DupCheck } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Progress, Select, Textarea } from '../../components/ui';
-import { DISTRICTS, fmtDate, todayStr } from '../../lib/format';
+import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Progress, Select, Textarea, DistrictSelect } from '../../components/ui';
+import { fmtDate, todayStr } from '../../lib/format';
 import { useUserNames } from '../../lib/useUserNames';
 
 type FieldDef = { k: string; label: string; type?: 'text' | 'number' | 'date' | 'datetime-local' | 'textarea' | 'district' | 'result' | 'url' | 'tel'; span?: boolean; required?: boolean };
@@ -102,7 +102,7 @@ export function ReportForm({ kind, onDone }: { kind: ReportKind; onDone?: () => 
           const common = { value: v[f.k] || '', onChange: (e: { target: { value: string } }) => set(f.k, e.target.value) };
           let input;
           if (f.type === 'textarea') input = <Textarea {...common} />;
-          else if (f.type === 'district') input = <Select {...common} placeholder="—" options={DISTRICTS.map((d) => ({ value: d, label: d }))} />;
+          else if (f.type === 'district') input = <DistrictSelect value={common.value} onChange={(x) => set(f.k, x)} />;
           else if (f.type === 'result') input = <Select {...common} placeholder="—" options={['Снимает', 'Думает', 'Не подошло', 'Перенос'].map((d) => ({ value: d, label: d }))} />;
           else input = <Input type={f.type === 'url' ? 'url' : f.type === 'tel' ? 'tel' : f.type || 'text'} inputMode={f.type === 'number' ? 'numeric' : undefined} {...common} />;
           return <Field key={f.k} label={f.label} className={f.span ? 'span2' : ''}>{input}</Field>;

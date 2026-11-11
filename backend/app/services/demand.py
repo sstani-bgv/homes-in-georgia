@@ -8,6 +8,7 @@ from datetime import timedelta
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app import districts
 from app.models import STAFF, Client, ClientView, Deal, Lead, Listing, Property, Reaction, User
 from app.services.common import get_or_404, jload, log_event, now
 from app.services.errors import DomainError, forbidden
@@ -47,8 +48,8 @@ def fits(profile: dict, o: dict) -> bool:
         if km > (p.get("radius_km") or 2.0) * 1.5:
             return False
     elif ds := [d.lower() for d in p.get("districts") or [] if d != "any"]:
-        d = (o.get("district") or "").lower()
-        if not d or not any(w in d or d in w for w in ds):
+        d, t = (o.get("district") or "").lower(), districts.tag(o.get("district"))
+        if not d or not any(w in d or d in w or (t and districts.tag(w) == t) for w in ds):  # «Вере» = «Вера» = Vera
             return False
     if any(x != "none" for x in p.get("pets") or []) and o.get("pets_allowed") is False:
         return False

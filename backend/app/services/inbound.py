@@ -27,14 +27,14 @@ from app.models import ChannelPost, Deal, News, Owner, PropertyPublication, Repo
 from app.services import settings as settings_svc
 from app.services import users as users_svc
 from app.services.common import TZ, jload, log_event, now
+from app import districts
 from app.services.dedup import address_match, norm_address
 from app.telegram.client import conf
 
 log = logging.getLogger(__name__)
 
-DISTRICTS = ["Saburtalo", "Vake", "Vera", "Chugureti", "Sololaki", "Mtatsminda", "Didube", "Avlabari", "Ortachala", "Gldani",
-             "Isani", "Varketili", "Nutsubidze", "Digomi", "Marjanishvili", "Navtlughi", "Rustaveli", "Didi Dighomi",
-             "Krtsanisi", "Old Tbilisi"]
+# the channel's district tags (app/districts.py) + older post tags
+DISTRICTS = [d[0] for d in districts.DISTRICTS] + ["Marjanishvili", "Navtlughi", "Rustaveli", "Didi Dighomi", "Old Tbilisi"]
 DEAL_TAGS = ("#Rented", "#Sold", "#Sale")
 RENTED_TAGS = ("#Rented", "#Сдано", "#сдано", "#Sold")
 # hashtags of a listing post that are never an agent
@@ -196,7 +196,8 @@ def parse_listing(text: str, mode: str = "channel") -> dict | None:
          else re.search(r"[+]995[^\r\n]*#([A-Za-zА-Яа-я]+)", before))
     tag = m[1].replace("'", "") if m else ""
     candidates = [] if tag else [t for t in reversed(re.findall(r"#([A-Z][a-z]+)", before)) if t.lower() not in NON_AGENT_TAGS]
-    district = next((d for d in DISTRICTS if "#" + d.replace(" ", "") in text), "")
+    tags = set(re.findall(r"#(\w+)", text))  # whole tags: #Digomi is not #DigomiMassive
+    district = next((d for d in DISTRICTS if d.replace(" ", "") in tags), "")
     if mode == "channel":
         pm = re.search(r"(\d{3,4})\$\s*\+", text) or re.search(r"💰\s*(\d{3,4})\$", text) or re.search(r"(\d{3,4})\$", text)
     else:

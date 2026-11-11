@@ -78,7 +78,9 @@ def test_point_facts_district_and_metro(client, db, monkeypatch):
     rev = {"Vake District": {"city_district": "Vake District", "suburb": "Vake"},
            "Bagebi": {"city_district": "Vake District", "suburb": "Bagebi"},
            "Saburtalo": {"city_district": "Saburtalo District", "suburb": "Nutsubidze Plateau"},
-           "Old": {"city_district": "Mtatsminda District", "suburb": "Sololaki"}}
+           "Old": {"city_district": "Mtatsminda District", "suburb": "Sololaki"},
+           "Didi": {"city_district": "Didube District", "suburb": "Didi Dighomi", "neighbourhood": "Microdistrict 3"},
+           "OldOnly": {"city_district": "Old Tbilisi District", "suburb": "Old Tbilisi"}}
     pick = []
 
     def fake_get(url, params=None, **kw):
@@ -90,10 +92,12 @@ def test_point_facts_district_and_metro(client, db, monkeypatch):
     geo._reverse.cache_clear()
     ag = make_user(db, "agent")
     for name, (lat, lng), district, metro in [
-            ("Old", (41.7036, 44.7900), "Старый город", "Rustaveli"),  # next to Rustaveli station
-            ("Bagebi", (41.7120, 44.7320), "Ваке-Багеби", "VazhaPshavela"),  # ~1.3 km from Vazha-Pshavela
+            ("Old", (41.7036, 44.7900), "Сололаки", "Rustaveli"),  # next to Rustaveli station: the fine tag now
+            ("Bagebi", (41.7120, 44.7320), "Багеби", "VazhaPshavela"),  # ~1.3 km from Vazha-Pshavela
             ("Vake District", (41.7090, 44.7550), "Ваке", "Delisi"),  # Vake Park: ~2 km, the nearest still fills (11-11)
-            ("Saburtalo", (41.7240, 44.7310), "Сабуртало", "VazhaPshavela")]:
+            ("Saburtalo", (41.7240, 44.7310), "Нуцубидзе", "VazhaPshavela"),  # «Nutsubidze Plateau» -> #Nutsubidze
+            ("Didi", (41.7900, 44.7600), "Диди Дигоми", "Guramishvili"),  # Dighomi spelling, not plain #Digomi
+            ("OldOnly", (41.6900, 44.8100), "Старый город", "AvlabariMetro")]:  # no finer name: the old coarse value
         pick.append(name)
         r = client.get("/api/geo/point", params={"lat": lat, "lng": lng}, headers=auth(ag)).json()
         assert (r["district"], r["metro"]) == (district, metro), name

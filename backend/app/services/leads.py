@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings as env
+from app import districts as districts_
 from app.models import (ADMINS, FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
 from app.services import catalog, jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
@@ -379,7 +380,8 @@ def recommend_agents(db: Session, lead_id: int) -> list[dict]:
             score += 100
             reasons.append("его объект")
         districts = [str(d).lower() for d in (a.districts or [])]
-        if district and any(d and (d in district.lower() or district.lower() in d) for d in districts):
+        t = districts_.tag(district)
+        if district and any(d and (d in district.lower() or district.lower() in d or (t and districts_.tag(d) == t)) for d in districts):
             score += 30
             reasons.append(f"район {district}")
         n = load.get(a.id, 0)

@@ -9,7 +9,7 @@ import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyS
 import { thumbUrl } from '../api/client';
 import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { useToast } from './toast';
-import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, formatPhone, money, SOURCE_LABEL } from '../lib/format';
+import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, districtLabel, fmtDateTime, formatPhone, money, SOURCE_LABEL } from '../lib/format';
 
 /** «Скопировать» next to a phone: tel: links do nothing on desktop / Telegram Desktop. */
 export function CopyPhone({ phone }: { phone: string }) {
@@ -357,5 +357,5 @@ export function DupCheck({ value }: { value?: string | null }) {
 }
 
 export function Place({ district, address }: { district?: string | null; address?: string | null }) {
-  return <span className="row gap-sm muted" style={{ fontSize: 12 }}><MapPin size={13} />{[district, address].filter(Boolean).join(', ') || '—'}</span>;
+  return <span className="row gap-sm muted" style={{ fontSize: 12 }}><MapPin size={13} />{[districtLabel(district), address].filter(Boolean).join(', ') || '—'}</span>;
 }

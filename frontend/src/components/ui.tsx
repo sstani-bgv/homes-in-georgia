@@ -2,7 +2,7 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Inbox, X } from 'lucide-react';
-import { initials, phoneBlur, phoneFocus } from '../lib/format';
+import { DISTRICT_LIST, DISTRICTS, districtLabel, initials, phoneBlur, phoneFocus } from '../lib/format';
 import { mediaUrl } from '../api/client';
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ok';
@@ -68,6 +68,19 @@ export function Select({ options, placeholder, ...p }: SelectHTMLAttributes<HTML
     <select className="select" {...p}>
       {placeholder !== undefined && <option value="">{placeholder}</option>}
       {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+/** The channel's districts in groups (native select: the phone's own picker, type-to-find on desktop). An old value that
+ * has no tag today («Старый город») stays as the first option, so the card shows it until someone picks a new one. */
+export function DistrictSelect({ value, onChange, placeholder = '—', ...p }: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange'> & { value?: string | null; onChange: (v: string) => void; placeholder?: string }) {
+  const v = districtLabel(value);
+  const groups = [...new Set(DISTRICT_LIST.map((d) => d[2]))];
+  return (
+    <select className="select" value={v} onChange={(e) => onChange(e.target.value)} {...p}>
+      <option value="">{placeholder}</option>
+      {v && !DISTRICTS.includes(v) && <option value={v}>{v}</option>}
+      {groups.map((g) => <optgroup key={g} label={g}>{DISTRICT_LIST.filter((d) => d[2] === g).map((d) => <option key={d[0]} value={d[1]}>{d[1]}</option>)}</optgroup>)}
     </select>
   );
 }

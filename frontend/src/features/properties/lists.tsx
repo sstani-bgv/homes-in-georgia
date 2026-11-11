@@ -13,7 +13,7 @@ import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
 import { ListingsMap } from './ListingsMap';
-import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
+import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
 const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', th: 'Threads', tg: 'Telegram' };
@@ -179,7 +179,7 @@ export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id
   const phone = p?.owner?.phone;
   const side = p && (
     <CompareSide label={`Объект #${p.id} в базе`} photos={own.length ? own : p.photos || []} address={p.address} rows={[
-      ['Цена', money(p.price, p.currency || 'USD')], ['Район', p.district || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
+      ['Цена', money(p.price, p.currency || 'USD')], ['Район', districtLabel(p.district) || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
       ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
       ['Агент собственника', (p.owner?.agent || p.agent)?.name || '—'],
       ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{formatPhone(phone)}</a> <CopyPhone phone={phone} /></>}</>] as [string, React.ReactNode]] : []),
@@ -223,7 +223,7 @@ function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
         {p.address && <span className="plaque">{p.address}</span>}
       </div>
       <div className="lcard-body">
-        <span className="label">{[p.district, bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ') || '—'}</span>
+        <span className="label">{[districtLabel(p.district), bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ') || '—'}</span>
         <div className="price">{money(p.price, p.currency || 'USD')}<span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>/мес</span></div>
         <div className="row row-between gap-sm faint" style={{ fontSize: 12, marginTop: 'auto' }}>
           <span className="ellipsis">#{p.id} · {p.agent?.name || 'без агента'}</span>
@@ -242,7 +242,7 @@ export function PropertyMiniCard({ p, to, onMove }: { p: Property; to: string; o
         {ph && <img src={thumbUrl(ph)} alt="" loading="lazy" draggable={false} style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flex: 'none' }} />}
         <div className="grow">
           <div className="kcard-title ellipsis">{p.address || `Объект #${p.id}`}</div>
-          <div className="kcard-meta">{[p.district, bedroomsLabel(p.bedrooms), money(p.price, p.currency || 'USD')].filter(Boolean).join(' · ')}</div>
+          <div className="kcard-meta">{[districtLabel(p.district), bedroomsLabel(p.bedrooms), money(p.price, p.currency || 'USD')].filter(Boolean).join(' · ')}</div>
           <ExclusiveConflictBadge p={p} />
         </div>
       </div>

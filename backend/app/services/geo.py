@@ -8,6 +8,8 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from app import districts
+
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 UA = "homes-in-georgia-crm/1.0 (real-estate CRM address check)"
 TBILISI = "44.60,41.85,45.05,41.60"  # viewbox lon1,lat1,lon2,lat2 (as bot/geo.py)
@@ -18,11 +20,7 @@ _last = [0.0]
 _PIN = re.compile(r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)")
 _AT = re.compile(r"(?:@|[?&](?:q|query|ll|center|destination)=|^)\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})")
 _SHORT = ("maps.app.goo.gl", "goo.gl")
-# Nominatim's English district names -> the CRM's district list (frontend DISTRICTS)
-_DISTRICT = {"bagebi": "Ваке-Багеби", "vake": "Ваке", "saburtalo": "Сабуртало", "mtatsminda": "Мтацминда", "vere": "Вере",
-             "ortachala": "Ортачала", "didube": "Дидубе", "chughureti": "Чугурети", "isani": "Исани", "samgori": "Самгори",
-             "gldani": "Глдани", "nadzaladevi": "Надзаладеви", "krtsanisi": "Крцаниси", "dighomi": "Дигоми",
-             "digomi": "Дигоми", "old tbilisi": "Старый город", "sololaki": "Старый город", "abanotubani": "Старый город"}
+_OLD_TOWN = "Старый город"  # OSM «Old Tbilisi» without a finer name: the old coarse value, there is no single tag
 
 
 def _in_georgia(lat: float, lng: float) -> bool:  # rough box: a swapped «lng, lat» or a point abroad is not ours
@@ -48,12 +46,11 @@ def point_of(q: str) -> tuple[float, float] | None:
 
 
 def _district(addr: dict) -> str | None:
-    for k in ("suburb", "city_district", "quarter", "neighbourhood"):
-        v = (addr.get(k) or "").lower()
-        for stem, ru in _DISTRICT.items():
-            if stem in v:
-                return ru
-    return None
+    """The finest channel district OSM names at the point (neighbourhood first), as the CRM's Russian label."""
+    for k in ("neighbourhood", "quarter", "suburb", "city_district"):
+        if t := districts.find(addr.get(k)):
+            return districts.BY_TAG[t][1]
+    return _OLD_TOWN if any("old tbilisi" in (addr.get(k) or "").lower() for k in ("suburb", "city_district")) else None
 
 
 def _get(url: str, params: dict):

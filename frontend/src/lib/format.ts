@@ -46,7 +46,58 @@ export const SOURCE_LABEL: Record<string, string> = {
   referral: 'Рекомендация', import: 'Импорт', deal: 'Из сделки', other: 'Другое',
 };
 
-export const DISTRICTS = ['Ваке', 'Сабуртало', 'Ваке-Багеби', 'Мтацминда', 'Вере', 'Ортачала', 'Дидубе', 'Чугурети', 'Исани', 'Самгори', 'Глдани', 'Надзаладеви', 'Крцаниси', 'Дигоми', 'Старый город'];
+// The channel's district filter tags (backend app/districts.py is the source; tests/test_districts.py keeps them equal).
+// objects store the Russian label; the post caption takes the tag.
+export const DISTRICT_LIST: [tag: string, ru: string, group: string][] = [
+  ['Mtatsminda', 'Мтацминда', 'Старый Тбилиси и центр'],
+  ['Sololaki', 'Сололаки', 'Старый Тбилиси и центр'],
+  ['Abanotubani', 'Абанотубани', 'Старый Тбилиси и центр'],
+  ['Kukia', 'Кукия', 'Старый Тбилиси и центр'],
+  ['Vera', 'Вера', 'Старый Тбилиси и центр'],
+  ['Chugureti', 'Чугурети', 'Старый Тбилиси и центр'],
+  ['Avlabari', 'Авлабари', 'Старый Тбилиси и центр'],
+  ['Ortachala', 'Ортачала', 'Старый Тбилиси и центр'],
+  ['Krtsanisi', 'Крцаниси', 'Старый Тбилиси и центр'],
+  ['Ponichala', 'Поничала', 'Старый Тбилиси и центр'],
+  ['QvemoPonichala', 'Нижняя Поничала', 'Старый Тбилиси и центр'],
+  ['Vake', 'Ваке', 'Ваке и Сабуртало'],
+  ['Bagebi', 'Багеби', 'Ваке и Сабуртало'],
+  ['Vashlijvari', 'Вашлиджвари', 'Ваке и Сабуртало'],
+  ['Lisi', 'Лиси', 'Ваке и Сабуртало'],
+  ['SavnetisUbani', 'Сванетский квартал', 'Ваке и Сабуртало'],
+  ['Tskneti', 'Цкнети', 'Ваке и Сабуртало'],
+  ['Tskhneti', 'Цхнети', 'Ваке и Сабуртало'],
+  ['Afrika', 'Африка', 'Ваке и Сабуртало'],
+  ['Saburtalo', 'Сабуртало', 'Ваке и Сабуртало'],
+  ['VazhaPshavela', 'Важа-Пшавела', 'Ваке и Сабуртало'],
+  ['Nutsubidze', 'Нуцубидзе', 'Ваке и Сабуртало'],
+  ['Iverubani', 'Ивертубани', 'Ваке и Сабуртало'],
+  ['Didube', 'Дидубе', 'Дидубе и Дигоми'],
+  ['Nadzaladevi', 'Надзаладеви', 'Дидубе и Дигоми'],
+  ['Naxalovka', 'Нахаловка', 'Дидубе и Дигоми'],
+  ['Digomi', 'Дигоми', 'Дидубе и Дигоми'],
+  ['DidiDigomi', 'Диди Дигоми', 'Дидубе и Дигоми'],
+  ['DigomiMassive', 'Дигомский массив', 'Дидубе и Дигоми'],
+  ['Digomi1to9', 'Дигоми 1–9', 'Дидубе и Дигоми'],
+  ['Gldani', 'Глдани', 'Глдани'],
+  ['Temqa', 'Темка', 'Глдани'],
+  ['Avchala', 'Авчала', 'Глдани'],
+  ['Isani', 'Исани', 'Исани и Самгори'],
+  ['Samgori', 'Самгори', 'Исани и Самгори'],
+  ['Varketili', 'Варкетили', 'Исани и Самгори'],
+  ['Vazisubani', 'Вазисубани', 'Исани и Самгори'],
+  ['Saguramo', 'Сагурамо', 'За городом'],
+  ['OutOfTown', 'За городом', 'За городом'],
+];
+export const DISTRICTS = DISTRICT_LIST.map((d) => d[1]);
+// old coarse CRM values -> today's label («Старый город» has no single tag: shown as it is)
+const DISTRICT_OLD: Record<string, string> = { 'Вере': 'Вера', 'Ваке-Багеби': 'Багеби', 'Ваке-Сабуртало': 'Ваке' };
+const BY_TAG = Object.fromEntries(DISTRICT_LIST.map(([t, ru]) => [t.toLowerCase(), ru]));
+/** A stored district (ru label, old value or an English tag like «Saburtalo» from the old base) -> the label to show. */
+export function districtLabel(v?: string | null): string {
+  const s = (v || '').trim();
+  return DISTRICT_OLD[s] || BY_TAG[s.replace(/^#/, '').toLowerCase()] || s;
+}
 
 export function money(v?: number | null, cur = 'USD'): string {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';

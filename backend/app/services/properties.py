@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import storage
+from app import districts, storage
 from app.config import settings as env
 from app.models import (ARCHIVE_REASONS, FIELD, PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
                         PropertyListing, PropertyMedia, PropertyPublication, User)
@@ -1142,11 +1142,13 @@ def review(db: Session, pid: int, operator: User, approve: bool, comment: str | 
     return p
 
 
-# CRM district -> the channel's hashtag (the agency's old HTML post generator, buildRentPost)
-DISTRICT_TAG = {"Ваке": "#Vake", "Ваке-Багеби": "#Vake", "Сабуртало": "#Saburtalo", "Мтацминда": "#Mtatsminda", "Вере": "#Vera",
-                "Ортачала": "#Ortachala", "Дидубе": "#Didube", "Чугурети": "#Chugureti", "Исани": "#Isani", "Самгори": "#Samgori",
-                "Глдани": "#Gldani", "Надзаладеви": "#Nadzaladevi", "Дигоми": "#Digomi", "Сололаки": "#Sololaki",
-                "Авлабари": "#Avlabari", "Нахаловка": "#Naxalovka", "Ваке-Сабуртало": "#Vake"}
+
+
+def district_tag(value: str | None) -> str:
+    """CRM district -> the channel's hashtag (app/districts.py); an unknown old value keeps its own words as the tag."""
+    return "#" + (districts.tag(value) or (value or "Tbilisi").strip().replace(" ", "").replace("-", ""))
+
+
 PRICE_TAGS = ((300, "#Price0to300"), (500, "#Price300to500"), (700, "#Price500to700"), (900, "#Price700to900"),
               (1200, "#Price900to1200"))
 SALE_PRICE_STEPS = (30000, 50000, 70000, 90000, 120000, 150000, 180000, 210000, 240000, 270000, 300000, 330000, 360000,
@@ -1326,7 +1328,7 @@ def post_text(db: Session, p: Property) -> str:
     f = p.post_fields or {}
     sale = f.get("deal") == "Sale"
     tag = lambda k: f"#{f[k]}" if f.get(k) else None  # noqa: E731
-    district = DISTRICT_TAG.get((p.district or "").strip(), f"#{(p.district or 'Tbilisi').replace(' ', '')}")
+    district = district_tag(p.district)
     lines = [" ".join(x for x in (district, f.get("metro") and f"🚇 #{f['metro']}") if x)]
     if p.address:
         url = maps_url(db, p)
@@ -1431,12 +1433,12 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     no footer (the contacts sit in Tags); an old-base description is cut to its own words (prose()). media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
     f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
     sale = f.get("deal") == "Sale"
-    district = DISTRICT_TAG.get((p.district or "").strip(), "#" + (p.district or "Tbilisi").replace(" ", "")).lstrip("#")
+    district = district_tag(p.district).lstrip("#")
     beds = "Studio" if p.bedrooms == 0 else (f"{p.bedrooms} bedroom{'s' if p.bedrooms != 1 else ''}" if p.bedrooms else None)
     commercial = f.get("prop_type") not in (None, "Apartment", "House", "Duplex", "Townhouse")
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
     head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
-                                  _human(f["prop_type"]).lower() if commercial else beds, _human(district)) if x)
+                                  _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district))) if x)
     marks = [x for x, on in (("Exclusive", p.is_exclusive), ("Discount", f.get("discount"))) if on]
     sub = " · ".join(x for x in (*marks, f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
                                  p.floor and (f"{p.floor}/{p.total_floors} floor" if p.total_floors else f"{p.floor} floor"),
