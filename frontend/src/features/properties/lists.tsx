@@ -1,6 +1,6 @@
 // Funnel 1 lists: new listings (C1), kanban (by status), my objects. Shared by desktop and /m.
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
@@ -403,11 +403,14 @@ const BASE: PS[] = ['published', 'rented'];
  * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
 export function PropertyList({ mine, archived, status: only, agentId, base = '' }: { mine?: boolean; archived?: boolean; status?: string; agentId?: number; base?: string }) {
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
-  const [agent, setAgent] = useState('');
-  const [page, setPage] = useState(0);
   const { isStaff } = useAuth();
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
+  // «База объектов» opened from a dashboard number: /objects?tab=all&status=rented
+  const [params] = useSearchParams();
+  const asked = params.get('status') as PS | null;
+  const [status, setStatus] = useState<string>(scope === 'all' && asked && BASE.includes(asked) ? asked : '');
+  const [agent, setAgent] = useState('');
+  const [page, setPage] = useState(0);
   const fixedAgent = agentId !== undefined;  // the cabinet: one agent's objects, no agent select
   // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
   const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine && !fixedAgent });

@@ -170,7 +170,7 @@ def counters(month: str | None = None, db: Session = Depends(get_db, scope="func
 
 @router.get("/analytics/dashboard")
 def analytics_dashboard(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return analytics.dashboard(db, month)
+    return {**analytics.dashboard(db, month), "stats": analytics.stats(db, user)}
 
 
 @router.get("/analytics/funnel")

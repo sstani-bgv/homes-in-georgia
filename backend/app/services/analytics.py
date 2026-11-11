@@ -1,10 +1,10 @@
 """Dashboard metrics (apps-script getRentalStats / updateAnalyticsCache, now straight from Postgres)."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import FIELD, ChannelPost, Deal, Event, Lead, Property, User
+from app.models import FIELD, STAFF, ChannelPost, Deal, Event, Lead, Listing, Property, PropertyListing, User
 from app.services.common import TZ, now
 from app.services.reports import month_bounds
 
@@ -159,6 +159,62 @@ def weekly_listings(db: Session, at: datetime | None = None) -> dict:
         return {"total": sum(by.values()), "week_start": a.strftime("%d.%m"), "by_agent": by,
                 "top_agents": [{"name": n, "count": c} for n, c in sorted(by.items(), key=lambda x: -x[1])]}
     return {"current": build(mon, nxt), "last_week": build(last, mon), "week_start": mon.strftime("%d.%m")}
+
+
+# «В работе» tab = the board without its done columns (frontend lists.tsx WORK)
+WORK_STATUSES = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled", "media_uploaded",
+                 "review", "returned")
+
+
+def _count(db: Session, model, *where) -> int:
+    return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
+
+
+def stats(db: Session, user: User) -> dict:
+    """«Статистика» on «Главная» (Stanislav 11-11): where the objects / leads / deals are. Staff: the agency; an agent:
+    his own (same scoping as the lists the numbers link to). The parsed-ads feed is shared, so it is never scoped."""
+    staff = user.role in STAFF
+    t = now().astimezone(TZ)
+    day = t.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc = lambda d: d.astimezone(timezone.utc).isoformat(timespec="seconds")  # listings/leads keep UTC ISO text
+    prev = (t.month - 2) % 12 + 1, t.year - (t.month == 1)
+    mine_p = () if staff else (Property.agent_id == user.id,)
+    mine_l = () if staff else (Lead.agent_id == user.id,)
+    mine_d = () if staff else (Deal.agent_id == user.id,)
+    base = (Property.published_at.isnot(None),)
+    from app.services.properties import _untaken
+    linked = select(PropertyListing.listing_id).join(Property, Property.id == PropertyListing.property_id).where(
+        Property.listing_id.is_distinct_from(PropertyListing.listing_id))
+    feed = (*_untaken(), Listing.id.not_in(linked))  # = the «Новые объявления» feed (properties.new_listings)
+    new_l = ("new", "operator_taken") if staff else ("agent_assigned",)
+    open_l = (Lead.archived_at.is_(None), Lead.status.not_in(("rented", "refused", *new_l)))
+    if not staff:  # an agent's board starts after the operator
+        open_l += (Lead.status.not_in(("new", "operator_taken")),)
+    return {
+        "scope": "agency" if staff else "mine",
+        "objects": {
+            "work": _count(db, Property, Property.status.in_(WORK_STATUSES), Property.board_hidden_at.is_(None), *mine_p),
+            "review": _count(db, Property, Property.status == "review", *mine_p),
+            "published": _count(db, Property, Property.status == "published", *base, *mine_p),
+            "rented": _count(db, Property, Property.status == "rented", *base, *mine_p),
+            "archived": _count(db, Property, Property.status == "archived", *mine_p),
+            "feed_today": _count(db, Listing, *feed, Listing.first_seen >= utc(day)),
+            "feed_week": _count(db, Listing, *feed, Listing.first_seen >= utc(day - timedelta(days=6))),
+        },
+        "leads": {
+            "new": _count(db, Lead, Lead.status.in_(new_l), Lead.archived_at.is_(None), *mine_l),
+            "work": _count(db, Lead, *open_l, *mine_l),
+            "viewings_today": _count(db, Lead, Lead.viewing_at >= day, Lead.viewing_at < day + timedelta(days=1),
+                                     Lead.status.not_in(("refused",)), *mine_l),
+            "rented_month": _count(db, Lead, Lead.status == "rented", Lead.updated_at >= utc(day.replace(day=1)), *mine_l),
+        },
+        "deals": {
+            "month": _count(db, Deal, Deal.status.in_(LIVE), Deal.month == f"{t.month}/{t.year}", *mine_d),
+            "prev_month": _count(db, Deal, Deal.status.in_(LIVE), Deal.month == f"{prev[0]}/{prev[1]}", *mine_d),
+        },
+        "contracts_expiring": _count(db, Deal, Deal.status == "confirmed", Deal.rent_to >= t.date(),
+                                     Deal.rent_to <= t.date() + timedelta(days=30), *mine_d),
+    }
 
 
 def dashboard(db: Session, month: str | None = None) -> dict:

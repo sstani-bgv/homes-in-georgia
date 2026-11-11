@@ -27,6 +27,61 @@ function FunnelRow({ order, labels, counts, link }: { order: string[]; labels: R
   );
 }
 
+type Stats = {
+  scope: 'agency' | 'mine';
+  objects: Record<'work' | 'review' | 'published' | 'rented' | 'archived' | 'feed_today' | 'feed_week', number>;
+  leads: Record<'new' | 'work' | 'viewings_today' | 'rented_month', number>;
+  deals: { month: number; prev_month: number };
+  contracts_expiring: number;
+};
+
+function N({ to, n, label, sub }: { to: string; n: number; label: string; sub?: React.ReactNode }) {
+  return (
+    <Link to={to} className="card" style={{ padding: '10px 12px', color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
+      <div className="num" style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1 }}>{num(n)}{sub}</div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25, marginTop: 2 }}>{label}</div>
+    </Link>
+  );
+}
+
+/** «Статистика» (Stanislav 11-11): where everything is, each number opens its list. Backend analytics.stats. */
+function StatsBlock({ s, staff }: { s: Stats; staff: boolean }) {
+  const o = s.objects, l = s.leads, d = s.deals.month - s.deals.prev_month;
+  const row = (title: string, items: React.ReactNode) => (
+    <div className="col gap-sm">
+      <div className="label">{title}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>{items}</div>
+    </div>
+  );
+  return (
+    <Card label="Статистика" title={s.scope === 'mine' ? 'Мои цифры' : 'По агентству'}>
+      <div className="col gap-lg">
+        {row('Объекты', <>
+          <N to="/objects?tab=board" n={o.work} label="в работе" />
+          <N to={staff ? '/objects?tab=review' : '/objects?tab=board'} n={o.review} label="на публикации" />
+          <N to="/objects?tab=all&status=published" n={o.published} label="опубликовано" />
+          <N to="/objects?tab=all&status=rented" n={o.rented} label="сдано" />
+          <N to="/objects?tab=archive" n={o.archived} label="в архиве" />
+          <N to="/objects?tab=new" n={o.feed_today} label="новых объявл. сегодня" />
+          <N to="/objects?tab=new" n={o.feed_week} label="новых объявл. за 7 дней" />
+        </>)}
+        {row('Заявки', <>
+          <N to="/leads" n={l.new} label="новые" />
+          <N to="/leads" n={l.work} label="в работе" />
+          <N to="/calendar" n={l.viewings_today} label="просмотры сегодня" />
+          <N to="/leads" n={l.rented_month} label="сданы за месяц" />
+        </>)}
+        {row('Сделки и договоры', <>
+          <N to="/deals" n={s.deals.month} label="сделок за месяц"
+            sub={d ? <span style={{ fontSize: 12, marginLeft: 6, color: d > 0 ? 'var(--brand)' : 'var(--accent)' }}>{d > 0 ? '↑' : '↓'}{Math.abs(d)}</span> : undefined} />
+          <N to="/deals" n={s.deals.prev_month} label="за прошлый месяц" />
+          <N to={staff ? '/reports?tab=expiring' : '/me'} n={s.contracts_expiring} label="договоры кончаются ≤30 дн" />
+        </>)}
+      </div>
+    </Card>
+  );
+}
+
 function TaskRow({ to, title, meta, right }: { to: string; title: string; meta?: string; right?: React.ReactNode }) {
   return (
     <Link to={to} className="list-row" style={{ color: 'inherit', textDecoration: 'none' }}>
@@ -79,7 +134,7 @@ function MyTasks() {
 }
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, isStaff } = useAuth();
   const { data, isLoading, error } = useQuery({ queryKey: ['dashboard'], queryFn: api.analytics.dashboard, refetchInterval: 60_000 });
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings.get, retry: false });
   const metrics = parseMetrics(settings.data?.dashboard_metrics) || parseMetrics(data?.metrics);
@@ -105,6 +160,8 @@ export function DashboardPage() {
                 sub={user?.level ? 'уровень · сделки, объекты' : 'сделки, объекты, статистика'} />
             </Link>
           </div>
+
+          {data.stats && !metrics?.stats_off && <div className="section"><StatsBlock s={data.stats as Stats} staff={isStaff} /></div>}
 
           <div className="split section">
             <div className="col gap-lg">

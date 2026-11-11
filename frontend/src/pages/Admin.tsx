@@ -346,6 +346,8 @@ function SettingsAdmin() {
       <Card label="Главная" title="Метрики дашборда">
         <div className="col">
           {METRICS.map(([k, label]) => <Switch key={k} checked={!!metrics[k]} onChange={(v) => setMetric(k, v)} label={label} />)}
+          {/* «Статистика»: stored as an opt-out so lists saved before it existed keep it on */}
+          <Switch checked={!metrics.stats_off} onChange={(v) => setMetric('stats_off', !v)} label="Статистика (объекты, заявки, сделки)" />
         </div>
       </Card>
       <Card label="Сделки → Аналитика" title="Метрики аналитики">
