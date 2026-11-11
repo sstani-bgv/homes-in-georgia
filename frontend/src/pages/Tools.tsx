@@ -5,7 +5,7 @@ import { Search } from 'lucide-react';
 import { api } from '../api';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input } from '../components/ui';
-import { fmtDate } from '../lib/format';
+import { fmtDate, phoneInput } from '../lib/format';
 
 type DupRow = { source?: string; owner?: string | null; phone?: string | null; address?: string | null; link?: string | null; status?: string; rent_to?: string | null;
   phone_match?: boolean; addr_match?: boolean; url_match?: boolean; cadastral_match?: boolean; property_id?: number; deal_id?: number; is_agent?: boolean };
@@ -34,7 +34,7 @@ export function PropertyCheck() {
     <div className="split">
       <Card label="База собственников" title="Проверка объекта">
         <div className="form-grid">
-          <Field label="Телефон собственника" hint="Любой формат, с кодом страны или без"><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} inputMode="tel" /></Field>
+          <Field label="Телефон собственника" hint="Любой формат, с кодом страны или без"><Input value={f.phone} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} inputMode="tel" /></Field>
           <Field label="Адрес объекта" hint="Улица и номер, частичное совпадение работает"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
           <Field label="Ссылка на объявление"><Input value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} /></Field>
           <Field label="Кадастровый код"><Input value={f.cadastral} onChange={(e) => setF({ ...f, cadastral: e.target.value })} /></Field>

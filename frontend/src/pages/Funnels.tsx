@@ -12,7 +12,7 @@ import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
 import { PropertyDetail } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
-import { DISTRICTS } from '../lib/format';
+import { DISTRICTS, phoneInput } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 
 type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archive';
@@ -34,7 +34,7 @@ function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void 
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Собственник пришёл сам: объект сразу в статусе «Собственник», дальше откроется пост-генератор — там цена, параметры и фото.</div>
       <div className="form-grid">
         <Field label="Имя собственника"><Input value={f.owner_name} onChange={(e) => setF({ ...f, owner_name: e.target.value })} /></Field>
-        <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XX XX XX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: e.target.value })} /></Field>
+        <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XX XX XX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: phoneInput(e) })} /></Field>
         <Field label="Адрес (можно позже)" className="span2"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
         <Field label="Район"><Select value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })} placeholder="—" options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
       </div>

@@ -9,13 +9,13 @@ import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyS
 import { thumbUrl } from '../api/client';
 import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { useToast } from './toast';
-import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, money, SOURCE_LABEL } from '../lib/format';
+import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, fmtDateTime, formatPhone, money, SOURCE_LABEL } from '../lib/format';
 
 /** «Скопировать» next to a phone: tel: links do nothing on desktop / Telegram Desktop. */
 export function CopyPhone({ phone }: { phone: string }) {
   const toast = useToast();
-  const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(phone) : Promise.reject())
-    .then(() => toast(`Скопировано: ${phone}`), () => toast('Не удалось скопировать, выделите номер вручную', true));
+  const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(formatPhone(phone)) : Promise.reject())
+    .then(() => toast(`Скопировано: ${formatPhone(phone)}`), () => toast('Не удалось скопировать, выделите номер вручную', true));
   return <Button size="sm" variant="secondary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); copy(); }}><Copy size={14} />Скопировать</Button>;
 }
 
@@ -141,13 +141,13 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
           {l.owner && (
             <div className="col gap-sm">
               <span className="label">{l.owner.is_agent ? 'Контакт агента' : 'Собственник'}{l.owner.name ? ` · ${l.owner.name}` : ''}</span>
-              {l.owner.phone && <div className="row gap-sm"><a className="btn btn-secondary grow" href={`tel:${l.owner.phone.replace(/[^+\d]/g, '')}`}>Позвонить · {l.owner.phone}</a><CopyPhone phone={l.owner.phone} /></div>}
+              {l.owner.phone && <div className="row gap-sm"><a className="btn btn-secondary grow" href={`tel:${l.owner.phone.replace(/[^+\d]/g, '')}`}>Позвонить · {formatPhone(l.owner.phone)}</a><CopyPhone phone={l.owner.phone} /></div>}
             </div>
           )}
           {!!l.phones?.length && (
             <div className="col gap-sm">
               <span className="label">Контакты из объявления</span>
-              {l.phones.map((phone) => <div key={phone} className="row gap-sm"><a className="btn btn-secondary grow" href={`tel:${phone.replace(/[^+\d]/g, '')}`}>Позвонить · {phone}</a><CopyPhone phone={phone} /></div>)}
+              {l.phones.map((phone) => <div key={phone} className="row gap-sm"><a className="btn btn-secondary grow" href={`tel:${phone.replace(/[^+\d]/g, '')}`}>Позвонить · {formatPhone(phone)}</a><CopyPhone phone={phone} /></div>)}
             </div>
           )}
           {!!l.telegram_contacts?.length && (

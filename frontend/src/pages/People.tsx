@@ -10,7 +10,7 @@ import { LeadStatusBadge, PropertyStatusBadge } from '../components/domain';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Switch, Textarea } from '../components/ui';
 import { ProfileView } from '../features/leads/LeadDetail';
-import { fmtDate, fmtDateTime, money } from '../lib/format';
+import { fmtDate, fmtDateTime, money, phoneInput } from '../lib/format';
 
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
@@ -179,7 +179,7 @@ function OwnerForm({ owner, onDone }: { owner?: Owner; onDone: () => void }) {
     <div className="col">
       <div className="form-grid">
         <Field label="Имя"><Input value={f.name || ''} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} inputMode="tel" /></Field>
         <Field label="Адрес" className="span2"><Input value={f.address || ''} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
         <Field label="Ссылка" className="span2"><Input value={f.link || ''} onChange={(e) => setF({ ...f, link: e.target.value })} /></Field>
         <Field label="Заметки" className="span2"><Textarea value={f.notes || ''} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>

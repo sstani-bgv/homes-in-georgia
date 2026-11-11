@@ -6,7 +6,7 @@ import { itemsOf } from '../api/client';
 import type { Role, Settings, User } from '../api/types';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
-import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime } from '../lib/format';
+import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneInput } from '../lib/format';
 import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
 
@@ -39,7 +39,7 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
-        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => set('phone', phoneInput(e))} inputMode="tel" /></Field>
         <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
           <div className="row gap-sm">
             <Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => set('agent_tag', e.target.value.replace(/^#+/, '') || null)} />

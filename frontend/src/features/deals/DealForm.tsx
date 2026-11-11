@@ -11,7 +11,7 @@ import { errText, useToast } from '../../components/toast';
 import { PropertyStatusBadge } from '../../components/domain';
 import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from '../../components/ui';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
-import { levelFor, money, todayStr } from '../../lib/format';
+import { levelFor, money, phoneInput, todayStr } from '../../lib/format';
 import { AXES, AXIS_NOTE, PARTICIPATE, PEOPLE_HINT, defaultScenario, peopleRule, type Axis, type DistRow, type Scenario } from '../../lib/scenarios';
 
 function useDebounced<T>(v: T, ms = 300): T {
@@ -270,10 +270,10 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
               <Field label="Аренда до"><Input type="date" value={f.rent_to} onChange={(e) => upd('rent_to', e.target.value)} /></Field>
             </>}
             <Field label="Клиент"><Input value={f.client_name} onChange={(e) => upd('client_name', e.target.value)} /></Field>
-            <Field label="Телефон клиента"><Input value={f.client_phone} onChange={(e) => upd('client_phone', e.target.value)} inputMode="tel" /></Field>
+            <Field label="Телефон клиента"><Input value={f.client_phone} onChange={(e) => upd('client_phone', phoneInput(e))} inputMode="tel" /></Field>
             <Field label="Telegram клиента"><Input value={f.client_tg} onChange={(e) => upd('client_tg', e.target.value)} /></Field>
             <Field label="Собственник"><Input value={f.owner_name} onChange={(e) => setF((x) => ({ ...x, owner_name: e.target.value, owner_id: 0, owner_typed: true }))} disabled={!manual && (!pid || ro('owner_name'))} /></Field>
-            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => setF((x) => ({ ...x, owner_phone: e.target.value, owner_id: 0, owner_typed: true }))} inputMode="tel" disabled={!manual && (!pid || ro('owner_phone'))} /></Field>
+            <Field label="Телефон собственника" className="span2"><Input value={f.owner_phone} onChange={(e) => { const v = phoneInput(e); setF((x) => ({ ...x, owner_phone: v, owner_id: 0, owner_typed: true })); }} inputMode="tel" disabled={!manual && (!pid || ro('owner_phone'))} /></Field>
             {f.owner_typed && !f.owner_id && (
               <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name}
                 onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>

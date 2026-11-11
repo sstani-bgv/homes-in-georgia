@@ -134,3 +134,52 @@ export function pluralForm(n: number): 0 | 1 | 2 {
   const m10 = n % 10, m100 = n % 100;
   return m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2;
 }
+
+/** two-digit prefixes of 3-digit country codes (+380, +374, +971, +998…); the rest are 2 digits, +1/+7 one */
+const CC3 = ['21', '22', '23', '24', '25', '26', '29', '35', '37', '38', '42', '50', '59', '67', '68', '69', '80', '85', '87', '88', '96', '97', '99'];
+
+/** «599206716» / «+995599206716» / «0599-20-67-16» → «+995 599 20 67 16»; foreign → «+7 916 123 45 67».
+ *  Text with letters/commas or >15 digits (two numbers in one field) is returned untouched, so no digit is ever lost. */
+export function formatPhone(raw?: string | null): string {
+  const s = raw ?? '';
+  if (/[^\d\s+()\-.]/.test(s)) return s;
+  let d = s.replace(/\D/g, '');
+  let plus = s.trim().startsWith('+');
+  if (!plus && d.startsWith('00')) { d = d.slice(2); plus = true; }
+  if (!d) return plus ? '+' : '';
+  if (d.length > 15) return s;
+  let nat: string | null = null;
+  if (d.startsWith('995')) nat = d.slice(3);
+  else if ('995'.startsWith(d)) return (plus ? '+' : '') + d; // still typing «+99…»
+  else if (!plus && d.replace(/^0/, '').length <= 9) nat = d.replace(/^0/, ''); // local Georgian number
+  if (nat !== null) return ['+995', nat.slice(0, 3), nat.slice(3, 5), nat.slice(5, 7), nat.slice(7)].filter(Boolean).join(' ');
+  const ccLen = /^[17]/.test(d) ? 1 : CC3.includes(d.slice(0, 2)) ? 3 : 2;
+  const r = d.slice(ccLen);
+  const tail = r.length >= 7 ? r.slice(-4) : '';
+  const head = tail ? r.slice(0, -4) : r;
+  return ['+' + d.slice(0, ccLen), ...(head.match(/.{1,3}/g) ?? []), ...(tail ? [tail.slice(0, 2), tail.slice(2)] : [])].join(' ');
+}
+
+/** onChange for phone inputs: `onChange={(e) => set(phoneInput(e))}`. Formats as you type, keeps the caret next to
+ *  the same digit (counted from the end, since «+995 » may appear in front) and makes Backspace/Delete on a space
+ *  remove the neighbouring digit instead of getting stuck. */
+export function phoneInput(e: { target: HTMLInputElement; nativeEvent: Event }): string {
+  const el = e.target;
+  let v = el.value;
+  let pos = el.selectionStart ?? v.length;
+  const kind = (e.nativeEvent as InputEvent).inputType;
+  const f0 = formatPhone(v);
+  if (f0.length === v.length + 1 && /\D/.test(f0[pos] ?? '') && f0.slice(0, pos) + f0.slice(pos + 1) === v) {
+    // a separator was deleted: delete the digit next to it instead
+    if (kind === 'deleteContentBackward' && pos > 0) { v = v.slice(0, pos - 1) + v.slice(pos); pos -= 1; }
+    else if (kind === 'deleteContentForward') v = v.slice(0, pos) + v.slice(pos + 1);
+  }
+  const f = formatPhone(v);
+  if (f === v && f === el.value) return f;
+  let after = v.slice(pos).replace(/\D/g, '').length;
+  let caret = f.length;
+  while (after > 0 && caret > 0) { caret -= 1; if (/\d/.test(f[caret])) after -= 1; }
+  el.value = f;
+  if (document.activeElement === el) el.setSelectionRange(caret, caret);
+  return f;
+}

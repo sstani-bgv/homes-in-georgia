@@ -7,7 +7,7 @@ import { http } from '../api/client';
 import { errText } from '../components/toast';
 import { Button, ErrorBox, Field, Input, Loading, Seg } from '../components/ui';
 import { LANG_LABEL, buildExclusivePdf, confirmText, tbilisiNow, type Lang } from '../lib/exclusivePdf';
-import { fmtDateTime } from '../lib/format';
+import { fmtDateTime, phoneInput } from '../lib/format';
 
 interface SignView { id: number; address: string; cadastral_code: string; owner_name: string; owner_phone: string; signed_at: string | null }
 
@@ -83,7 +83,7 @@ export function ExclusiveSignPage() {
     <div className="form-grid">
       <Field label={t.name}><Input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></Field>
       <Field label={t.pid}><Input inputMode="numeric" value={f.personal_id} onChange={(e) => setF({ ...f, personal_id: e.target.value })} /></Field>
-      <Field label={t.phone}><Input type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+      <Field label={t.phone}><Input type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: phoneInput(e) })} /></Field>
       <Field label={t.cad}><Input value={f.cadastral_code} onChange={(e) => setF({ ...f, cadastral_code: e.target.value })} /></Field>
     </div>
     <div className="col gap-sm">

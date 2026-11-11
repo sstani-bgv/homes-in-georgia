@@ -12,7 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, isoToLocal, localToIso, money } from '../../lib/format';
+import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
@@ -69,7 +69,7 @@ function useProp(id: number) {
 function OwnerPhone({ p }: { p: Property }) {
   const phone = p.owner?.phone || p.owner_phone;
   if (!phone) return <span className="muted">скрыт</span>;
-  return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/\s/g, '')}`} style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{phone}</a><CopyPhone phone={phone} /></span>;
+  return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/[^+\d]/g, '')}`} style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatPhone(phone)}</a><CopyPhone phone={phone} /></span>;
 }
 
 function CallStep({ p }: { p: Property }) {
@@ -112,7 +112,7 @@ function CallStep({ p }: { p: Property }) {
           <Seg value={isOwner} onChange={setIsOwner} options={[{ value: 'owner', label: 'Собственник' }, { value: 'agent', label: 'Агент' }]} />
           <div className="form-grid">
             <Field label="Имя"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label="Телефон"><Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" /></Field>
+            <Field label="Телефон"><Input value={phone} onChange={(e) => setPhone(phoneInput(e))} inputMode="tel" /></Field>
           </div>
           {isOwner === 'agent' && <div className="muted" style={{ fontSize: 12 }}>Объект останется в базе с пометкой «агент», а номер попадёт в список агентов.</div>}
           <div className="row"><Button loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button><Button variant="ghost" onClick={() => setReached(false)}>Отмена</Button></div>
@@ -347,7 +347,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <div className="muted" style={{ fontSize: 13 }}>Агент: <b>{agentLabel(p.agent)}</b> — тег агента ставится в пост сам</div>
           <div className="form-grid">
             <Field label="Имя собственника"><Input value={f.owner_name} onChange={(e) => setF((x) => ({ ...x, owner_name: e.target.value, owner_id: undefined }))} /></Field>
-            <Field label="Телефон собственника"><Input type="tel" value={f.owner_phone} onChange={(e) => setF((x) => ({ ...x, owner_phone: e.target.value, owner_id: undefined }))} /></Field>
+            <Field label="Телефон собственника"><Input type="tel" inputMode="tel" value={f.owner_phone} onChange={(e) => { const v = phoneInput(e); setF((x) => ({ ...x, owner_phone: v, owner_id: undefined })); }} /></Field>
           </div>
           {!p.owner && !f.owner_id && (f.owner_name || f.owner_phone) && (
             <OwnerSuggest query={f.owner_phone || f.owner_name} onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} />
@@ -638,7 +638,7 @@ function Lease({ p }: { p: Property }) {
         <Field label="Сдан с"><Input type="date" value={f.rent_from} onChange={set('rent_from')} /></Field>
         <Field label="Договор до"><Input type="date" value={f.rent_to} onChange={set('rent_to')} /></Field>
         <Field label="Арендатор"><Input value={f.tenant_name} onChange={set('tenant_name')} placeholder="Имя" /></Field>
-        <Field label="Телефон"><Input value={f.tenant_phone} onChange={set('tenant_phone')} placeholder="+995 …" /></Field>
+        <Field label="Телефон"><Input value={f.tenant_phone} onChange={(e) => setF({ ...f, tenant_phone: phoneInput(e) })} inputMode="tel" placeholder="+995 5XX XX XX XX" /></Field>
         <Field label="Telegram"><Input value={f.tenant_tg} onChange={set('tenant_tg')} placeholder="@username" /></Field>
       </div>
       <div className="row mt">
@@ -991,7 +991,7 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
         <Field label="Этаж"><Input type="number" value={v.floor ?? ''} onChange={(e) => upd('floor', numOrNull(e.target.value))} /></Field>
         <Field label="Этажей в доме"><Input type="number" value={v.total_floors ?? ''} onChange={(e) => upd('total_floors', numOrNull(e.target.value))} /></Field>
         <Field label="Собственник" hint={lockHint('owner_name')}><Input value={v.owner_name || ''} onChange={(e) => upd('owner_name', e.target.value)} /></Field>
-        <Field label="Телефон собственника" hint={lockHint('owner_phone')}><Input type="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', e.target.value)} /></Field>
+        <Field label="Телефон собственника" hint={lockHint('owner_phone')}><Input type="tel" inputMode="tel" value={v.owner_phone || ''} onChange={(e) => upd('owner_phone', phoneInput(e))} /></Field>
         {!p.owner && (f.owner_name !== undefined || f.owner_phone !== undefined) && !f.owner_id && (
           <div className="span2"><OwnerSuggest query={f.owner_phone || f.owner_name || ''}
             onPick={(o) => setF((x) => ({ ...x, owner_id: o.id, owner_name: o.name || '', owner_phone: o.phone || '' }))} /></div>

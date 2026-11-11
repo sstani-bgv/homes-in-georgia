@@ -12,7 +12,7 @@ import { errText, useToast } from '../../components/toast';
 import { Avatar, Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Textarea } from '../../components/ui';
 import { DealForm } from '../deals/DealForm';
 import { DealView } from '../../pages/Deals';
-import { CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, localToIso, money } from '../../lib/format';
+import { CONTRACT_STAGES, OUTCOME_LABEL, REFUSAL_LABEL, bedroomsLabel, fmtDate, fmtDateTime, fmtSlot, formatPhone, localToIso, money } from '../../lib/format';
 
 const PETS: Record<string, string> = { none: 'нет', cat: 'кошка', dog: 'собака', other: 'другое' };
 
@@ -211,7 +211,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
                   <Phone size={18} style={{ flex: 'none' }} />
                   <span className="ellipsis">{lead.owner?.is_agent ? 'Позвонить агенту' : 'Позвонить собственнику'}{lead.owner?.name ? ` · ${lead.owner.name}` : ''}</span>
                 </a>
-                <b className="num" style={{ fontSize: 16, userSelect: 'all' }}>{ownerPhone}</b>
+                <b className="num" style={{ fontSize: 16, userSelect: 'all' }}>{formatPhone(ownerPhone)}</b>
                 <CopyPhone phone={ownerPhone} />
               </div>
             )}
@@ -291,7 +291,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
           <Card label="Клиент" title={isStaff && !compact && c?.id ? <Link to={`/clients/${c.id}`}>{c.name || 'Клиент'}</Link> : c?.name || 'Клиент'} actions={c?.lang ? <Badge tone="grey">{c.lang.toUpperCase()}</Badge> : undefined}>
             {lead.contacts_visible ?? (!!lead.contacts_shared_at || isStaff) ? (
               <div className="col gap-sm" style={{ marginBottom: 12 }}>
-                {c?.phone && <a href={`tel:${c.phone.replace(/\s/g, '')}`} style={{ fontWeight: 700 }}>{c.phone}</a>}
+                {c?.phone && <a href={`tel:${c.phone.replace(/[^+\d]/g, '')}`} style={{ fontWeight: 700 }}>{formatPhone(c.phone)}</a>}
                 {c?.username && <a href={`https://t.me/${c.username}`} target="_blank" rel="noreferrer" style={{ fontWeight: 700 }}>@{c.username}</a>}
                 {(c?.username || c?.tg_id) && (
                   <a className="btn btn-secondary" href={c.username ? `https://t.me/${c.username}` : `tg://user?id=${c.tg_id}`} target="_blank" rel="noreferrer">
