@@ -373,7 +373,7 @@ export function WorkProperties() {
   return (
     <div className="col">
       <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
-      {view === 'board' ? <PropertyBoard /> : <PropertyList key="work" status={PROPERTY_BOARD.filter((s) => s !== 'published' && s !== 'rented').join(',')} />}
+      {view === 'board' ? <PropertyBoard /> : <PropertyList key="work" status={PROPERTY_BOARD.filter((s) => s !== 'published' && s !== 'rented').join(',')} pickAll="Все в работе" />}
     </div>
   );
 }
@@ -383,8 +383,9 @@ type PS = keyof typeof PROPERTY_STATUS;
 const BASE: PS[] = ['published', 'rented'];
 
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
+ * pickAll: a status select narrowing `only` (a comma list) to one of its statuses, pickAll = the «all» label;
  * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
-export function PropertyList({ mine, archived, status: only, agentId, base = '' }: { mine?: boolean; archived?: boolean; status?: string; agentId?: number; base?: string }) {
+export function PropertyList({ mine, archived, status: only, pickAll, agentId, base = '' }: { mine?: boolean; archived?: boolean; status?: string; pickAll?: string; agentId?: number; base?: string }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [agent, setAgent] = useState('');
@@ -396,7 +397,7 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
   const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine && !fixedAgent });
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ['properties', 'list', scope, q, status, agentId ?? agent, page],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agentId ?? (agent ? Number(agent) : undefined), status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
+    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agentId ?? (agent ? Number(agent) : undefined), status: archived ? 'archived' : (pickAll && status) || only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
   const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: isStaff && (scope === 'all' || scope === 'archive') }); // whole-base totals: staff only
@@ -414,10 +415,10 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
           <Search size={16} />
           <input className="input" placeholder="Адрес, район, агент, цена, #тег, телефон" value={q} onChange={(e) => { const v = e.target.value; filter(() => setQ(v)); }} />
         </div>
-        {!archived && !only && (
-          <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => { const v = e.target.value; filter(() => setStatus(v)); }}>
-            <option value="">Все статусы</option>
-            {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
+        {!archived && (!only || pickAll) && (
+          <select className="select" style={{ width: 'auto' }} value={status} aria-label="Статус" onChange={(e) => { const v = e.target.value; filter(() => setStatus(v)); }}>
+            <option value="">{pickAll || 'Все статусы'}</option>
+            {(pickAll ? only!.split(',') as PS[] : mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
         {isStaff && !mine && !fixedAgent && (
