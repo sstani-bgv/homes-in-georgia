@@ -294,15 +294,35 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
     setQueue(fit.map((x) => ({ name: x.name, state: 'wait' })));
     const mark = (i: number, ch: Partial<(typeof queue)[number]>) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, ...ch } : x)));
     let failed = 0;
+    const got: number[][] = [];  // the new media ids per picked file
     await pool(fit, 3, async (x, i) => {
       mark(i, { state: 'prep' });
       try {
         const small = await shrinkPhoto(x);
         mark(i, { state: 'up', pct: 0 });
-        set(await api.properties.uploadMediaProgress(p.id, small, (f) => mark(i, { pct: Math.round(f * 100) })));
+        const r = await api.properties.uploadMediaProgress(p.id, small, (f) => mark(i, { pct: Math.round(f * 100) }));
+        got[i] = r.uploaded_ids || [];
+        set(r);
         mark(i, { state: 'done', pct: 100 });
       } catch (e) { failed++; mark(i, { state: 'err', msg: errText(e) }); }
     });
+    // the server numbers files in the order they finish (3 go up at once): put them back in the order they were picked
+    const newIds = got.flat();
+    if (newIds.length > 1) {
+      try {
+        const fresh = shotsOf(await api.properties.get(p.id));
+        const cur = [...fresh.filter((m) => m.kind !== 'video'), ...fresh.filter((m) => m.kind === 'video')];
+        const isNew = new Set(newIds), kind = new Map(cur.map((m) => [Number(m.id), m.kind]));
+        const queueOf = (k: string | undefined) => newIds.filter((id) => kind.get(id) === k);
+        const q = new Map<string | undefined, number[]>();
+        const ids = cur.map((m) => Number(m.id)).map((id) => {
+          if (!isNew.has(id)) return id;
+          if (!q.has(kind.get(id))) q.set(kind.get(id), queueOf(kind.get(id)));
+          return q.get(kind.get(id))!.shift()!;
+        });
+        if (ids.some((id, j) => id !== Number(cur[j].id))) set(await api.properties.mediaOrder(p.id, ids));
+      } catch { /* the order stays as uploaded; the agent can drag it */ }
+    }
     refresh();
     if (!failed) { toast(fit.length > 1 ? `Загружено файлов: ${fit.length}` : 'Файл загружен'); setQueue([]); }
   };
@@ -508,8 +528,11 @@ function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder }: { p?: Prope
   useEffect(() => setLocal(null), [p?.media]);
   const media = local || [...all.filter((m) => m.kind !== 'video'), ...all.filter((m) => m.kind === 'video')];
   const [open, setOpen] = useState<number | null>(null);
-  const [drag, setDrag] = useState<number | null>(null);
-  /** move tile `from` to `to`, within its own group (photos / videos) */
+  // drag-and-drop on pointer events (mouse and touch): a mouse drags after a few px; a finger after a long press
+  // (a plain swipe still scrolls). The tile moves within its group; the order is saved once, on drop.
+  const [drag, setDrag] = useState<{ from: number; over: number; x: number; y: number; w: number } | null>(null);
+  const press = useRef<{ i: number; x: number; y: number; id: number; touch: boolean; timer?: number; el: HTMLElement } | null>(null);
+  const dragged = useRef(false);  // swallow the click (lightbox) that ends a drag
   const move = (from: number, to: number) => {
     if (!onOrder || to < 0 || to >= media.length || from === to || media[from].kind !== media[to].kind) return;
     const next = [...media];
@@ -517,19 +540,69 @@ function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder }: { p?: Prope
     setLocal(next);
     onOrder(next.map((m) => Number(m.id)));
   };
+  useEffect(() => {  // while dragging, a finger must not scroll the page (touchmove has to be non-passive for that)
+    if (!drag) return;
+    const stop = (e: TouchEvent) => e.preventDefault();
+    document.addEventListener('touchmove', stop, { passive: false });
+    return () => document.removeEventListener('touchmove', stop);
+  }, [!!drag]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const start = (x: number, y: number) => {
+    const s = press.current!;
+    dragged.current = true;
+    navigator.vibrate?.(15);
+    setDrag({ from: s.i, over: s.i, x, y, w: s.el.getBoundingClientRect().width });
+  };
+  const overAt = (x: number, y: number, from: number) => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-mi]');
+    const j = el ? Number(el.dataset.mi) : -1;
+    return j >= 0 && media[j].kind === media[from].kind ? j : null;
+  };
+  const capture = (el: HTMLElement, id: number) => { try { el.setPointerCapture(id); } catch { /* pointer already gone */ } };
+  const end = () => { if (press.current?.timer) clearTimeout(press.current.timer); press.current = null; };
+  const handlers = (i: number) => !onOrder ? {} : {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || (e.target as HTMLElement).closest('button, select')) return;
+      dragged.current = false;
+      const touch = e.pointerType !== 'mouse';
+      press.current = { i, x: e.clientX, y: e.clientY, id: e.pointerId, touch, el: e.currentTarget };
+      if (touch) press.current.timer = window.setTimeout(() => press.current && start(press.current.x, press.current.y), 350);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const s = press.current;
+      if (!s || s.id !== e.pointerId) return;
+      if (!drag) {
+        const far = Math.hypot(e.clientX - s.x, e.clientY - s.y) > (s.touch ? 10 : 5);
+        if (s.touch) { if (far) end(); return; }  // moved before the long press: it's a scroll
+        if (!far) return;
+        capture(s.el, e.pointerId);
+        start(e.clientX, e.clientY);
+        return;
+      }
+      if (!s.el.hasPointerCapture(e.pointerId)) capture(s.el, e.pointerId);
+      const over = overAt(e.clientX, e.clientY, drag.from);
+      setDrag({ ...drag, x: e.clientX, y: e.clientY, over: over ?? drag.over });
+    },
+    onPointerUp: () => { if (drag) move(drag.from, drag.over); setDrag(null); end(); },
+    onPointerCancel: () => { setDrag(null); end(); },
+    onDragStart: (e: React.DragEvent) => e.preventDefault(),  // no native image drag (it would cancel the pointer)
+    onContextMenu: (e: React.MouseEvent) => { if (press.current?.touch || drag) e.preventDefault(); },  // long press ≠ menu
+    onKeyDown: (e: React.KeyboardEvent) => {  // keyboard fallback: ← / → move the focused tile
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      move(i, i + (e.key === 'ArrowLeft' ? -1 : 1));
+    },
+  };
+  // while dragging the grid shows the order it would drop into; the dragged tile's slot is the placeholder
+  const shown = drag ? (() => { const n = [...media]; n.splice(drag.over, 0, n.splice(drag.from, 1)[0]); return n; })() : media;
   if (!media.length) return <div className="muted" style={{ fontSize: 13 }}>Файлов пока нет</div>;
-  const tile = (m: Shot, i: number) => (
-    <div className={`ph ${drag === i ? 'dragging' : ''}`} key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}
-      draggable={!!onOrder} onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDrag(null)}
-      onDragOver={(e) => { if (drag !== null && media[drag].kind === m.kind) e.preventDefault(); }}
-      onDrop={(e) => { e.preventDefault(); if (drag !== null) move(drag, i); setDrag(null); }}>
-      {onOrder && (
-        <span className="move" onClick={(e) => e.stopPropagation()}>
-          <button type="button" aria-label="Раньше" disabled={i === 0 || media[i - 1].kind !== m.kind} onClick={() => move(i, i - 1)}><ChevronLeft size={14} /></button>
-          <span className="num">{i - (m.kind === 'video' ? media.findIndex((x) => x.kind === 'video') : 0) + 1}</span>
-          <button type="button" aria-label="Позже" disabled={i === media.length - 1 || media[i + 1].kind !== m.kind} onClick={() => move(i, i + 1)}><ChevronRight size={14} /></button>
-        </span>
-      )}
+  const tile = (m: Shot, i: number) => {
+    const ghost = drag !== null && shown[i] === media[drag.from];
+    return (
+    <div className={`ph ${ghost ? 'drop-slot' : ''} ${onOrder ? 'sortable' : ''}`} key={m.id} data-mi={i} tabIndex={onOrder ? 0 : undefined}
+      aria-label={onOrder ? 'Файл: перетащите или ← → чтобы поменять порядок' : undefined}
+      onClick={() => { if (dragged.current) { dragged.current = false; return; } setOpen(media.indexOf(m)); }} style={{ cursor: onOrder ? 'grab' : 'zoom-in' }}
+      {...handlers(i)}>
+      {onOrder && <span className="num">{i - (m.kind === 'video' ? shown.findIndex((x) => x.kind === 'video') : 0) + 1}</span>}
       {m.kind === 'video' ? <>
         <video src={`${mediaUrl(m.src)}#t=0.1`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         <span className="video-badge"><Play size={12} fill="currentColor" />Видео</span>
@@ -545,15 +618,21 @@ function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder }: { p?: Prope
       ) : m.room && m.kind !== 'video' && <span className="room badge badge-blue">{m.room}</span>}
       {onDelete && <button className="del btn btn-danger icon-btn btn-sm" style={{ width: 28, height: 28 }} onClick={(e) => { e.stopPropagation(); onDelete(Number(m.id)); }} aria-label="Удалить"><Trash2 size={14} /></button>}
     </div>
-  );
+    );
+  };
+  const dm = drag && media[drag.from];
   const nPhoto = media.findIndex((m) => m.kind === 'video') === -1 ? media.length : media.findIndex((m) => m.kind === 'video');
   return (
     <>
       {open !== null && <Lightbox items={media} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
       {grouped ? <>
-        {nPhoto > 0 && <><span className="label">Фото · {nPhoto}</span><div className="photo-strip">{media.slice(0, nPhoto).map((m, i) => tile(m, i))}</div></>}
-        {nPhoto < media.length && <><span className="label">Видео · {media.length - nPhoto}</span><div className="photo-strip">{media.slice(nPhoto).map((m, i) => tile(m, nPhoto + i))}</div></>}
-      </> : <div className="photo-strip">{media.map(tile)}</div>}
+        {nPhoto > 0 && <><span className="label">Фото · {nPhoto}</span><div className="photo-strip">{shown.slice(0, nPhoto).map((m, i) => tile(m, i))}</div></>}
+        {nPhoto < media.length && <><span className="label">Видео · {media.length - nPhoto}</span><div className="photo-strip">{shown.slice(nPhoto).map((m, i) => tile(m, nPhoto + i))}</div></>}
+      </> : <div className="photo-strip">{shown.map(tile)}</div>}
+      {drag && dm && createPortal(
+        <div className="drag-ghost" style={{ width: drag.w, height: drag.w, left: drag.x - drag.w / 2, top: drag.y - drag.w / 2 }}>
+          {dm.kind === 'video' ? <video src={`${mediaUrl(dm.src)}#t=0.1`} muted playsInline preload="metadata" /> : <img src={thumbUrl(dm.src)} alt="" />}
+        </div>, document.body)}
     </>
   );
 }

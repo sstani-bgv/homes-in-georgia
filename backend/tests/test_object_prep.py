@@ -104,3 +104,6 @@ def test_media_order_saved_and_rooms_photo_only(db, client):
     assert r.status_code == 409 and r.json()["code"] == "bad_order"
     other = make_user(db, "agent")
     assert client.put(f"/api/properties/{p.id}/media/order", headers=auth(other), json={"ids": [a.id, b.id, v.id]}).status_code == 403
+    r = client.post(f"/api/properties/{p.id}/media", headers=auth(ag), files={"files": ("c.jpg", b"\xff\xd8x", "image/jpeg")})
+    assert r.status_code == 200, r.text
+    assert r.json()["uploaded_ids"] == [r.json()["media"][-1]["id"]]  # the UI maps parallel uploads to the selection order

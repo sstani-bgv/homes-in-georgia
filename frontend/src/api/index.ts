@@ -80,7 +80,7 @@ export const api = {
     uploadMediaProgress: (id: number, file: File, onProgress: (f: number) => void) => {
       const fd = new FormData();
       fd.append('files', file);
-      return uploadWithProgress<Property>(`/properties/${id}/media`, fd, onProgress);
+      return uploadWithProgress<Property & { uploaded_ids?: number[] }>(`/properties/${id}/media`, fd, onProgress);
     },
     mediaOrder: (id: number, ids: number[]) => http.put<Property>(`/properties/${id}/media/order`, { ids }),
     deleteMedia: (id: number, mid: number) => http.del<unknown>(`/properties/${id}/media/${mid}`),
