@@ -3,6 +3,7 @@ import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttribute
 import { createPortal } from 'react-dom';
 import { Inbox, X } from 'lucide-react';
 import { initials } from '../lib/format';
+import { mediaUrl } from '../api/client';
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ok';
 export function Button({ variant = 'primary', size, block, loading, children, className = '', ...rest }:
@@ -107,7 +108,7 @@ export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; on
 }
 
 export function Avatar({ name, src, size }: { name?: string | null; src?: string | null; size?: 'lg' }) {
-  return <span className={`avatar ${size === 'lg' ? 'avatar-lg' : ''}`}>{src ? <img src={src} alt="" /> : initials(name)}</span>;
+  return <span className={`avatar ${size === 'lg' ? 'avatar-lg' : ''}`}>{src ? <img src={mediaUrl(src)} alt="" /> : initials(name)}</span>;
 }
 
 export function Progress({ value, max }: { value: number; max: number }) {

@@ -261,3 +261,30 @@ def test_post_media_fit_the_bot_api_upload_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(notify, "_squeeze_video", lambda p, tmp, n: None)
     assert notify._bot_media([("photo", str(photo)), ("video", str(big))], str(tmp_path)) == [("photo", str(photo))]
     assert notify._bot_media([("video", str(small))], str(tmp_path)) == [("video", str(small))]  # small: untouched
+
+
+def test_team_avatars_from_telegram(db, monkeypatch, tmp_path):
+    """Irakli 2026-11-11: the team's Telegram profile photos fill users.photo_url; a set photo (a Telegram sign-in) is
+    kept, a hidden one leaves the initials."""
+    import io
+
+    from PIL import Image
+
+    from app import storage
+    from app.telegram import avatars
+    a, b, c = make_user(db, "agent", tg_id=101), make_user(db, "agent", tg_id=102), make_user(db, "agent", tg_id=103)
+    c.photo_url = "https://t.me/i/userpic/320/c.jpg"
+    db.commit()
+    buf = io.BytesIO()
+    Image.new("RGB", (640, 640), "red").save(buf, "JPEG")
+    calls = {"getUserProfilePhotos": lambda p: {"photos": [[{"file_id": "s"}, {"file_id": "big"}]]} if p["user_id"] == 101 else {"photos": []},
+             "getFile": lambda p: {"file_path": "photos/x.jpg"}}
+    monkeypatch.setattr(avatars.tg, "call", lambda m, **p: calls[m](p))
+    monkeypatch.setattr(avatars.httpx, "get", lambda url, timeout: type("R", (), {"status_code": 200, "content": buf.getvalue()})())
+    saved = {}
+    monkeypatch.setattr(storage, "put", lambda k, d: saved.update({k: d}))
+    assert avatars.run(out=lambda *_: None) == (1, 1)
+    db.expire_all()
+    assert a.photo_url == f"/api/media/avatars/u{a.id}.jpg" and b.photo_url is None and c.photo_url.startswith("https://t.me/")
+    with Image.open(io.BytesIO(saved[f"avatars/u{a.id}.jpg"])) as im:
+        assert im.size == (256, 256)
