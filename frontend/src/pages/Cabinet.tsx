@@ -78,7 +78,7 @@ export function CabinetView({ base = '', userId, tabbed }: { base?: string; user
           <div className="grid g2">
             <Card label="Инструменты" title="Быстрый доступ">
               <div className="add-grid">
-                <Link to={`${base}/contracts`} className="add-item"><FileText size={20} /><span><b>Договор</b><small>Аренда или продажа</small></span></Link>
+                <Link to={`${base}/contracts?new=1`} className="add-item"><FileText size={20} /><span><b>Договор</b><small>Аренда или продажа</small></span></Link>
                 <Link to={`${base}/calendar`} className="add-item"><CalendarDays size={20} /><span><b>Календарь</b><small>Показы и съёмки</small></span></Link>
                 {!base && <Link to="/team?tab=standards" className="add-item"><BookOpen size={20} /><span><b>Стандарты</b><small>Лестница и викторина</small></span></Link>}
               </div>

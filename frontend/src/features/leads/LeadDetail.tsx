@@ -183,6 +183,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   if (error || !lead) return <ErrorBox error={error} />;
   const c = lead.client;
   const isAgent = lead.agent_id === user?.id || lead.agent?.id === user?.id;
+  const liveContract = lead.contract && lead.contract.status !== 'closed_no_deal' ? lead.contract : null;  // closed: a new one can be made
   const closed = ['rented', 'refused'].includes(lead.status);
   const l = lead.listing;
   const showOutcome = ['viewing_done', 'deal_pending', 'rented', 'refused', 'thinking'].includes(lead.status) || lead.agent_outcome || lead.client_outcome;
@@ -216,7 +217,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
               </div>
             )}
             {(isAgent || isStaff) && CONTRACT_STAGES.includes(lead.status) && (
-              <Link className="btn btn-secondary btn-lg" to={`${compact ? '/m' : ''}/contracts?lead_id=${lead.id}`}><FileText size={18} />Оформить договор</Link>
+              <Link className="btn btn-secondary btn-lg" to={`${compact ? '/m' : ''}/contracts?${liveContract ? `id=${liveContract.id}` : `lead_id=${lead.id}`}`}><FileText size={18} />{liveContract ? `Договор: ${liveContract.status_label}` : 'Оформить договор'}</Link>
             )}
             {isStaff && lead.status === 'new' && <Button size="lg" loading={take.isPending} onClick={() => take.mutate()}><Hand size={18} />Взять</Button>}
             {isStaff && !closed && <Button size={lead.status === 'operator_taken' ? 'lg' : undefined} variant={lead.status === 'operator_taken' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}><UserPlus size={16} />{lead.agent ? 'Сменить агента' : 'Назначить агента'}</Button>}

@@ -1,13 +1,16 @@
 // /contracts and /m/contracts — contract generator (port of the old CRM tab «tab-contract»).
-// Output is a printable A4 document (window.print + print CSS) and a .doc file for Word; no external services.
+// Output: «Сохранить PDF» (the server prints this HTML with headless Chrome → stored contract, features/contracts/
+// ContractCard), the printable A4 preview (window.print + the same print CSS) and a .doc file for Word.
 import { useEffect, useMemo, useState } from 'react';
 import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Building2, Download, FileText, Home, KeyRound, Printer, RotateCcw, Send } from 'lucide-react';
+import { Building2, Download, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { Deal, LeadContract } from '../api/types';
+import type { Contract, Deal, LeadContract } from '../api/types';
+import { ContractActions, ContractList, ContractStatusBadge, ContractView } from '../features/contracts/ContractCard';
 import { insideTelegram } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
@@ -124,6 +127,14 @@ function docHtml(doc: ContractDoc): string {
   // the text as edited in the preview (Irakli: «иногда приходится редактировать договоры»), else as generated
   const inner = document.querySelector('.contract-doc .cd-body')?.innerHTML || docInner(doc);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.45}${DOC_CSS}</style></head><body><div class="contract-doc">${inner}</div></body></html>`;
+}
+
+/** The page the server prints to PDF: the edited text + the print CSS of «Печать» (header, page numbers, initials,
+ *  watermark). Brand images stay /brand/… links: the server inlines them. */
+function pdfHtml(doc: ContractDoc): string {
+  const inner = document.querySelector('.contract-doc .cd-body')?.innerHTML || docInner(doc);
+  const base = `body{margin:0;background:#fff;color:#111}.contract-doc{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.55}`;
+  return `<!doctype html><html lang="ka"><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>${base}${DOC_CSS}${pageCss(doc)}</style></head><body><article class="contract-doc" lang="ka"><div class="cd-body">${inner}</div></article></body></html>`;
 }
 
 /** David's drafts are ~370 KB of text: loaded only when the contract page needs them (own chunk). */
@@ -265,8 +276,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   function reset() {
     clearDraft();
     setType(''); setLang(''); setD({ ...EMPTY, timestamp: todayStr() }); setDepTouched(false); setPetTouched(false);
-    setStep(1); setErr(''); setMissing(new Set()); setPrefilled(null);
-    if (dealId || leadId) setParams((sp) => { sp.delete('deal_id'); sp.delete('lead_id'); return sp; }, { replace: true });
+    setStep(1); setErr(''); setMissing(new Set()); setPrefilled(null); setSaved(null);
+    if (dealId || leadId) setParams((sp) => { sp.delete('deal_id'); sp.delete('lead_id'); sp.set('new', '1'); return sp; }, { replace: true });
   }
 
   const fileBase = `Contract_${type || 'x'}_${lang || 'x'}_${(d.cadastral_code || d.client_full_name || 'draft').replace(/[^\w.-]+/g, '_')}`;
@@ -287,6 +298,18 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }
   // Telegram's webview ignores blob / <a download>: the bot sends the same file to the agent's chat instead
   const tg = insideTelegram();
+  // «Сохранить PDF»: the first save creates the contract, later ones (after edits) regenerate it while it is a draft
+  const [saved, setSaved] = useState<Contract | null>(null);
+  const save = useMutation({
+    mutationFn: () => {
+      const b = { kind: type as CxType, lang: lang as CxLang, html: pdfHtml(doc!), title: doc!.title, cadastral: d.cadastral_code,
+        address: d.street_house, client_name: d.client_full_name, owner_name: d.owner_full_name,
+        lead_id: leadId || leadC.data?.lead_id || null, deal_id: dealId || leadC.data?.deal_id || null };
+      return saved && saved.status === 'draft' ? api.contracts.update(saved.id, b) : api.contracts.create(b);
+    },
+    onSuccess: (c) => { setSaved(c); toast(`PDF сохранён: договор #${c.id}`); },
+    onError: (e) => toast(errText(e), true),
+  });
   const sendTg = useMutation({
     mutationFn: () => api.contracts.send(`${fileBase}.doc`, docHtml(doc!)),
     onSuccess: () => toast('Договор отправлен вам в Telegram'),
@@ -447,13 +470,19 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
       {step === 5 && doc && (
         <>
           <div className="row row-wrap no-print">
-            <Button onClick={print}><Printer size={16} />Печать или PDF</Button>
-            {tg ? <Button variant="secondary" loading={sendTg.isPending} onClick={() => sendTg.mutate()}><Send size={16} />Отправить в Telegram</Button>
+            <Button loading={save.isPending} onClick={() => save.mutate()}><Save size={16} />{saved ? 'Обновить PDF' : 'Сохранить PDF'}</Button>
+            {!tg && <Button variant="secondary" onClick={print}><Printer size={16} />Печать</Button>}
+            {tg ? <Button variant="secondary" loading={sendTg.isPending} onClick={() => sendTg.mutate()}><Send size={16} />.doc в Telegram</Button>
               : <Button variant="secondary" onClick={download}><Download size={16} />Скачать .doc</Button>}
             <Button variant="ghost" onClick={() => setStep(3)}>Изменить данные</Button>
-            <span className="muted grow" style={{ fontSize: 12, minWidth: 200 }}>В окне печати выберите «Сохранить как PDF», чтобы скачать файл</span>
           </div>
-          <div className="muted no-print" style={{ fontSize: 12 }}>Текст договора можно поправить прямо здесь: правка уйдёт в печать и в .doc.</div>
+          {saved && (
+            <Card className="no-print" label={`Договор #${saved.id}`} title={<span className="row gap-sm">PDF сохранён <ContractStatusBadge c={saved} /></span>}
+              actions={<Link className="btn btn-sm btn-ghost" to={`?id=${saved.id}`}>Открыть договор</Link>}>
+              <ContractActions c={saved} onChange={setSaved} />
+            </Card>
+          )}
+          <div className="muted no-print" style={{ fontSize: 12 }}>Текст договора можно поправить прямо здесь: правка уйдёт в PDF{saved ? ' (нажмите «Обновить PDF»)' : ''}, в печать и в .doc.</div>
           <div className="contract-paper-wrap"><ContractDocument doc={doc} editable /></div>
         </>
       )}
@@ -471,5 +500,21 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   );
 }
 
-export function ContractsPage() { return <ContractWizard />; }
-export function MContracts() { return <ContractWizard compact />; }
+/** /contracts: the list (active / history); ?id= one contract; ?new=1 (or ?lead_id= / ?deal_id=) the wizard. */
+function Contracts({ compact }: { compact?: boolean }) {
+  const [params] = useSearchParams();
+  const base = compact ? '/m/contracts' : '/contracts';
+  const id = Number(params.get('id')) || 0;
+  if (id) return <ContractView key={id} id={id} base={base} />;
+  if (params.has('new') || params.has('lead_id') || params.has('deal_id')) return <ContractWizard compact={compact} />;
+  return (
+    <div className="col gap-lg">
+      {!compact && <PageHead label="Генератор договоров" title="Договоры" />}
+      <Link className="btn btn-lg" to={`${base}?new=1`}><Plus size={18} />Новый договор</Link>
+      <ContractList base={base} />
+    </div>
+  );
+}
+
+export function ContractsPage() { return <Contracts />; }
+export function MContracts() { return <Contracts compact />; }

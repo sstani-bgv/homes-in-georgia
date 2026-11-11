@@ -28,7 +28,11 @@ Google Docs: шапка «RENT IN TBILISI» с флагом и номер стр
 - `frontend/src/features/contracts/templates.ts` — поля формы (`CxData`), типы (`CX_TYPES`), включённые типы
   (`ENABLED_TYPES`), языки типа (`langsFor`), выбор шаблона (`draftKey`), подстановка полей (`buildContract`:
   даты dd.mm.yyyy, `one_month` = конец первого оплаченного периода, остальное как введено).
-- `frontend/src/pages/Contracts.tsx` — мастер (тип → язык → данные → проверка → документ), предпросмотр, печать, .doc.
+- `frontend/src/pages/Contracts.tsx` — `/contracts`: список (активные / сделки / «Сделка не состоялась» / все),
+  `?id=` договор, `?new=1` (или `?lead_id=` / `?deal_id=`) мастер (тип → язык → данные → проверка → документ),
+  предпросмотр, «Сохранить PDF», печать, .doc.
+- `frontend/src/features/contracts/ContractCard.tsx` — договор: PDF (открыть / скачать / в Telegram), «Поделиться»
+  (файл через системное меню телефона, иначе ссылка), «Договор подписан», «Сделка не состоялась», список.
 - `frontend/scripts/contract-drafts/gen.py` + `parse.py` — конвертер Google Docs → `templates-david.ts`.
   `FIXES` в gen.py — наши исправления опечаток оригиналов, применяются при каждой генерации.
 - `frontend/public/brand/contract-watermark.png`, `ge-flag.svg` — водяной знак и флаг шапки.
