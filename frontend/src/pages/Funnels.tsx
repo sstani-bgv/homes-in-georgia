@@ -20,7 +20,7 @@ type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archiv
 
 /** «Объект вручную»: the owner came to the office himself. His contact makes the object «Собственник» at once (no call
  * step); the card then opens the post generator, where the agent fills everything (address, price, photos...). */
-function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ManualProperty({ open, onClose, base = '' }: { open: boolean; onClose: () => void; base?: string }) {
   const empty = { owner_name: '', owner_phone: '', address: '', district: '', point: null as Point | null, facts: null as PointFacts | null };
   const [f, setF] = useState(empty);
   const qc = useQueryClient();
@@ -28,7 +28,7 @@ function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void 
   const navigate = useNavigate();
   const m = useMutation({
     mutationFn: () => api.properties.create({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, ...(f.facts?.metro ? { post_fields: { metro: f.facts.metro } } : {}), source_type: 'direct', owner_name: f.owner_name, owner_phone: f.owner_phone }),
-    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`/objects/${p.id}`); },
+    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`${base}/objects/${p.id}`); },
     onError: (e) => toast(errText(e), true),
   });
   return (
