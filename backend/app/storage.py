@@ -66,6 +66,17 @@ def put(key: str, data: bytes) -> None:
         p.write_bytes(data)
 
 
+def read(key: str) -> bytes | None:
+    """The stored file's bytes (small private documents: contract PDFs), None if missing."""
+    if is_s3():
+        try:
+            return s3().get_object(Bucket=env.S3_BUCKET, Key=key)["Body"].read()
+        except Exception:  # NoSuchKey and the like
+            return None
+    p = local_path(key)
+    return p.read_bytes() if p.is_file() else None
+
+
 def delete(key: str) -> None:
     keys = [key] + ([preview_key(key)] if not key.startswith("previews/") else [])
     for k in keys:

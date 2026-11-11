@@ -10,8 +10,9 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend:/app TZ=Asia/Tbilisi
 WORKDIR /app
-# ffmpeg: bot video fetchers (yt-dlp merges/HLS)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg: bot video fetchers (yt-dlp merges/HLS); chromium + fonts: contract PDFs (backend/app/services/contracts.py)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg chromium fonts-noto-core fonts-montserrat \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt backend/requirements.txt
 COPY bot/requirements.txt bot/requirements.txt
 RUN pip install -r backend/requirements.txt -r bot/requirements.txt

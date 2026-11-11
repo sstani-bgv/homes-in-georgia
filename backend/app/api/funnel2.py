@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import STAFF_ROLES, current_user, require_roles
 from app.db import get_db
 from app.models import Client, Deal, Lead, Listing, Property, User
-from app.services import catalog
+from app.services import catalog, contracts
 from app.services import leads as L
 from app.services.common import get_or_404
 from app.services.errors import forbidden
@@ -110,6 +110,7 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
         "client": {"name": data["client_full_name"] or None, "phone": (deal.client_phone if deal else None) or client.get("phone"),
                    "username": client.get("username")},
         "owner": {"name": data["owner_full_name"] or None, "phone": (deal.owner_phone if deal else None) or owner.get("phone")},
+        "contract": contracts.summary(contracts.for_lead(db, lead.id)),
     }
 
 

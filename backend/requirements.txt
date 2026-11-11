@@ -6,6 +6,7 @@ psycopg[binary]==3.3.6
 alembic==1.20.1
 pydantic-settings==2.16.2
 pyjwt==2.15.1
+cryptography==50.0.2   # pyjwt RS256: the Google service account token (services/contracts.py → Drive)
 bcrypt==5.0.0
 httpx==0.28.1
 pypdf==7.0.1   # app/services/registry.py: the cadastral code from the owner's registry extract PDF

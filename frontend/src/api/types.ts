@@ -321,6 +321,47 @@ export interface Lead {
   created_at?: string | null;
   slots?: Slot[];
   history?: EventItem[];
+  /** the lead's contract (GET /leads/{id} only): draft → signed → deal | closed_no_deal */
+  contract?: ContractSummary | null;
+}
+
+export type ContractStatus = 'draft' | 'signed' | 'deal' | 'closed_no_deal';
+export type ContractCloseReason = 'deal_failed' | 'client_changed_mind' | 'owner_refused' | 'other';
+export interface ContractSummary {
+  id: number;
+  status: ContractStatus;
+  status_label: string;
+  signed_at?: string | null;
+  has_signed_pdf?: boolean;
+  close_reason?: ContractCloseReason | null;
+  close_reason_label?: string | null;
+  closed_at?: string | null;
+}
+/** A stored contract (backend services/contracts.py). */
+export interface Contract extends ContractSummary {
+  kind: 'rent' | 'comm' | 'sale';
+  lang: 'GEO' | 'RU' | 'EN';
+  title?: string | null;
+  cadastral?: string | null;
+  address?: string | null;
+  client_name?: string | null;
+  owner_name?: string | null;
+  lead_id?: number | null;
+  deal_id?: number | null;
+  property_id?: number | null;
+  created_by?: UserRef | null;
+  created_at?: string | null;
+  signed_by?: UserRef | null;
+  close_comment?: string | null;
+  closed_by?: UserRef | null;
+  in_drive?: boolean;
+  filename: string;
+  share?: { path: string; url: string; expires_at: string } | null;
+  html?: string;
+}
+export interface ContractIn {
+  kind: Contract['kind']; lang: Contract['lang']; html: string; title?: string; cadastral?: string; address?: string;
+  client_name?: string; owner_name?: string; lead_id?: number | null; deal_id?: number | null; property_id?: number | null;
 }
 
 /** GET /leads/{id}/contract: ContractWizard prefill (data keys = CxData). */
@@ -333,6 +374,7 @@ export interface LeadContract {
   district?: string | null;
   client: { name?: string | null; phone?: string | null; username?: string | null };
   owner: { name?: string | null; phone?: string | null };
+  contract?: ContractSummary | null;
 }
 
 export interface RecommendedAgent {

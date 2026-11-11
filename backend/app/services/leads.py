@@ -676,6 +676,8 @@ def detail(db: Session, lead: Lead, user: User) -> dict:
     d["slots"] = [{"id": s.id, "starts_at": s.starts_at.isoformat(), "chosen": s.chosen}
                   for s in db.scalars(select(LeadSlot).where(LeadSlot.lead_id == lead.id).order_by(LeadSlot.starts_at))]
     d["history"] = history(db, lead.id)
+    from app.services import contracts
+    d["contract"] = contracts.summary(contracts.for_lead(db, lead.id))  # status: draft | signed | deal | closed_no_deal
     return d
 
 

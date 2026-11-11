@@ -2,6 +2,9 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/backend:/app TZ=Asia/Tbilisi
 WORKDIR /app
+# contract PDFs: headless chromium + Georgian / Montserrat fonts (app/services/contracts.py)
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-noto-core fonts-montserrat \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend backend

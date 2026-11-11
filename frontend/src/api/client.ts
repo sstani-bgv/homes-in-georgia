@@ -130,6 +130,14 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   return data as T;
 }
 
+/** A file from an authenticated endpoint (contract PDFs). */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'Файл не найден' : `Ошибка ${res.status}`);
+  return res.blob();
+}
+
 export const http = {
   get: <T>(p: string, q?: Query) => request<T>('GET', p, undefined, q),
   post: <T>(p: string, b?: unknown, q?: Query) => request<T>('POST', p, b ?? {}, q),

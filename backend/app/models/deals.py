@@ -73,3 +73,42 @@ class Evaluation(Base):
     comment = Column(Text)
     raw = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+CONTRACT_STATUSES = ("draft", "signed", "deal", "closed_no_deal")
+CONTRACT_CLOSE_REASONS = {"deal_failed": "Сделка сорвалась", "client_changed_mind": "Клиент передумал",
+                          "owner_refused": "Собственник отказался", "other": "Другое"}
+
+
+class Contract(Base):
+    """A contract generated in the CRM wizard (frontend pages/Contracts.tsx): the document HTML as edited, its PDF
+    and the lifecycle draft → signed → deal | closed_no_deal (docs/CONTRACTS.md, migration 0007)."""
+    __tablename__ = "contracts"
+    __table_args__ = (Index("contracts_lead_idx", "lead_id"), Index("contracts_created_by_idx", "created_by"))
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"))
+    deal_id = Column(Integer, ForeignKey("deals.id", ondelete="SET NULL"))
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    kind = Column(Text, nullable=False)  # rent | comm | sale
+    lang = Column(Text, nullable=False)  # GEO | RU | EN
+    title = Column(Text)
+    cadastral = Column(Text)
+    address = Column(Text)
+    client_name = Column(Text)
+    owner_name = Column(Text)
+    html = Column(Text, nullable=False)
+    pdf_path = Column(Text)          # private/contracts/<id>/… generated PDF
+    signed_pdf_path = Column(Text)   # the signed scan uploaded at «Договор подписан» (optional)
+    status = Column(Text, nullable=False, server_default="draft")
+    signed_at = Column(DateTime(timezone=True))
+    signed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    close_reason = Column(Text)
+    close_comment = Column(Text)
+    closed_at = Column(DateTime(timezone=True))
+    closed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    share_token = Column(Text, unique=True)
+    share_expires_at = Column(DateTime(timezone=True))
+    drive_file_id = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -122,6 +122,13 @@ def property_lease_expiry(db: Session, job: Job):
     notify.property_lease_expiry(p, days)
 
 
+@handler("contract_drive")
+def contract_drive(db: Session, job: Job):
+    """A signed contract's PDF → the Drive folder (services/contracts.drive_upload); errors retry with backoff."""
+    from app.services import contracts
+    return contracts.drive_upload(db, _ref_id(job))
+
+
 @handler("review_batch")
 def review_batch(db: Session, job: Job):
     return "noop"  # the bot's own review loop handles catalog moderation cards

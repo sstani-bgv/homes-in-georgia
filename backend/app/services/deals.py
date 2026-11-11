@@ -363,6 +363,8 @@ def confirm(db: Session, deal_id: int, actor: User) -> Deal:
         from app.services import properties
         properties.mark_rented(db, deal.property_id, actor)
     schedule_reminders(db, deal)
+    from app.services import contracts
+    contracts.mark_deal(db, deal, actor)
     log_event(db, "deal", deal.id, "confirmed", actor)
     db.commit()
     try:

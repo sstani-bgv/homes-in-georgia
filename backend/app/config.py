@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     APIFY_TOKEN: str = ""
     GOOGLE_SA_JSON: str = ""
     SHEET_ID: str = ""
+    GOOGLE_SA_SUBJECT: str = ""         # optional: a Workspace user the service account acts as (domain-wide delegation)
+    GDRIVE_CONTRACTS_FOLDER: str = "1DDD3V7EzEIPZHuTgNXV0nKzc3K3wwLFy"  # signed contract PDFs (services/contracts.py)
+    CHROME_BIN: str = "chromium"        # headless Chrome/Chromium that prints contract PDFs; mac: the Google Chrome binary
+    CONTRACT_SHARE_DAYS: int = 7        # «Поделиться» link lifetime
     TZ: str = "Asia/Tbilisi"
     SLA_OPERATOR_TAKE_MIN: int = 5
     SLA_AGENT_SLOTS_MIN: int = 30

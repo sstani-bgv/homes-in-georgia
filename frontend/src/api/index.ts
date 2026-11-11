@@ -1,11 +1,11 @@
 // Typed API functions, straight from docs/ARCHITECTURE.md §7.
-import { http, uploadWithProgress } from './client';
+import { fetchBlob, http, uploadWithProgress } from './client';
 import {
   normAgentStat, normAuth, normBoard, normCabinet, normClient, normCounter, normDashboard, normEvent, normLead, normListing, normPage,
   normProperty, normRecommend, normReport,
 } from './normalize';
 import type {
-  AgentStat, AppConfig, AuthOut, Cabinet, Client, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
+  AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
   Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
 } from './types';
@@ -148,7 +148,23 @@ export const api = {
   },
 
   /** Mini App: the generated contract file sent to the user's Telegram chat by the bot (webviews block downloads) */
-  contracts: { send: (filename: string, html: string) => http.post<{ ok: boolean }>('/contracts/send', { filename, html }) },
+  contracts: {
+    send: (filename: string, html: string) => http.post<{ ok: boolean }>('/contracts/send', { filename, html }),
+    /** status: active (draft + signed, default) | draft | signed | deal | closed_no_deal | all */
+    list: (q?: { status?: string; lead_id?: number; q?: string }) => http.get<L<Contract>>('/contracts', { ...q, limit: LIMIT }),
+    get: (id: number) => http.get<Contract>(`/contracts/${id}`),
+    create: (b: ContractIn) => http.post<Contract>('/contracts', b),
+    update: (id: number, b: ContractIn) => http.put<Contract>(`/contracts/${id}`, b),
+    sign: (id: number, file?: File | null) => {
+      const fd = new FormData();
+      if (file) fd.append('file', file);
+      return http.post<Contract>(`/contracts/${id}/sign`, fd);
+    },
+    close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
+    share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
+    sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
+    pdf: (id: number, signed = false) => fetchBlob(`/contracts/${id}/pdf${signed ? '?signed=1' : ''}`),
+  },
   deals: {
     calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),
     list: (q?: { month?: string; agent_id?: number; status?: string }) => http.get<L<Deal>>('/deals', { ...q, limit: LIMIT }),

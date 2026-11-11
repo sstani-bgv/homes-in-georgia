@@ -18,7 +18,10 @@ interface AuthState {
 
 const Ctx = createContext<AuthState | null>(null);
 
-interface TgWebApp { initData?: string; ready?: () => void; expand?: () => void; colorScheme?: string; setHeaderColor?: (c: string) => void }
+interface TgWebApp {
+  initData?: string; ready?: () => void; expand?: () => void; colorScheme?: string; setHeaderColor?: (c: string) => void;
+  openLink?: (url: string) => void; openTelegramLink?: (url: string) => void;
+}
 export function tgWebApp(): TgWebApp | null {
   const w = window as unknown as { Telegram?: { WebApp?: TgWebApp } };
   return w.Telegram?.WebApp ?? null;
