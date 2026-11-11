@@ -260,6 +260,13 @@ a.brand, a.brand:hover { color: inherit; text-decoration: none; }
 }
 .tabs button.active { color: var(--brand); border-bottom-color: var(--brand); }
 .tab-count { background: var(--brand-soft); color: var(--brand); border-radius: 99px; padding: 0 7px; font-size: 11px; line-height: 18px; }
+/* phone: every tab visible at once (Stanislav 11-11) — wrapped pills instead of a sideways scroll */
+@media (max-width: 767px) {
+  .tabs { flex-wrap: wrap; gap: 6px; overflow: visible; border-bottom: 0; }
+  .tabs button { padding: 6px 11px; font-size: 12px; border: 1px solid var(--line); border-radius: 99px; margin-bottom: 0; background: var(--surface); }
+  .tabs button.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .tabs button.active .tab-count { background: rgba(255,255,255,.2); color: #fff; }
+}
 
 /* ---------- table ---------- */
 .table-wrap { overflow-x: auto; }
