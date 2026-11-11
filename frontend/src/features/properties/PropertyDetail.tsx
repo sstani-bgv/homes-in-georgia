@@ -181,6 +181,10 @@ type GenForm = {
   total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields;
 };
 const BEDROOM_CHIPS: Record<string, string> = { 0: 'Студия', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5+' };
+// the old generator's sale block (backend SALE_AMENITIES): its own type order, beds up to 6+, only these amenities
+const SALE_TYPES = ['Apartment', 'House', 'Land', 'Commercial', 'Retail', 'Business', 'Cafe', 'Restaurant', 'BeautySalon', 'Warehouses', 'Manufacture', 'Duplex', 'Townhouse'];
+const SALE_BEDROOM_CHIPS: Record<string, string> = { ...BEDROOM_CHIPS, 5: '5', 6: '6+' };
+const SALE_AMENITIES = ['Balcony', 'Terrace', 'Courtyard', 'ParkingPlace', 'Conditioner', 'Dishwasher', 'Oven', 'Stove', 'Bath', 'Shower', 'Elevator', 'Fireplace'];
 const AMENITY_FIXED = ['Elevator', 'Oven', 'ParkingPlace', 'Conditioner']; // backend FIXED_AMENITIES: ✖️ in a rent post when absent
 const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 const genOf = (p: Property): GenForm => ({
@@ -289,8 +293,8 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
 
         <div className="gen-block">
           <span className="gen-title">2 · Объект</span>
-          <Field label="Тип"><Chips options={one('prop_type')} value={pf.prop_type} onChange={(v) => setPf('prop_type', v)} /></Field>
-          <Field label="Спальни"><Chips options={BEDROOM_CHIPS} value={f.bedrooms} onChange={(v) => upd('bedrooms', v ?? '')} /></Field>
+          <Field label="Тип"><Chips options={sale ? Object.fromEntries(SALE_TYPES.map((t) => [t, one('prop_type')[t]])) : one('prop_type')} value={pf.prop_type} onChange={(v) => setPf('prop_type', v)} /></Field>
+          <Field label="Спальни"><Chips options={sale ? SALE_BEDROOM_CHIPS : BEDROOM_CHIPS} value={f.bedrooms} onChange={(v) => upd('bedrooms', v ?? '')} /></Field>
           <Field label="Здание"><Chips options={one('building')} value={pf.building} onChange={(v) => setPf('building', v)} /></Field>
           {sale && <Field label="Состояние"><Chips options={one('condition')} value={pf.condition} onChange={(v) => setPf('condition', v)} /></Field>}
           <div className="form-grid">
@@ -307,7 +311,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <Field label="Дизайн"><Chips options={one('design')} value={pf.design} onChange={(v) => setPf('design', v)} /></Field>
           <Field label="Ванные комнаты" hint="Одна — не отмечать"><Chips options={one('bathrooms')} value={pf.bathrooms} onChange={(v) => setPf('bathrooms', v)} /></Field>
           <Field label="Отопление"><Chips options={one('heating')} value={pf.heating} onChange={(v) => setPf('heating', v)} /></Field>
-          {((sale ? [['Удобства', AMENITY_ALL]] : [['✅/✖️ в посте', AMENITY_FIXED], ['Остальные (только ✅ если есть)', AMENITY_REST]]) as [string, string[]][]).map(([label, keys]) => (
+          {((sale ? [['Удобства', SALE_AMENITIES]] : [['✅/✖️ в посте', AMENITY_FIXED], ['Остальные (только ✅ если есть)', AMENITY_REST]]) as [string, string[]][]).map(([label, keys]) => (
             <Field key={label} label={label}>
               <div className="row row-wrap gap-sm">
                 {keys.map((a) => {
@@ -322,7 +326,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
 
         <div className="gen-block">
           <span className="gen-title">3 · Цена</span>
-          {sale ? <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={pf.sale_price ?? ''} onChange={(e) => setPf('sale_price', e.target.value === '' ? undefined : Number(e.target.value))} /></Field> : <>
+          {sale ? <Field label="Цена ($)" hint="Диапазон цены (#Price…) ставится в пост сам по цене"><Input type="number" inputMode="numeric" value={pf.sale_price ?? ''} onChange={(e) => setPf('sale_price', e.target.value === '' ? undefined : Number(e.target.value))} /></Field> : <>
             <div className="form-grid">
               <Field label="Цена ($)"><Input type="number" inputMode="numeric" value={f.price} onChange={(e) => upd('price', e.target.value)} /></Field>
               <Field label="Депозит ($)" hint="Пусто — равен цене, 0 — без депозита"><Input type="number" inputMode="numeric" min={0} value={pf.deposit ?? ''} onChange={(e) => setPf('deposit', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>
