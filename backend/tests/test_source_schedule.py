@@ -16,7 +16,8 @@ def test_schedule_price_and_save(db, client):
     fb, th = next(x for x in r if x["key"] == "facebook"), next(x for x in r if x["key"] == "threads")
     assert fb["every_min"] == 360 and fb["paid"]["per_run"] == 0.002 and fb["paid"]["per_hour"] == 0.007
     assert fb["paid"]["spent_7d"] == 0.088 and th["paid"]["per_run"] == 0.12 and th["paid"]["per_hour"] == 0
-    assert next(x for x in r if x["key"] == "ss")["paid"] is None
+    assert next(x for x in r if x["key"] == "ss")["paid"]["per_run"] == 0.002  # Apify since the Cloudflare block
+    assert next(x for x in r if x["key"] == "myhome")["paid"] is None
 
     r = client.put("/api/sources/schedule", headers=auth(admin), json={"facebook": 120})
     assert r.status_code == 200 and next(x for x in r.json() if x["key"] == "facebook")["every_min"] == 120

@@ -192,7 +192,7 @@ def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db, scope=
 # How often the parser runs each source (bot/refresh.sh reads source_every_min through db.py export-sources) and what the
 # paid ones cost: per run (Apify start / per query) and per hour of new posts, measured from the runs the parser
 # recorded (source_runs, 7 days). The page multiplies them by the chosen frequency: $/month.
-SCHEDULE = [("ss", "ss.ge", None), ("myhome", "myhome.ge", None), ("livo", "livo.ge", None), ("korter", "korter.ge", None),
+SCHEDULE = [("ss", "ss.ge (Apify)", 0.002), ("myhome", "myhome.ge", None), ("livo", "livo.ge", None), ("korter", "korter.ge", None),
             ("telegram", "Telegram-каналы", None), ("facebook", "Facebook-группы (Apify)", 0.002),
             ("threads", "Threads (Apify)", None)]
 SCHEDULE_DEFAULTS = {"ss": 360, "myhome": 360, "livo": 360, "korter": 360, "telegram": 360, "facebook": 360, "threads": 480}
@@ -206,13 +206,13 @@ def _schedule(db: Session) -> list[dict]:
     out = []
     for key, label, start in SCHEDULE:
         paid = None
-        if key in ("facebook", "threads"):
+        if key in ("ss", "facebook", "threads"):
             rr = runs.get(key) or []
             spent = sum(r[1] for r in rr)
             if key == "threads":  # a flat price per query and run, new posts are free
                 per_run = spent / len(rr) if rr else THREADS_PER_QUERY * queries
                 paid = {"per_run": round(per_run, 4), "per_hour": 0}
-            else:  # $0.002 a start + $0.0007 a new post: posts come at their own pace, whatever the frequency
+            else:  # a start (+ ss.ge: the list page) + each new post / detail page, which come at their own pace
                 hours = sum(r[3] for r in rr if r[3])
                 var = sum(max(0, r[1] - start) for r in rr if r[3])
                 paid = {"per_run": start, "per_hour": round(var / hours, 5) if hours else None}

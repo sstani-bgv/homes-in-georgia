@@ -112,6 +112,9 @@ def run_actor(actor, inp):
             if _out_of_usage(r):
                 print(f"apify: key #{n} is out of usage this month, trying the next one")
                 continue
+            if r.status_code == 403:  # e.g. cheerio-scraper not approved on that account (full-permission-actor-not-approved)
+                print(f"apify: key #{n} can't run {actor} ({r.text[:120]}), trying the next one")
+                continue
             run = r.raise_for_status().json()["data"]
             while run["status"] in ("READY", "RUNNING"):
                 time.sleep(5)
