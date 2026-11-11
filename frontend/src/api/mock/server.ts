@@ -530,6 +530,40 @@ on('GET', '/analytics/channel-posts', () => ({ total: 9, items: [
   { agent_id: 2, name: 'Георгий', posts: 5, exclusive: 2, last: new Date().toISOString() },
   { agent_id: null, name: 'GiorgiSV', posts: 4, exclusive: 0, last: new Date().toISOString() }] }));
 on('GET', '/analytics/funnel', () => ({}));
+on('GET', '/analytics/site', (_m, _b, q) => {
+  const days = Number(q.get('days')) || 7;
+  const k = days / 7;
+  const n = (x: number) => Math.round(x * k);
+  const today = Date.now();
+  const daily = Array.from({ length: days }, (_, i) => {
+    const d = new Date(today - (days - 1 - i) * 864e5).toISOString().slice(0, 10);
+    const v = 60 + Math.round(40 * Math.sin(i / 2) + (i % 7 === 5 ? 35 : 0));
+    return { d, visitors: v, sessions: Math.round(v * 1.3), contacts: Math.round(v / 14), views: v * 3 };
+  });
+  const L = (id: string, service: string, agent: string, viewers: number, contacts: number, favs = 0) =>
+    ({ id, service, agent, views: viewers + 7, viewers, contacts, shares: Math.round(contacts / 2), favs, conversion: viewers ? Math.round(contacts / viewers * 1000) / 10 : 0 });
+  const listings = [L('rent-548893', 'rent', 'David_Tibelashvili', n(84), n(9), 6), L('rent-548711', 'rent', 'kvirkvel1a', n(61), n(5), 3),
+    L('sale-2603', 'sale', 'David_Tibelashvili', n(47), n(2), 4), L('daily-710', 'daily', '', n(39), 0, 5), L('commercial-2718', 'commercial', 'Dima', n(22), 0, 1)];
+  return {
+    period: { from: today - days * 864e5, to: today, days },
+    totals: { visitors: n(512), newVisitors: n(398), sessions: n(690), pageviews: n(2840), listingViews: n(1630), contacts: n(41), contactSessions: n(36), conversion: 5.2, shares: n(27), favs: n(64) },
+    prev: { visitors: n(455), newVisitors: n(361), sessions: n(610), pageviews: n(2500), listingViews: n(1420), contacts: n(33), contactSessions: n(30), conversion: 4.9, shares: n(30), favs: n(51) },
+    daily,
+    contactsBy: { whatsapp: n(18), telegram: n(12), phone: n(9), office: n(2) },
+    sources: [{ name: 'instagram', sessions: n(240), contacts: n(15), conversion: 6.3 }, { name: 'direct', sessions: n(190), contacts: n(9), conversion: 4.7 },
+      { name: 'google', sessions: n(130), contacts: n(8), conversion: 6.2 }, { name: 'telegram', sessions: n(90), contacts: n(6), conversion: 6.7 }, { name: 'share', sessions: n(40), contacts: n(3), conversion: 7.5 }],
+    campaigns: [{ name: 'reels-vake-2br', source: 'instagram', sessions: n(88), contacts: n(7), conversion: 8 }, { name: 'whatsapp', source: 'share', sessions: n(25), contacts: n(2), conversion: 8 }],
+    listings, bestListings: listings.filter((x) => x.contacts > 0), noResponse: listings.filter((x) => x.contacts === 0 && x.viewers >= 5),
+    agents: [{ name: 'David_Tibelashvili', listings: 2, views: n(145), contacts: n(11), conversion: 7.6 }, { name: 'kvirkvel1a', listings: 1, views: n(68), contacts: n(5), conversion: 7.4 }, { name: '—', listings: 1, views: n(46), contacts: 0, conversion: 0 }],
+    searches: [{ name: 'rent · district=Vake · beds=2', n: n(31) }, { name: 'rent · price=-800', n: n(22) }, { name: 'daily · district=Old Tbilisi', n: n(14) }],
+    zeroSearches: [{ name: 'rent · beds=4 · district=Vake · pets=1', n: n(6) }, { name: 'sale · price=-40000 · district=Saburtalo', n: n(3) }],
+    sharesBy: { telegram: n(11), whatsapp: n(9), copy: n(7) },
+    socialBy: { instagram: n(14), 'telegram:rent_tbilisi_ge': n(9), facebook: n(4) },
+    devices: { mobile: n(470), desktop: n(190), tablet: n(30) }, langs: { ru: n(410), en: n(220), ka: n(60) }, themes: { light: n(520), dark: n(170) },
+    errors: [{ name: "Cannot read properties of undefined (reading 'photos')", n: 3, sessions: 2, page: '#/listing/rent-548711', device: 'mobile', last: today - 36e5 }],
+    perf: { loadMedian: 1840, loadP75: 3120, lcpMedian: 1520, lcpP75: 2610, n: n(600), byDevice: { mobile: { median: 2100, p75: 3400, n: n(420) }, desktop: { median: 1200, p75: 1900, n: n(180) } } },
+  };
+});
 
 // ---------- content / admin ----------
 on('GET', '/ticker', () => page(F.ticker.filter((t) => t.status === 'active')));

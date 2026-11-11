@@ -815,3 +815,40 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 /* a laptop / tablet: 11 lead columns in a row are narrow too */
 @media (min-width: 768px) and (max-width: 1279px) { .status-tile span { font-size: 10px; } }
 @media (min-width: 768px) and (max-width: 999px) { .status-bar-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+/* ---------- «Аналитика» (pages/Analytics.tsx): hge.ge site counter ---------- */
+.sa-kpis { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.sa-ch { font-weight: 700; }
+.sa-ch.up { color: var(--ok); }
+.sa-ch.down { color: var(--accent); }
+.sa-grid { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .sa-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sa-wide { grid-column: 1 / -1; } }
+.sa-grid > .card { min-width: 0; }
+.sa-note { font-size: 12px; color: var(--muted); margin: -6px 0 12px; }
+.sa-empty { font-size: 13px; color: var(--muted); }
+.sa-bars { display: grid; gap: 8px; }
+.sa-bar { display: grid; grid-template-columns: minmax(90px, 38%) 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.sa-bar i { display: block; height: 10px; border-radius: 6px; background: var(--line); }
+.sa-bar em { display: block; height: 100%; border-radius: 6px; background: var(--brand); }
+.sa-bar b { min-width: 28px; text-align: right; }
+.sa-table th, .sa-table td { padding: 8px 6px; font-size: 13px; }
+.sa-table th { font-size: 10px; letter-spacing: .06em; }
+.sa-table th.n, .sa-table td.n { text-align: right; white-space: nowrap; }
+.sa-table a { font-weight: 600; }
+.sa-table code { font-size: 12px; word-break: break-word; }
+.sa-chart { width: 100%; height: auto; display: block; }
+.sa-chart .v { fill: var(--brand); opacity: .28; }
+.sa-chart .c { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+.sa-chart text { font-size: 10px; fill: var(--muted); }
+.sa-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.sa-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.sa-legend i.v { background: var(--brand); opacity: .4; }
+.sa-legend i.c { background: var(--accent); }
+.sa-perf { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.sa-perf div { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 12px; background: var(--canvas); }
+.sa-perf span { font-size: 12px; color: var(--muted); }
+.sa-perf b { font-size: 18px; font-weight: 800; }
+.sa-lb { display: grid; gap: 10px; }
+@media (min-width: 900px) { .sa-lb { grid-template-columns: 1.4fr 1fr 1fr; } .sa-lb-out { grid-column: 1 / -1; } }
+.sa-lb-out { display: flex; gap: 8px; }
+.sa-lb-out .input { flex: 1; min-width: 0; font-size: 13px; }

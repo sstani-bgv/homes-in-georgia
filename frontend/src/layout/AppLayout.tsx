@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Building2, CalendarDays, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
+  Building2, CalendarDays, ChartLine, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
   Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ADMIN_ROLES, STAFF_ROLES, atLeast } from '../api/types';
+import { ADMIN_ROLES, STAFF_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
+  { to: '/analytics', label: 'Аналитика', icon: ChartLine, roles: SUPER_ROLES },  // hge.ge counter, superadmins only
   { to: '/admin', label: 'Управление', icon: Settings, roles: ADMIN_ROLES },
   { to: '/me', label: 'Кабинет', icon: CircleUser },
 ];

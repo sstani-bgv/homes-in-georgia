@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import type { Role } from './api/types';
-import { ADMIN_ROLES, STAFF_ROLES } from './api/types';
+import { ADMIN_ROLES, STAFF_ROLES, SUPER_ROLES } from './api/types';
 import { useAuth } from './auth/AuthContext';
 import { Empty, Loading } from './components/ui';
 import { AppLayout } from './layout/AppLayout';
 import { AdminPage } from './pages/Admin';
+import { AnalyticsPage } from './pages/Analytics';
 import { CabinetPage } from './pages/Cabinet';
 import { CalcPage } from './pages/Calc';
 import { CalendarPage } from './pages/Calendar';
@@ -29,7 +30,7 @@ function RequireAuth({ children, roles }: { children: ReactNode; roles?: Role[] 
     const next = encodeURIComponent(loc.pathname + loc.search);
     return <Navigate to={`/login?next=${next}`} replace state={{ error }} />;
   }
-  if (roles && !roles.includes(user.role)) return <Empty text="Раздел доступен только администраторам" />;
+  if (roles && !roles.includes(user.role)) return <Empty text={roles.includes('admin') || roles.includes('operator') ? 'Раздел доступен только администраторам' : 'Раздел доступен только суперадминам'} />;
   return <>{children}</>;
 }
 
@@ -95,6 +96,7 @@ export function App() {
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="analytics" element={<RequireAuth roles={SUPER_ROLES}><AnalyticsPage /></RequireAuth>} />
         <Route path="admin" element={<RequireAuth roles={ADMIN_ROLES}><AdminPage /></RequireAuth>} />
         <Route path="me" element={<CabinetPage />} />
         <Route path="*" element={<NotFound />} />
