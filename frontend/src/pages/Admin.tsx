@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Role, Settings, User } from '../api/types';
@@ -85,6 +85,19 @@ function Users() {
   const all = useQuery({ queryKey: ['users', 'admin', ''], queryFn: () => api.users.list({}) });
   const toggle = useMutation({ mutationFn: (u: User) => api.users.update(u.id, { is_active: !u.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
   const items = itemsOf(data);
+  // active on top; the ones who left are folded under «Неактивные (N)» (Stanislav 11-11)
+  const [showOff, setShowOff] = useState(false);
+  const active = items.filter((u) => u.is_active), inactive = items.filter((u) => !u.is_active);
+  const row = (u: User) => (
+                <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
+                  <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
+                  <td><Badge tone={u.role === 'superadmin' || u.role === 'admin' ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
+                  <td className="num">{u.level ? `${u.level}%` : '—'}</td>
+                  <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
+                  <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>
+                  <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
+                  <td onClick={(e) => e.stopPropagation()}><Switch checked={u.is_active} onChange={() => toggle.mutate(u)} /></td>
+                </tr>);
   return (
     <>
       <div className="row row-between row-wrap" style={{ marginBottom: 14 }}>
@@ -96,17 +109,15 @@ function Users() {
           <table className="table">
             <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th>Хэштег</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
             <tbody>
-              {items.map((u) => (
-                <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
-                  <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
-                  <td><Badge tone={u.role === 'superadmin' || u.role === 'admin' ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
-                  <td className="num">{u.level ? `${u.level}%` : '—'}</td>
-                  <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
-                  <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>
-                  <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
-                  <td onClick={(e) => e.stopPropagation()}><Switch checked={u.is_active} onChange={() => toggle.mutate(u)} /></td>
+              {active.map(row)}
+              {inactive.length > 0 && (
+                <tr className="clickable" onClick={() => setShowOff((v) => !v)}>
+                  <td colSpan={7} className="muted" style={{ fontWeight: 700 }}>
+                    {showOff ? <ChevronUp size={16} /> : <ChevronDown size={16} />} Неактивные ({inactive.length}) · {showOff ? 'скрыть' : 'показать'}
+                  </td>
                 </tr>
-              ))}
+              )}
+              {showOff && inactive.map(row)}
             </tbody>
           </table>
         </div>

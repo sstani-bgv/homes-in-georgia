@@ -411,7 +411,7 @@ export function PropertyList({ mine, archived, status: only, base = '' }: { mine
         {isStaff && !mine && (
           <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => { const v = e.target.value; filter(() => setAgent(v)); }}>
             <option value="">Все агенты</option>
-            {itemsOf(agents.data).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((u) => (
+            {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
               <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>
             ))}
           </select>
