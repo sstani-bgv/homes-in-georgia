@@ -864,7 +864,7 @@ function ExclusiveContract({ p, canEdit, nested }: { p: Property; canEdit: boole
   const link = p.exclusive_sign_token ? `${window.location.origin}/sign/${p.exclusive_sign_token}` : '';
   const up = useMutation({ mutationFn: (file: File) => api.properties.uploadContract(p.id, file), onSuccess: (r) => { set(r); toast('Договор загружен'); }, onError: (e) => toast(errText(e), true) });
   const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(link || '') : Promise.reject()).then(() => toast('Ссылка скопирована'), () => toast('Не удалось скопировать', true));
-  const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('Подтвердите, пожалуйста, эксклюзивное сотрудничество с Rent in Tbilisi и подпишите по ссылке')}`;
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('გთხოვთ, დაადასტუროთ ექსკლუზიური თანამშრომლობა Rent in Tbilisi-სთან და მოაწეროთ ხელი ბმულზე.\nПодтвердите, пожалуйста, эксклюзивное сотрудничество с Rent in Tbilisi и подпишите по ссылке.')}`;
   return (
     <div className={nested ? 'col gap-sm' : 'gen-block'}>
       <span className={nested ? 'label' : 'gen-title'}>Эксклюзивный договор</span>

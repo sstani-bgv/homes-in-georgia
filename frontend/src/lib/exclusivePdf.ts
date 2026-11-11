@@ -5,7 +5,8 @@
 export type Lang = 'ru' | 'ka' | 'en';
 export interface ConfirmData { address: string; cadastral_code: string; full_name: string; personal_id: string; phone: string; date: string }
 
-export const LANG_LABEL: Record<Lang, string> = { ru: 'Русский', ka: 'ქართული', en: 'English' };
+// Georgian first: the owner's page opens in it and the switcher lists it first (Stanislav 2026-11-11)
+export const LANG_LABEL: Record<Lang, string> = { ka: 'ქართული', ru: 'Русский', en: 'English' };
 
 /** [title, lines]; a line starting with «• » is a bullet. */
 export function confirmText(lang: Lang, d: ConfirmData): [string, string[]] {
@@ -165,9 +166,9 @@ export async function buildExclusivePdf(objectId: number, d: ConfirmData, signat
   f.need(320);
   f.para('ხელმოწერის ოქმი / Протокол подписания / Signing record', { size: 21, bold: true, color: NAVY, gap: 10 });
   ([
-    ['Объект CRM', `#${objectId}`], ['ФИО / სახელი და გვარი', d.full_name], ['Личный номер / პირადი ნომერი', d.personal_id],
-    ['Телефон / ტელეფონი', d.phone], ['Адрес / მისამართი', d.address || '—'], ['Кадастровый код / საკადასტრო კოდი', d.cadastral_code || '—'],
-    ['Время (Тбилиси) / დრო', d.date], ['Устройство / მოწყობილობა', device],
+    ['ობიექტი / Объект CRM', `#${objectId}`], ['სახელი და გვარი / ФИО', d.full_name], ['პირადი ნომერი / Личный номер', d.personal_id],
+    ['ტელეფონი / Телефон', d.phone], ['მისამართი / Адрес', d.address || '—'], ['საკადასტრო კოდი / Кадастровый код', d.cadastral_code || '—'],
+    ['დრო / Время (Тбилиси)', d.date], ['მოწყობილობა / Устройство', device],
     ['', 'Собственник открыл ссылку от агента, заполнил данные, отметил согласие и расписался на экране. IP-адрес, время сервера и SHA-256 этого PDF записаны в CRM Homes in Georgia.'],
   ] as [string, string][]).forEach(([k, v]) => f.para(k ? `${k}: ${v}` : v, { size: 16, color: k ? INK : GREY, gap: 4 }));
 

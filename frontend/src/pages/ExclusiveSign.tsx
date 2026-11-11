@@ -48,7 +48,7 @@ function SignaturePad({ onInk, padRef, clearLabel }: { onInk: (v: boolean) => vo
 export function ExclusiveSignPage() {
   const { token = '' } = useParams();
   const q = useQuery({ queryKey: ['exclusive-sign', token], queryFn: () => http.get<SignView>(`/public/exclusive/${token}`), retry: false });
-  const [lang, setLang] = useState<Lang>('ru');
+  const [lang, setLang] = useState<Lang>('ka');
   const [f, setF] = useState({ full_name: '', personal_id: '', phone: '', cadastral_code: '' });
   const [ink, setInk] = useState(false);
   const [agree, setAgree] = useState(false);
