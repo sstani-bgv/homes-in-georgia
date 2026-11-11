@@ -77,6 +77,11 @@ export const api = {
       fd.append('file', file);
       return http.post<Property>(`/properties/${id}/exclusive-contract`, fd);
     },
+    uploadOwnerDoc: (id: number, kind: 'owner_id_doc' | 'registry_extract', file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return http.post<Property>(`/properties/${id}/owner-docs/${kind}`, fd);
+    },
     uploadMediaProgress: (id: number, file: File, onProgress: (f: number) => void) => {
       const fd = new FormData();
       fd.append('files', file);

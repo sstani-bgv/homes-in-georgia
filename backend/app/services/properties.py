@@ -54,6 +54,15 @@ MAX_MEDIA = {"photo": 9, "video": 1}
 CONTRACT = "exclusive_contract"
 POST_KINDS = ("photo", "video")
 MAX_CONTRACT = 20 * 1024 * 1024
+# the owner's documents next to the contract (exclusive objects): his passport/ID and the Public Registry extract
+# (ამონაწერი, the owner downloads it himself from naprweb.reestri.gov.ge — its document view is behind reCAPTCHA, so
+# we don't fetch it). Private: stored under private/, served only to staff and the object's agent (api media_file),
+# never in a post/album/slideshow (not POST_KINDS).
+OWNER_ID_DOC, REGISTRY_EXTRACT = "owner_id_doc", "registry_extract"
+OWNER_DOCS = {OWNER_ID_DOC: ("паспорт / ID собственника", (".jpg", ".jpeg", ".png", ".pdf", ".heic", ".heif")),
+              REGISTRY_EXTRACT: ("выписка из Публичного реестра (PDF)", (".pdf",))}
+MAX_OWNER_DOC = 15 * 1024 * 1024
+PRIVATE_PREFIX = "private/"
 # the agent's media and checklist are open until «Готово — отправить оператору»; after that only staff change them,
 # unless the operator returns the object (returned)
 AGENT_MEDIA_STATUSES = ("owner_confirmed", "shoot_scheduled", "media_uploaded", "returned")
@@ -843,6 +852,62 @@ def _store_contract(db: Session, p: Property, content: bytes, uploaded_by: int |
     return m
 
 
+def _check_owner_doc(kind: str, name: str, content: bytes) -> str:
+    """-> the file extension; the type is checked by the content's magic bytes, not the name alone."""
+    if kind not in OWNER_DOCS:
+        raise DomainError("not_found", "unknown document kind")
+    label, exts = OWNER_DOCS[kind]
+    ext = os.path.splitext(name or "")[1].lower()
+    head = content[:16]
+    magic = {".pdf": head.startswith(b"%PDF"), ".jpg": head.startswith(b"\xff\xd8"), ".jpeg": head.startswith(b"\xff\xd8"),
+             ".png": head.startswith(b"\x89PNG"), ".heic": head[4:8] == b"ftyp", ".heif": head[4:8] == b"ftyp"}
+    if ext not in exts or not magic.get(ext):
+        raise DomainError("bad_file", f"{label}: можно {', '.join(e.lstrip('.').upper() for e in exts)}")
+    if len(content) > MAX_OWNER_DOC:
+        raise DomainError("too_large", f"{label}: файл больше {MAX_OWNER_DOC // 1024 // 1024} МБ")
+    return ext
+
+
+def _store_owner_doc(db: Session, p: Property, kind: str, name: str, content: bytes, uploaded_by: int | None) -> PropertyMedia:
+    """Save (replacing the previous one) in private storage; the caller commits."""
+    ext = _check_owner_doc(kind, name, content)
+    for old in db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == p.id, PropertyMedia.kind == kind)):
+        try:
+            storage.delete(old.path)
+        except Exception:
+            log.warning("could not delete %s", old.path)
+        db.delete(old)
+    key = f"{PRIVATE_PREFIX}properties/{p.id}/{uuid.uuid4().hex}{ext}"
+    storage.put(key, content)
+    m = PropertyMedia(property_id=p.id, kind=kind, path=key, position=0, uploaded_by=uploaded_by)
+    db.add(m)
+    return m
+
+
+def upload_owner_doc(db: Session, pid: int, kind: str, name: str, content: bytes, actor: User) -> PropertyMedia:
+    """The agent uploads the owner's passport / registry extract himself (contract signed on paper)."""
+    p = _prop(db, pid, lock=True)
+    _require_media_editable(p, actor)
+    _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
+    m = _store_owner_doc(db, p, kind, name, content, actor.id)
+    log_event(db, "property", p.id, f"{kind}_uploaded", actor)
+    db.commit()
+    return m
+
+
+def owner_docs(db: Session, pid: int) -> dict[str, PropertyMedia]:
+    return {m.kind: m for m in db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == pid,
+                                                                      PropertyMedia.kind.in_(OWNER_DOCS)))}
+
+
+def missing_owner_docs(db: Session, p: Property) -> list[str]:
+    """Exclusive objects: the owner's documents «Отправить оператору» still waits for."""
+    if not p.is_exclusive:
+        return []
+    have = owner_docs(db, p.id)
+    return [label for kind, (label, _) in OWNER_DOCS.items() if kind not in have]
+
+
 def upload_contract(db: Session, pid: int, name: str, content: bytes, actor: User) -> PropertyMedia:
     """The agent uploads a contract signed on paper / elsewhere; replaces the previous one. Needed by submit_for_review."""
     p = _prop(db, pid, lock=True)
@@ -884,8 +949,10 @@ def sign_view(db: Session, token: str) -> dict:
             "signed_at": c.created_at if c else None}
 
 
-def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | None, user_agent: str | None) -> PropertyMedia:
-    """The owner confirmed and signed: his PDF (built in the browser, hig-sign style) becomes the object's contract."""
+def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | None, user_agent: str | None,
+                  docs: dict[str, tuple[str, bytes]] | None = None) -> PropertyMedia:
+    """The owner confirmed and signed: his PDF (built in the browser, hig-sign style) becomes the object's contract.
+    docs: {OWNER_ID_DOC: (name, bytes), REGISTRY_EXTRACT: (name, bytes)} — both required, kept private."""
     p = _signable(db, token, lock=True)
     if contract(db, p.id):
         raise DomainError("already_signed", "Договор уже подписан")
@@ -896,7 +963,15 @@ def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | Non
         raise DomainError("consent_required", "Нужно согласие с условиями")
     if f["cadastral_code"] != (p.cadastral_code or "").strip():
         f["cadastral_code"] = clean_cadastral(f["cadastral_code"]) or ""
+    docs = docs or {}
+    for kind, (label, _) in OWNER_DOCS.items():
+        if not (docs.get(kind) and docs[kind][1]):
+            raise DomainError("missing_fields", f"Загрузите: {label}")
+        _check_owner_doc(kind, *docs[kind])  # everything is checked before anything is stored
     m = _store_contract(db, p, pdf, None)
+    for kind, (name, content) in docs.items():
+        if kind in OWNER_DOCS:
+            _store_owner_doc(db, p, kind, name, content, None)
     log_event(db, "property", p.id, "exclusive_contract_signed", None, label=f["full_name"], **f, ip=ip,
               user_agent=(user_agent or "")[:300], pdf_sha256=hashlib.sha256(pdf).hexdigest())
     db.commit()
@@ -1015,6 +1090,8 @@ def submit_for_review(db: Session, pid: int, agent: User) -> Property:
         raise DomainError("no_media", "upload photos or videos first")
     if p.is_exclusive and not contract(db, p.id):
         raise DomainError("no_exclusive_contract", "Эксклюзив: загрузите подписанный собственником эксклюзивный договор (PDF)")
+    if docs := missing_owner_docs(db, p):
+        raise DomainError("no_owner_docs", "Эксклюзив: загрузите " + ", ".join(docs))
     if missing := missing_fields(p):
         raise DomainError("missing_fields", "Заполните перед отправкой: " + ", ".join(missing))
     if other := _same_object(db, p):
@@ -1601,7 +1678,8 @@ def prefetch(db: Session, rows: list[Property], cache: dict) -> None:
             cache[("conflict", pid)] = ads.get(pid, [])
     pids = [p.id for p in rows if ("media_count", p.id) not in cache]
     if pids:
-        counts = dict(db.execute(select(PropertyMedia.property_id, func.count()).where(PropertyMedia.property_id.in_(pids))
+        counts = dict(db.execute(select(PropertyMedia.property_id, func.count()).where(PropertyMedia.property_id.in_(pids),
+                                                                                         PropertyMedia.kind.in_(POST_KINDS))
                                  .group_by(PropertyMedia.property_id)).all())
         for pid in pids:
             cache[("media_count", pid)] = counts.get(pid, 0)
@@ -1682,6 +1760,10 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         d["exclusive_contract"] = {"id": c.id, "url": f"/api/media/{c.path}", "created_at": c.created_at} if c else None
         if p.is_exclusive and not c:
             d["missing"].append("эксклюзивный договор (PDF)")
+        d["missing"] += missing_owner_docs(db, p)
+        # the passport and the extract: only staff and the object's agent (the files themselves: api media_file)
+        d["owner_docs"] = {k: {"id": m.id, "url": f"/api/media/{m.path}", "created_at": m.created_at}
+                           for k, m in owner_docs(db, p.id).items()} if p.is_exclusive and can_see_owner(p, user) else {}
         d["exclusive_sign_token"] = sign_token(p.id) if p.is_exclusive and can_see_owner(p, user) else None
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
@@ -1692,7 +1774,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     else:
         k = ("media_count", p.id)
         if k not in cache:
-            cache[k] = db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id))
+            cache[k] = db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id, PropertyMedia.kind.in_(POST_KINDS)))
         d["media_count"] = cache[k]
         if ("cover", p.id) not in cache:
             _covers(db, [p], cache)

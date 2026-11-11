@@ -962,6 +962,27 @@ function ExclusiveContract({ p, canEdit, nested }: { p: Property; canEdit: boole
         <input ref={ref} type="file" accept="application/pdf" hidden onChange={(e) => { const fl = e.target.files?.[0]; if (fl) up.mutate(fl); e.target.value = ''; }} />
         <Button block loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={16} />{c ? 'Заменить PDF договора' : 'Или загрузить подписанный PDF'}</Button>
       </>}
+      <OwnerDoc p={p} canEdit={canEdit} kind="registry_extract" label="Выписка из Публичного реестра" accept="application/pdf,.pdf" />
+      <OwnerDoc p={p} canEdit={canEdit} kind="owner_id_doc" label="Паспорт / ID собственника" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf,.pdf" />
+    </div>
+  );
+}
+
+/** The owner's private document (the sign page uploads both; the agent can for a paper contract). Only staff and the
+ * object's agent get owner_docs (and the file itself) from the backend; for others it's just «нет». */
+function OwnerDoc({ p, canEdit, kind, label, accept }: { p: Property; canEdit: boolean; kind: 'owner_id_doc' | 'registry_extract'; label: string; accept: string }) {
+  const { toast, set } = useProp(p.id);
+  const ref = useRef<HTMLInputElement>(null);
+  const d = p.owner_docs?.[kind];
+  const up = useMutation({ mutationFn: (file: File) => api.properties.uploadOwnerDoc(p.id, kind, file), onSuccess: (r) => { set(r); toast('Загружено'); }, onError: (e) => toast(errText(e), true) });
+  return (
+    <div className="row row-wrap gap-sm">
+      {d ? <span><CheckCircle2 size={14} color="var(--ok, #1a7f4b)" /> {label} · <a href={mediaUrl(d.url)} target="_blank" rel="noreferrer"><FileText size={14} /> открыть</a></span>
+        : <span className="muted">{label}: нет</span>}
+      {canEdit && <>
+        <input ref={ref} type="file" accept={accept} hidden onChange={(e) => { const fl = e.target.files?.[0]; if (fl) up.mutate(fl); e.target.value = ''; }} />
+        <Button size="sm" variant="secondary" loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={14} />{d ? 'Заменить' : 'Загрузить'}</Button>
+      </>}
     </div>
   );
 }

@@ -306,6 +306,14 @@ async def properties_contract(pid: int, file: UploadFile = File(...), db: Sessio
     return P.out(db, get_or_404(db, Property, pid), user, full=True)
 
 
+@router.post("/properties/{pid}/owner-docs/{kind}")
+async def properties_owner_doc(pid: int, kind: str, file: UploadFile = File(...), db: Session = Depends(get_db, scope="function"),
+                               user: User = Depends(current_user)):
+    """kind: owner_id_doc (passport/ID) | registry_extract — private, staff and the object's agent only."""
+    P.upload_owner_doc(db, pid, kind, file.filename or "", await file.read(), user)
+    return P.out(db, get_or_404(db, Property, pid), user, full=True)
+
+
 # the owner's exclusive confirmation page (frontend /sign/<token>): no CRM login, the token is the access
 @router.get("/public/exclusive/{token}")
 def public_exclusive(token: str, db: Session = Depends(get_db, scope="function")):
@@ -313,13 +321,16 @@ def public_exclusive(token: str, db: Session = Depends(get_db, scope="function")
 
 
 @router.post("/public/exclusive/{token}")
-async def public_exclusive_sign(token: str, request: Request, file: UploadFile = File(...), full_name: str = Form(""),
+async def public_exclusive_sign(token: str, request: Request, file: UploadFile = File(...),
+                                id_doc: UploadFile | None = File(None), extract: UploadFile | None = File(None), full_name: str = Form(""),
                                 personal_id: str = Form(""), phone: str = Form(""), cadastral_code: str = Form(""),
                                 consent: bool = Form(False), db: Session = Depends(get_db, scope="function")):
     ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client and request.client.host)
     P.sign_contract(db, token, {"full_name": full_name, "personal_id": personal_id, "phone": phone,
                                 "cadastral_code": cadastral_code, "consent": consent},
-                    await file.read(), ip, request.headers.get("user-agent"))
+                    await file.read(), ip, request.headers.get("user-agent"),
+                    {P.OWNER_ID_DOC: (id_doc.filename or "", await id_doc.read()) if id_doc else None,
+                     P.REGISTRY_EXTRACT: (extract.filename or "", await extract.read()) if extract else None})
     return P.sign_view(db, token)
 
 

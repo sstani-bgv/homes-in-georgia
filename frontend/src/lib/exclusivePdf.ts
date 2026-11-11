@@ -141,7 +141,8 @@ function makePdf(jpegs: Uint8Array[], title: string) {
 }
 
 /** The signed confirmation in all three languages + the signing record → PDF bytes. */
-export async function buildExclusivePdf(objectId: number, d: ConfirmData, signature: HTMLCanvasElement, device: string): Promise<Uint8Array> {
+/** extra: more signing-record rows (the uploaded owner documents: file names only, never their content). */
+export async function buildExclusivePdf(objectId: number, d: ConfirmData, signature: HTMLCanvasElement, device: string, extra: [string, string][] = []): Promise<Uint8Array> {
   await Promise.race([
     Promise.all(['400', '700'].flatMap((w) => [document.fonts.load(`${w} 19px Montserrat`, 'Договор'), document.fonts.load(`${w} 19px "Noto Sans Georgian"`, 'ხელშეკრულება')])),
     new Promise((r) => setTimeout(r, 4000)),
@@ -168,7 +169,7 @@ export async function buildExclusivePdf(objectId: number, d: ConfirmData, signat
   ([
     ['ობიექტი / Объект CRM', `#${objectId}`], ['სახელი და გვარი / ФИО', d.full_name], ['პირადი ნომერი / Личный номер', d.personal_id],
     ['ტელეფონი / Телефон', d.phone], ['მისამართი / Адрес', d.address || '—'], ['საკადასტრო კოდი / Кадастровый код', d.cadastral_code || '—'],
-    ['დრო / Время (Тбилиси)', d.date], ['მოწყობილობა / Устройство', device],
+    ...extra, ['დრო / Время (Тбилиси)', d.date], ['მოწყობილობა / Устройство', device],
     ['', 'Собственник открыл ссылку от агента, заполнил данные, отметил согласие и расписался на экране. IP-адрес, время сервера и SHA-256 этого PDF записаны в CRM Homes in Georgia.'],
   ] as [string, string][]).forEach(([k, v]) => f.para(k ? `${k}: ${v}` : v, { size: 16, color: k ? INK : GREY, gap: 4 }));
 

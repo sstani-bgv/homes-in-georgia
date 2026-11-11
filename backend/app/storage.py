@@ -170,9 +170,9 @@ def fetch(key: str, tmp: str) -> str | None:
     return str(dest)
 
 
-def url(key: str) -> str:
-    """s3 only: where the browser gets the file."""
-    if env.S3_PUBLIC_URL:
+def url(key: str, presign: bool = False) -> str:
+    """s3 only: where the browser gets the file. presign: never the public base URL (private documents)."""
+    if env.S3_PUBLIC_URL and not presign:
         return f"{env.S3_PUBLIC_URL.rstrip('/')}/{quote(key)}"
     return s3().generate_presigned_url("get_object", Params={"Bucket": env.S3_BUCKET, "Key": key}, ExpiresIn=PRESIGN_TTL)
 

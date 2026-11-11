@@ -14,8 +14,9 @@ from app import storage
 from app.api.deps import ADMIN_ROLES, STAFF_ROLES, current_user, paginate, require_roles
 from app.config import REPO_ROOT, settings as env
 from app.db import get_db
-from app.models import Address, ChannelPost, Lead, Listing, News, Source, TickerMessage, User
+from app.models import Address, ChannelPost, Lead, Listing, News, Property, Source, TickerMessage, User
 from app.services import ics, settings
+from app.services import properties as P
 from app.services.common import get_or_404, jload, log_event, now_text
 from app.services.errors import DomainError
 from app.services.properties import listing_out, media_root
@@ -324,14 +325,23 @@ def _safe(root: Path, rel: str) -> Path:
 
 
 @router.get("/media/{path:path}")
-def media_file(path: str, preview: bool = Query(False, alias="p"), user: User = Depends(current_user)):
-    """p=1: the ~640px preview (storage.preview_key), the original while there is none."""
+def media_file(path: str, preview: bool = Query(False, alias="p"), user: User = Depends(current_user),
+               db: Session = Depends(get_db, scope="function")):
+    """p=1: the ~640px preview (storage.preview_key), the original while there is none.
+    private/properties/<id>/…: the owner's passport / registry extract — staff and the object's agent only."""
+    private = path.startswith(P.PRIVATE_PREFIX)
+    if private:
+        parts = path.split("/")
+        prop = db.get(Property, int(parts[2])) if len(parts) > 3 and parts[2].isdigit() else None
+        if not prop or not P.can_see_owner(prop, user):
+            raise DomainError("not_found", "file not found")
+        preview = False
     if storage.is_s3():
         if path.startswith("/") or ".." in path.split("/"):
             raise DomainError("not_found", "file not found")
         if preview and (f := storage.cached(storage.preview_key(path))):  # from the server's disk, cached by the browser
             return FileResponse(f, media_type="image/webp", headers=PREVIEW_HEADERS)
-        return RedirectResponse(storage.url(path), status_code=307)
+        return RedirectResponse(storage.url(path, presign=True) if private else storage.url(path), status_code=307)
     src = _safe(media_root(), path)
     if not src.is_file():
         raise DomainError("not_found", "file not found")

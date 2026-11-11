@@ -7,6 +7,7 @@ from tests.conftest import make_user
 from tests.test_david_feedback import _code, _ready
 
 PDF = b"%PDF-1.4 signed"
+JPG = b"\xff\xd8\xff\xe0passport"
 
 
 def test_exclusive_submit_needs_contract_pdf(db):
@@ -32,6 +33,9 @@ def test_exclusive_submit_needs_contract_pdf(db):
     # the PDF is not a post file: not in the card's media, the album, nor pickable for publishing
     assert [m["kind"] for m in d["media"]] == ["photo"]
     assert c.id not in {m.id for m in properties.media(db, p.id)}
+    assert _code(db, p.id, ag)[0] == "no_owner_docs"  # the passport and the registry extract too
+    properties.upload_owner_doc(db, p.id, "owner_id_doc", "id.jpg", JPG, ag)
+    properties.upload_owner_doc(db, p.id, "registry_extract", "ex.pdf", PDF, ag)
     assert _code(db, p.id, ag)[0] == "ok"
 
     op = make_user(db, "operator")
@@ -63,18 +67,52 @@ def test_owner_signs_by_public_link(db, client):
     v = client.get(f"/api/public/exclusive/{token}").json()  # no login: the token is the access
     assert (v["address"], v["owner_name"], v["signed_at"]) == ("Пекини 4", "Гиорги", None)
     form = {"full_name": "Гиорги Беридзе", "personal_id": "01001012345", "phone": "+995 555 12 34 56", "consent": "true"}
-    r = client.post(f"/api/public/exclusive/{token}", data={**form, "consent": "false"}, files={"file": ("c.pdf", PDF)})
+    docs = {"id_doc": ("passport.jpg", JPG), "extract": ("amonatseri.pdf", PDF)}
+    r = client.post(f"/api/public/exclusive/{token}", data={**form, "consent": "false"}, files={"file": ("c.pdf", PDF), **docs})
     assert r.json()["code"] == "consent_required" and properties.contract(db, p.id) is None
-    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF)})
+    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF), "extract": docs["extract"]})
+    assert r.json()["code"] == "missing_fields" and properties.contract(db, p.id) is None  # no passport
+    r = client.post(f"/api/public/exclusive/{token}", data=form,
+                    files={"file": ("c.pdf", PDF), "id_doc": ("passport.exe", b"MZ"), "extract": docs["extract"]})
+    assert r.json()["code"] == "bad_file" and properties.contract(db, p.id) is None
+    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF), **docs})
     assert r.status_code == 200 and r.json()["signed_at"]
     db.expire_all()
     assert properties.contract(db, p.id) and _code(db, p.id, ag)[0] == "ok"
     from app.models import Event
     ev = db.query(Event).filter_by(entity_id=str(p.id), action="exclusive_contract_signed").one()
     assert ev.data["personal_id"] == "01001012345" and len(ev.data["pdf_sha256"]) == 64
-    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF)})
+    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF), **docs})
     assert r.json()["code"] == "already_signed"
 
     p.is_exclusive = False  # no longer exclusive: the link stops working
     db.commit()
     assert client.get(f"/api/public/exclusive/{token}").status_code == 404
+
+
+def test_owner_docs_are_private(db, client):
+    """The passport / extract: private storage, not post media, only staff and the object's agent see them."""
+    from tests.conftest import auth
+    ag, other, op = make_user(db, "agent"), make_user(db, "agent"), make_user(db, "operator")
+    p = _ready(db, ag, "ss5", address="Пекини 5")
+    p.is_exclusive = True
+    db.commit()
+    with pytest.raises(DomainError) as e:
+        properties.upload_owner_doc(db, p.id, "owner_id_doc", "id.pdf", JPG, ag)  # a JPEG named .pdf
+    assert e.value.code == "bad_file"
+    db.rollback()
+    m = properties.upload_owner_doc(db, p.id, "owner_id_doc", "id.jpg", JPG, ag)
+    assert m.path.startswith("private/") and m.id not in {x.id for x in properties.media(db, p.id)}
+    d = properties.out(db, p, ag, full=True)
+    assert d["owner_docs"]["owner_id_doc"]["id"] == m.id and "выписка из Публичного реестра (PDF)" in d["missing"]
+    assert all(x["kind"] in ("photo", "video") for x in d["media"])
+    assert properties.out(db, p, other, full=True)["owner_docs"] == {}
+    assert properties.out(db, p, other)["media_count"] == len(properties.media(db, p.id))  # the passport isn't counted
+
+    url = f"/api/media/{m.path}"
+    assert client.get(url, headers=auth(other)).status_code == 404
+    assert client.get(url, headers=auth(ag)).content == JPG
+    assert client.get(url, headers=auth(op)).status_code == 200
+    assert client.get(url).status_code == 401
+    r = client.post(f"/api/properties/{p.id}/owner-docs/nonsense", files={"file": ("a.pdf", PDF)}, headers=auth(ag))
+    assert r.status_code == 404
