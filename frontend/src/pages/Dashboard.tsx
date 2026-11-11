@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Building2, Clock, Coins, Handshake, Repeat2, Send } from 'lucide-react';
+import { ArrowRight, Building2, CircleUser, Clock, Coins, Handshake, Repeat2, Send } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Lead, Property } from '../api/types';
@@ -94,12 +94,16 @@ export function DashboardPage() {
       <PageHead label={`Добрый день, ${user?.name || ''}`} title="Главная" />
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : data && (
         <>
-          <div className="grid g4">
+          <div className={`grid ${['deals', 'commission', 'objects', 'reposts'].filter(show).length > 3 ? 'g5' : 'g4'}`}>
             {show('deals') && <Stat blue label="Сделок за месяц" value={num(data.deals_count)} icon={<Handshake size={18} />}
               sub={target ? <><span>План {target}</span><div className="mt"><Progress value={data.deals_count || 0} max={target} /></div></> : undefined} />}
             {show('commission') && <Stat label="Комиссия платформы" value={money(data.platform_commission)} icon={<Coins size={18} color="var(--brand)" />} sub="за текущий месяц" />}
             {show('objects') && <Stat label="Активных объектов" value={num(data.active_objects)} icon={<Building2 size={18} color="var(--brand)" />} sub="в канале и базе" />}
             {show('reposts') && <Stat label="Репостов" value={num(data.reposts)} icon={<Repeat2 size={18} color="var(--brand)" />} sub={data.sla_overdue ? <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Просрочено заявок: {data.sla_overdue}</span> : 'за месяц'} />}
+            <Link to="/me" style={{ display: 'grid', color: 'inherit', textDecoration: 'none' }}>
+              <Stat label="Личный кабинет" value={user?.level ? `${user.level}%` : <ArrowRight size={28} />} icon={<CircleUser size={18} color="var(--brand)" />}
+                sub={user?.level ? 'уровень · сделки, объекты' : 'сделки, объекты, статистика'} />
+            </Link>
           </div>
 
           <div className="split section">
