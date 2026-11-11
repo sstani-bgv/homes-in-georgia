@@ -447,8 +447,9 @@ def understand(cl):
             except Exception as e:  # Codex down: no hard conditions from the text, its words rank by embeddings; not cached
                 print("understand: codex failed, ranking by embeddings only:", str(e).splitlines()[-1][:200] if str(e) else e)
                 res = None
-            if res is None:
-                q = {**q, "style": key}
+            if res is None:  # ponytail: only "до 800" / "800$" is read without Codex; districts and bedrooms are not
+                m = re.search(r"(?:до|max|under|up to)\s*\$?\s*(\d{3,5})|(\d{3,5})\s*(?:\$|usd|дол)", key, re.I)
+                q = {**q, "style": key, "max_price_usd": m and int(m.group(1) or m.group(2))}
             else:
                 p = res.get("place") and geocode(res["place"])
                 st["near"] = [key, [list(p), res.get("label") or res["place"], res.get("radius_km") or 2.0] if p else None]
@@ -567,10 +568,14 @@ EN_VOCAB = {"новый": "new", "евроремонт": "modern renovation", "�
 
 def template_reason(i, lang):
     """final_llm=off: a short reason from the profile, no model."""
+    g = lambda k: i.get(k) if i.get(k) not in (None, "", "mixed") else None  # no profile (not indexed yet): skip it
     if lang != "ru":
-        v = lambda k: EN_VOCAB.get(i.get(k) or "", i.get(k) or "")
-        return f"{v('style').capitalize()} style, {v('light')}, {v('renovation')} renovation, {v('furniture')} furniture"
-    return (i.get("looks") or f"{i.get('style')}, {i.get('light')}, ремонт {i.get('renovation')}").rstrip(".")
+        v = lambda k: g(k) and EN_VOCAB.get(g(k), g(k))
+        parts = [v("style") and f"{v('style').capitalize()} style", v("light"),
+                 v("renovation") and f"{v('renovation')} renovation", v("furniture") and f"{v('furniture')} furniture"]
+    else:
+        parts = [g("style"), g("light"), g("renovation") and f"ремонт {g('renovation')}"]
+    return (i.get("looks") or ", ".join(x for x in parts if x)).rstrip(".")
 
 
 def search_hybrid(cl):
