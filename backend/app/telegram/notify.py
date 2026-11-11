@@ -899,7 +899,7 @@ def agency_chat():
 def media_paths(pid, tmp, ids=None):
     """[(kind, local path)] of the first 10 files that exist (MEDIA_STORAGE=s3: downloaded into the tmp dir).
     ids: the operator's pick in album order (None = all, by position)."""
-    rows = store.q("SELECT id, kind, path FROM property_media WHERE property_id = %s ORDER BY position, id", (pid,))
+    rows = store.q("SELECT id, kind, path FROM property_media WHERE property_id = %s AND kind IN ('photo', 'video') ORDER BY position, id", (pid,))
     if ids is not None:
         by_id = {r["id"]: r for r in rows}
         rows = [by_id[i] for i in ids if i in by_id]

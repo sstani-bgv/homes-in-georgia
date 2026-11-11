@@ -45,6 +45,9 @@ POST_LOCKED = ("deposit", "sale_price")
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif"}
 MAX_UPLOAD = 300 * 1024 * 1024
+# the owner's signed exclusive contract (PDF): a property_media row of its own kind, never in a post/album/slideshow
+CONTRACT = "exclusive_contract"
+POST_KINDS = ("photo", "video")
 # the agent's media and checklist are open until «Готово — отправить оператору»; after that only staff change them,
 # unless the operator returns the object (returned)
 AGENT_MEDIA_STATUSES = ("owner_confirmed", "shoot_scheduled", "media_uploaded", "returned")
@@ -801,6 +804,47 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
     return out
 
 
+def upload_contract(db: Session, pid: int, name: str, content: bytes, actor: User) -> PropertyMedia:
+    """The signed exclusive contract PDF (hig-sign); replaces the previous one. Needed by submit_for_review."""
+    p = _prop(db, pid, lock=True)
+    _require_media_editable(p, actor)
+    _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
+    if not content.startswith(b"%PDF"):
+        raise DomainError("bad_file", "Договор — только PDF")
+    if len(content) > MAX_UPLOAD:
+        raise DomainError("too_large", f"file is too large: {name}")
+    for old in db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == p.id, PropertyMedia.kind == CONTRACT)):
+        try:
+            storage.delete(old.path)
+        except Exception:
+            log.warning("could not delete %s", old.path)
+        db.delete(old)
+    key = f"properties/{p.id}/{uuid.uuid4().hex}.pdf"
+    storage.put(key, content)
+    m = PropertyMedia(property_id=p.id, kind=CONTRACT, path=key, position=0, uploaded_by=actor.id)
+    db.add(m)
+    log_event(db, "property", p.id, "exclusive_contract_uploaded", actor)
+    db.commit()
+    return m
+
+
+def sign_url(db: Session, p: Property, user: User) -> str | None:
+    """EXCLUSIVE_SIGN_URL with {id} {address} {owner} {phone} {agent} filled (URL-encoded): the owner's signing link.
+    None when it isn't configured or the user may not see the owner's contacts."""
+    tpl = (env.EXCLUSIVE_SIGN_URL or "").strip()
+    if not tpl or not can_see_owner(p, user):
+        return None
+    owner = db.get(Owner, p.owner_id) if p.owner_id else None
+    agent = db.get(User, p.agent_id) if p.agent_id else None
+    vals = {"id": p.id, "address": p.address or "", "owner": owner and owner.name or "", "phone": owner and owner.phone or "",
+            "agent": agent and agent.name or ""}
+    return re.sub(r"\{(\w+)\}", lambda m: quote(str(vals[m[1]]), safe="") if m[1] in vals else m[0], tpl)
+
+
+def contract(db: Session, pid: int) -> PropertyMedia | None:
+    return db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == pid, PropertyMedia.kind == CONTRACT)).first()
+
+
 def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: User) -> PropertyMedia:
     """Tag one uploaded file with its room after a batch upload (the agent taps the photo)."""
     p = _prop(db, pid)
@@ -829,7 +873,9 @@ def delete_media(db: Session, pid: int, mid: int, actor: User) -> None:
 
 
 def media(db: Session, pid: int) -> list[PropertyMedia]:
-    return list(db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == pid).order_by(PropertyMedia.position)))
+    """The post's photos and videos (not the exclusive contract PDF)."""
+    return list(db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == pid, PropertyMedia.kind.in_(POST_KINDS))
+                           .order_by(PropertyMedia.position)))
 
 
 def set_checklist(db: Session, pid: int, checklist: dict, actor: User) -> Property:
@@ -886,8 +932,10 @@ def submit_for_review(db: Session, pid: int, agent: User) -> Property:
     p = _prop(db, pid, lock=True)
     _require_owner(p, agent)
     _require_status(p, "media_uploaded", "returned", "shoot_scheduled")
-    if not db.scalar(select(func.count()).where(PropertyMedia.property_id == p.id)):
+    if not media(db, p.id):
         raise DomainError("no_media", "upload photos or videos first")
+    if p.is_exclusive and not contract(db, p.id):
+        raise DomainError("no_exclusive_contract", "Эксклюзив: загрузите подписанный собственником эксклюзивный договор (PDF)")
     if missing := missing_fields(p):
         raise DomainError("missing_fields", "Заполните перед отправкой: " + ", ".join(missing))
     if other := _same_object(db, p):
@@ -1524,6 +1572,11 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                        "preview": f"/api/media/{m.path}?p=1"}
                       for m in media(db, p.id)]
         d["missing"] = missing_fields(p)  # what still blocks «Отправить оператору»
+        c = contract(db, p.id) if p.is_exclusive else None
+        d["exclusive_contract"] = {"id": c.id, "url": f"/api/media/{c.path}", "created_at": c.created_at} if c else None
+        if p.is_exclusive and not c:
+            d["missing"].append("эксклюзивный договор (PDF)")
+        d["exclusive_sign_url"] = sign_url(db, p, user) if p.is_exclusive else None
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
         d.update(card(db, p, user))

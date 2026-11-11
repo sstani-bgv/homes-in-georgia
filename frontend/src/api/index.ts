@@ -68,6 +68,11 @@ export const api = {
       if (room) fd.append('room', room);
       return http.post<Property>(`/properties/${id}/media`, fd);
     },
+    uploadContract: (id: number, file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return http.post<Property>(`/properties/${id}/exclusive-contract`, fd);
+    },
     deleteMedia: (id: number, mid: number) => http.del<unknown>(`/properties/${id}/media/${mid}`),
     mediaRoom: (id: number, mid: number, room: string | null) => http.patch<{ id: number; room: string | null }>(`/properties/${id}/media/${mid}`, { room }),
     checklist: (id: number, checklist: Record<string, boolean>) => http.post<Property>(`/properties/${id}/checklist`, { checklist }),

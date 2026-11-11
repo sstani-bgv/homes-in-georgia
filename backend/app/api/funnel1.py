@@ -284,6 +284,13 @@ async def properties_media(pid: int, files: list[UploadFile] = File(...), room: 
     return P.out(db, get_or_404(db, Property, pid), user, full=True)
 
 
+@router.post("/properties/{pid}/exclusive-contract")
+async def properties_contract(pid: int, file: UploadFile = File(...), db: Session = Depends(get_db, scope="function"),
+                              user: User = Depends(current_user)):
+    P.upload_contract(db, pid, file.filename or "contract.pdf", await file.read(), user)
+    return P.out(db, get_or_404(db, Property, pid), user, full=True)
+
+
 @router.patch("/properties/{pid}/media/{mid}")
 def properties_media_room(pid: int, mid: int, body: dict, db: Session = Depends(get_db, scope="function"),
                           user: User = Depends(current_user)):

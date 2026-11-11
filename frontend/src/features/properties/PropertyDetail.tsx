@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -350,6 +350,8 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           )}
         </div>
       </fieldset>
+
+      {f.is_exclusive && <ExclusiveContract p={p} canEdit={canEdit} />}
 
       <div className="gen-block">
         <span className="gen-title">Фото и видео</span>
@@ -743,6 +745,33 @@ function PostComposer({ p }: { p: Property }) {
   );
 }
 
+/** Exclusive object: the owner signs the exclusive contract by the hig-sign link (EXCLUSIVE_SIGN_URL), the agent uploads
+ * the signed PDF; without it «Отправить на модерацию» is blocked (backend submit_for_review). The PDF is not a post file. */
+function ExclusiveContract({ p, canEdit }: { p: Property; canEdit: boolean }) {
+  const { toast, set } = useProp(p.id);
+  const ref = useRef<HTMLInputElement>(null);
+  const c = p.exclusive_contract;
+  const link = p.exclusive_sign_url;
+  const up = useMutation({ mutationFn: (file: File) => api.properties.uploadContract(p.id, file), onSuccess: (r) => { set(r); toast('Договор загружен'); }, onError: (e) => toast(errText(e), true) });
+  const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(link || '') : Promise.reject()).then(() => toast('Ссылка скопирована'), () => toast('Не удалось скопировать', true));
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('Подпишите, пожалуйста, договор эксклюзивного сотрудничества с Homes in Georgia')}`;
+  return (
+    <div className="gen-block">
+      <span className="gen-title">Эксклюзивный договор</span>
+      {c ? <div className="alert alert-ok">Договор загружен {fmtDateTime(c.created_at)} · <a href={mediaUrl(c.url)} target="_blank" rel="noreferrer"><FileText size={14} /> скачать PDF</a></div>
+        : <div className="alert alert-warn">Нет договора: без подписанного PDF объект нельзя отправить оператору</div>}
+      {canEdit && <>
+        {link ? <div className="row row-wrap gap-sm">
+          <Button onClick={copy}><Copy size={16} />Скопировать ссылку</Button>
+          <a className="btn" href={share} target="_blank" rel="noreferrer"><Send size={16} />Отправить собственнику</a>
+        </div> : <div className="muted" style={{ fontSize: 12 }}>Ссылка на подписание не настроена — оформите договор как обычно и загрузите подписанный PDF.</div>}
+        <input ref={ref} type="file" accept="application/pdf" hidden onChange={(e) => { const fl = e.target.files?.[0]; if (fl) up.mutate(fl); e.target.value = ''; }} />
+        <Button block loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={16} />{c ? 'Заменить PDF договора' : 'Загрузить подписанный PDF'}</Button>
+      </>}
+    </div>
+  );
+}
+
 function ReviewStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [comment, setComment] = useState('');
@@ -754,6 +783,7 @@ function ReviewStep({ p }: { p: Property }) {
   });
   return (
     <div className="col">
+      {p.is_exclusive && <ExclusiveContract p={p} canEdit={false} />}
       <span className="label">Автопроверки</span>
       <div className="col gap-sm">
         <div className="row gap-sm"><AiFlagBadges flags={p.ai_flags} />{!p.ai_flags?.owner && !p.ai_flags?.agent_suspect && !p.ai_flags?.duplicate && <span className="muted">Меток ИИ нет</span>}</div>
