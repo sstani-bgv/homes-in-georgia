@@ -30,6 +30,8 @@ class Deal(Base):
     client_src_amount = Column(Numeric(14, 2))
     agent_level = Column(Integer)
     agent_deal_num = Column(Integer)
+    scenario = Column(JSONB)  # Molecula 90/10 pick: {axis, opt, role, lev, n}; null = the classic level scheme
+    distribution = Column(JSONB)  # [{who: agent|partner|platform|other, role, pct, amount}], 100% of the commission
     cadastral = Column(Text, index=True)
     ad_link = Column(Text)
     address = Column(Text)

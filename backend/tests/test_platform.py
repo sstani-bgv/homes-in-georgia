@@ -69,8 +69,10 @@ def test_exclusive_confirm_levels_up(db, sent):
     deals.confirm(db, d.id, op)
     db.refresh(ag)
     assert ag.exclusive_deals == 11 and ag.level == 70 and d.agent_deal_num == 11
-    d2 = deals.create(db, {"agent_id": ag.id, "price": 1000}, op)
+    d2 = deals.create(db, {"agent_id": ag.id, "price": 1000, "is_exclusive": True}, op)
     assert d2.agent_level == 70 and float(d2.agent_amount) == 350
+    d3 = deals.create(db, {"agent_id": ag.id, "price": 1000}, op)  # non-exclusive: 50% whatever the level
+    assert d3.agent_level == 70 and float(d3.agent_amount) == 250 and float(d3.platform_amount) == 250
     deals.cancel(db, d.id, op, "ошибка")
     db.refresh(ag)
     assert ag.exclusive_deals == 10 and not jobs.pending(db, "t14_client", d.id)
@@ -247,3 +249,53 @@ def test_ics_and_dashboard(db, client, sent):
     assert dash["response_times"]["agent_slots_avg_min"] is not None
     cab = client.get("/api/me/cabinet", headers=auth(ag)).json()
     assert cab["upcoming_viewings"][0]["id"] == lead.id and cab["level"]["level"] == 50
+
+
+# ---------------------------------------------------------------- Molecula scenarios
+
+def test_non_exclusive_pays_fifty_not_level():
+    r = deals.calc(price=1000, commission_pct=50, agent_level=90, is_exclusive=False)
+    assert (r["agent_amount"], r["platform_amount"]) == (250, 250)
+    assert deals.calc(price=1000, commission_pct=50, agent_level=90, is_exclusive=True)["agent_amount"] == 450
+
+
+@pytest.mark.parametrize("sc,rows", [
+    ({"axis": "make"}, [("agent", 70), ("platform", 30)]),
+    ({"axis": "participate", "opt": "object_agent_sign"}, [("agent", 10), ("partner", 50), ("platform", 40)]),
+    ({"axis": "participate", "opt": "take_exclusive"}, [("agent", 40), ("partner", 50), ("platform", 10)]),
+    ({"axis": "transfer", "role": "stream", "lev": 70}, [("partner", 15), ("agent", 70), ("platform", 15)]),
+    ({"axis": "transfer", "role": "mentor"}, [("agent", 50), ("platform", 50)]),
+    ({"axis": "create", "role": "after", "lev": 50}, [("partner", 25), ("agent", 50), ("platform", 25)]),
+    ({"axis": "external"}, [("agent", 50), ("partner", 25), ("platform", 25)]),
+])
+def test_scenario_distribution(sc, rows):
+    r = deals.calc(price=800, commission_pct=50, agent_level=70, is_exclusive=True, scenario=sc)
+    assert [(x["who"], x["pct"]) for x in r["distribution"]] == rows
+    assert sum(x["amount"] for x in r["distribution"]) == r["commission_total"] == 400
+    assert r["agent_amount"] == sum(x["amount"] for x in r["distribution"] if x["who"] == "agent")
+
+
+def test_scenario_make_non_exclusive_and_bad_input():
+    assert deals.calc(price=1000, agent_level=90, is_exclusive=False, scenario={"axis": "make"})["agent_amount"] == 250
+    with pytest.raises(DomainError):
+        deals.calc(price=1000, scenario={"axis": "nope"})
+    with pytest.raises(DomainError):
+        deals.calc(price=1000, split=[{"who": "agent", "pct": 60}, {"who": "platform", "pct": 30}])
+
+
+def test_deal_saves_scenario_and_people_rule(db, sent):
+    op = make_user(db, "operator")
+    ag, rec = make_user(db, "agent"), make_user(db, "recruit")
+    sc = {"axis": "participate", "opt": "object_recruit_joint"}
+    with pytest.raises(DomainError):  # an object scenario needs both agent and recruit
+        deals.create(db, {"agent_id": ag.id, "price": 1000, "scenario": sc}, op)
+    d = deals.create(db, {"agent_id": ag.id, "recruit_id": rec.id, "price": 1000, "scenario": sc, "is_exclusive": True}, op)
+    assert d.scenario["axis"] == "participate" and float(d.agent_amount) == 100 and float(d.recruit_amount) == 250
+    assert [r["who"] for r in d.distribution] == ["agent", "partner", "platform"]
+    assert "Участник сделки (20%): 100$" in deals.rented_text(d, db)
+    # an agent can't force their own split; an operator can
+    a = deals.create(db, {"agent_id": ag.id, "price": 1000, "split": [{"who": "agent", "pct": 100}]}, ag)
+    assert float(a.agent_amount) == 250
+    s = deals.create(db, {"agent_id": ag.id, "price": 1000, "split": [{"who": "agent", "pct": 60, "role": "Агент"},
+                                                                      {"who": "platform", "pct": 40, "role": "Платформа"}]}, op)
+    assert float(s.agent_amount) == 300

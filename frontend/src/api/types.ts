@@ -350,6 +350,8 @@ export interface Deal {
   client_src_amount?: number | null;
   agent_level?: number | null;
   agent_deal_num?: number | null;
+  scenario?: Scenario | null;
+  distribution?: DistRow[] | null;
   cadastral?: string | null;
   ad_link?: string | null;
   address?: string | null;
@@ -382,7 +384,13 @@ export interface DealPick {
   fields: { address?: string; cadastral?: string; metro?: string; ad_link?: string; owner_name?: string; owner_phone?: string; is_exclusive?: boolean; price?: number } | null;
 }
 
+import type { DistRow, Scenario } from '../lib/scenarios';
+export type { DistRow, Scenario };
+
 export interface DealCalcIn {
+  scenario?: Scenario | null;
+  /** staff's manual distribution rows (sum 100) */
+  split?: { who: string; role: string; pct: number }[] | null;
   price: number;
   commission_pct?: number;
   commission_total?: number | null;
@@ -400,6 +408,7 @@ export interface DealCalcOut {
   agent_amount: number;
   recruit_amount: number;
   client_src_amount: number;
+  distribution?: DistRow[];
 }
 
 export interface Evaluation {

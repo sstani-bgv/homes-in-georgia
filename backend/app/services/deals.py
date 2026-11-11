@@ -59,31 +59,113 @@ def parse_date(v) -> date | None:
     return None
 
 
+AXES = ("make", "participate", "transfer", "create", "external")
+# participate option → (agent's share %, the other side's role) — old CRM MOLECULA_PARTICIPATE
+PARTICIPATE = {
+    "object_recruit_joint": (20, "Рекрут / участник"), "object_recruit_sign": (10, "Рекрут / участник"),
+    "object_agent_joint": (20, "Участник"), "object_agent_sign": (10, "Участник"),
+    "client_joint_showing": (20, "Источник клиента"), "client_transfer": (10, "Источник клиента"),
+    "client_external": (30, "Внешний источник"), "take_exclusive": (40, "Куратор цикла"),
+}
+
+
+def scenario_rows(sc: dict, level: int = 50, is_exclusive: bool = True) -> list[dict]:
+    """Old CRM moleculeRows. `who`: agent = the deal's agent, partner = the second participant (recruit_id), platform = the
+    remainder. Port of frontend/src/pages/Calc.tsx moleculeRows."""
+    axis, opt, role = sc.get("axis"), sc.get("opt") or "object_recruit_joint", sc.get("role") or ""
+    lev = 70 if int(sc.get("lev") or 50) == 70 else 50
+    n = max(0, int(sc.get("n") or 0))
+    row = lambda who, r, pct: {"who": who, "role": r, "pct": pct}  # noqa: E731
+    if axis == "make":  # the personal ladder; non-exclusive is always 50 (old CRM `excl ? lvl : 50`)
+        return [row("agent", "Агент · собственный цикл", level if is_exclusive else 50)]
+    if axis == "participate":
+        if opt not in PARTICIPATE:
+            raise DomainError("bad_scenario", f"unknown participation: {opt}", 422)
+        share, other = PARTICIPATE[opt]
+        return [row("agent", "Участник сделки", share), row("partner", other if opt.startswith("client") else "Владелец объекта / агент", 50)]
+    if axis == "transfer":
+        if role == "stream":
+            share = 15 if lev == 70 else 25
+            return [row("partner", "Передающий поток", share), row("agent", "Агент полного цикла", lev)]
+        if role == "keeper":
+            return [row("agent", "Хранитель потока", min(5, max(1, n // 100 or 1)))]
+        return [row("agent", "Наставник · полный цикл", 50)]
+    if axis == "create":
+        if role == "after":
+            return [row("partner", "Создатель направления", 15 if lev == 70 else 25), row("agent", "Агент полного цикла", lev)]
+        return [row("agent", "Инициатор теста", 50)]
+    if axis == "external":
+        return [row("agent", "Внешний агент", 50), row("partner", "Внутренний куратор", 25)]
+    raise DomainError("bad_scenario", f"unknown axis: {axis}", 422)
+
+
+def people_rule(sc: dict | None) -> str:
+    """Old CRM moleculePeopleRule: which participants a scenario needs: agent | either (agent or recruit) | both."""
+    axis, opt = (sc or {}).get("axis"), (sc or {}).get("opt") or "object_recruit_joint"
+    if axis == "participate":
+        return "both" if opt.startswith("object_") else "either" if opt.startswith("client_") else "agent"
+    return "both" if axis == "transfer" else "agent"
+
+
 def calc(price=None, commission_pct=None, commission_total=None, platform_amount=None, agent_level=50,
-         recruit_pct=None, recruit_amount=None, client_src=None, is_rerented=False, **_ignored) -> dict:
-    """comm = commission_total or round(price*pct/100); platform = given or comm*(100-level)/100;
+         recruit_pct=None, recruit_amount=None, client_src=None, is_rerented=False, is_exclusive=True,
+         scenario=None, split=None, **_ignored) -> dict:
+    """comm = commission_total or round(price*pct/100); the agent's level share applies only to an exclusive object (a
+    non-exclusive one pays 50, as in the old CRM). platform = given or comm*(100-share)/100;
     recruit = given or comm*recruit_pct/100; client_src (who passed the client) = 10% of comm;
-    agent = comm - platform - recruit - client_src."""
+    agent = comm - platform - recruit - client_src.
+    `scenario` (Molecula axis) or `split` (staff's manual rows [{who, role, pct}], sum 100) replace that scheme:
+    every row gets pct% of comm, the platform gets the remainder. `distribution` lists the rows with amounts."""
     price_d = _d(price) or Decimal(0)
     pct = _d(commission_pct)
     pct = Decimal(50) if pct is None else pct
     level = int(agent_level or 50)
-    if is_rerented:
-        comm = Decimal(0)
-    else:
-        comm = _d(commission_total) or _round(price_d * pct / 100)
+    share = level if is_exclusive else 50
+    comm = Decimal(0) if is_rerented else _d(commission_total) or _round(price_d * pct / 100)
+    rows = None
+    if not is_rerented and split:
+        rows = [{"who": r.get("who") or "other", "role": str(r.get("role") or "")[:80], "pct": float(r.get("pct") or 0)} for r in split]
+        if abs(sum(r["pct"] for r in rows) - 100) > 0.01:
+            raise DomainError("bad_split", "Распределение должно давать 100%", 422)
+    elif not is_rerented and scenario:
+        rows = scenario_rows(scenario, level, is_exclusive)
+        rest = 100 - sum(r["pct"] for r in rows)
+        if rest < 0:
+            raise DomainError("bad_scenario", "Доли сценария превышают 100%", 422)
+        rows.append({"who": "platform", "role": "Платформа", "pct": rest})
+    if rows is not None:
+        amounts = [_round(comm * Decimal(str(r["pct"])) / 100) for r in rows]
+        pi = next((i for i, r in enumerate(rows) if r["who"] == "platform"), None)
+        if pi is not None:  # the platform takes the rounding remainder: the rows always add up to the commission
+            amounts[pi] = comm - sum(a for i, a in enumerate(amounts) if i != pi)
+        sum_of = lambda who: sum((a for r, a in zip(rows, amounts) if r["who"] == who), Decimal(0))  # noqa: E731
+        plat, agent, rec, src = sum_of("platform"), sum_of("agent"), sum_of("partner"), Decimal(0)
+        rpct = Decimal(str(sum(r["pct"] for r in rows if r["who"] == "partner")))
+        dist = [{**r, "amount": _r(a)} for r, a in zip(rows, amounts)]
+        return {"price": _r(price_d), "commission_pct": _r(pct), "commission_total": _r(comm), "platform_amount": _r(plat),
+                "platform_pct": round(float(plat / comm * 100)) if comm else 100 - share, "agent_level": level,
+                "recruit_pct": _r(rpct), "recruit_amount": _r(rec), "client_src_amount": 0.0, "agent_amount": _r(agent),
+                "distribution": dist}
     plat = _d(platform_amount)
     if plat is None:
-        plat = comm * (100 - level) / 100
+        plat = comm * (100 - share) / 100
     rpct = _d(recruit_pct) or Decimal(0)
     rec = _d(recruit_amount)
     if rec is None:
         rec = comm * rpct / 100
     src = _round(comm * Decimal("0.1")) if client_src else Decimal(0)
     agent = comm - plat - rec - src
+    p = lambda a: round(float(a / comm * 100), 2) if comm else 0  # noqa: E731
+    dist = [{"who": "platform", "role": "Платформа", "pct": p(plat), "amount": _r(plat)},
+            {"who": "agent", "role": "Агент", "pct": p(agent), "amount": _r(agent)}]
+    if rec:
+        dist.append({"who": "partner", "role": "Рекрут", "pct": p(rec), "amount": _r(rec)})
+    if src:
+        dist.append({"who": "other", "role": "Источник клиента", "pct": p(src), "amount": _r(src)})
     return {"price": _r(price_d), "commission_pct": _r(pct), "commission_total": _r(comm), "platform_amount": _r(plat),
-            "platform_pct": round(float(plat / comm * 100)) if comm else 100 - level, "agent_level": level,
-            "recruit_pct": _r(rpct), "recruit_amount": _r(rec), "client_src_amount": _r(src), "agent_amount": _r(agent)}
+            "platform_pct": round(float(plat / comm * 100)) if comm else 100 - share, "agent_level": level,
+            "recruit_pct": _r(rpct), "recruit_amount": _r(rec), "client_src_amount": _r(src), "agent_amount": _r(agent),
+            "distribution": dist}
 
 
 def default_commission_pct(deal_type: str | None, sub_type: str | None) -> int:
@@ -147,15 +229,23 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
                 p.cadastral_code = data["cadastral"].strip()
             data.update(properties.deal_fields(db, p, actor, data.get("deal_type") or "rent"))
     if actor is not None and actor.role not in STAFF:  # payout inputs an agent must not set for themselves
+        data.pop("split", None)
         data.pop("agent_level", None)
         data.pop("platform_amount", None)
         data.pop("commission_total", None)
         data["commission_pct"] = default_commission_pct(data.get("deal_type"), data.get("sub_type"))
     level = int(data.get("agent_level") or users.effective_level(agent))
+    sc = data.get("scenario") or None
+    if sc:
+        sc = {k: sc.get(k) for k in ("axis", "opt", "role", "lev", "n") if sc.get(k) not in (None, "")}
+        mode, has_a, has_r = people_rule(sc), bool(agent), bool(data.get("recruit_id"))
+        if (mode == "both" and not (has_a and has_r)) or (mode == "either" and not (has_a or has_r)) or not has_a and mode == "agent":
+            raise DomainError("people_required", {"both": "Нужны агент и рекрут", "either": "Укажите агента или рекрута"}.get(mode, "Укажите агента"), 422)
     nums = calc(price=data.get("price"), commission_pct=data.get("commission_pct"),
                 commission_total=data.get("commission_total"), platform_amount=data.get("platform_amount"),
                 agent_level=level, recruit_pct=data.get("recruit_pct"), recruit_amount=data.get("recruit_amount"),
-                client_src=data.get("client_src"), is_rerented=bool(data.get("is_rerented")))
+                client_src=data.get("client_src"), is_rerented=bool(data.get("is_rerented")),
+                is_exclusive=data.get("is_exclusive") in (True, "true", "1", 1, "on", "yes"), scenario=sc, split=data.get("split"))
     deal = Deal(status="pending", source=data.get("source") or "crm", raw={k: str(v) for k, v in data.items()})
     for k in FIELDS:
         if k in data and data[k] not in (None, ""):
@@ -168,6 +258,7 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     for k in ("commission_pct", "commission_total", "platform_amount", "agent_amount", "recruit_pct", "recruit_amount",
               "client_src_amount", "price"):
         setattr(deal, k, nums[k])
+    deal.scenario, deal.distribution = sc, nums["distribution"]
     deal.agent_level = level
     deal.agent_id = agent.id if agent else None
     if data.get("recruit") and not deal.recruit_id:
@@ -352,17 +443,25 @@ def rented_text(deal: Deal, db: Session | None = None) -> str:
     lvl = deal.agent_level or 50
     comm = Decimal(deal.commission_total or 0)
     plat_pct = round(float(Decimal(deal.platform_amount or 0) / comm * 100)) if comm else 100 - lvl
+    dist = deal.distribution or []
+    ag = next((r for r in dist if r["who"] == "agent"), None)
     lines = [f"💰 <b>#Rented{f' | Сделка #{deal.agent_deal_num}' if deal.is_exclusive and deal.agent_deal_num else ''}</b>",
              f"{'#Эксклюзив' if deal.is_exclusive else '#Неэксклюзив'} | {'Продажа' if deal.deal_type == 'sale' else 'Аренда'}"
-             f" | Agent {lvl}% | 👤 #{e(agent.name if agent else '?')}",
+             f" | Agent {_num(ag['pct']) if ag else lvl}% | 👤 #{e(agent.name if agent else '?')}",
              f"Link: {e(deal.ad_link)}", f"Cadastral: <code>{e(deal.cadastral)}</code>", "",
-             f"<b>Цена: {_num(deal.price)}$</b>", f"Комиссия: {_num(deal.commission_total)}$ ({_num(deal.commission_pct)}%)", "",
-             "📊 Распределение:", f"• Платформа ({plat_pct}%): {_num(deal.platform_amount)}$",
-             f"• Агент/Наставник ({lvl}%): {_num(deal.agent_amount)}$"]
-    if recruit or (deal.recruit_amount and float(deal.recruit_amount) > 0):
-        lines.append(f"• #{e(recruit.name if recruit else '')} ({_num(deal.recruit_pct)}%): {_num(deal.recruit_amount)}$")
-    if deal.client_src:
-        lines.append(f"• Передал клиента: {e(deal.client_src)} (10%): {_num(deal.client_src_amount)}$")
+             f"<b>Цена: {_num(deal.price)}$</b>", f"Комиссия: {_num(deal.commission_total)}$ ({_num(deal.commission_pct)}%)", ""]
+    if dist:  # the saved split rows (scenario or classic), the platform first
+        lines.append("📊 Распределение:")
+        who = lambda r: (f" #{recruit.name}" if r["who"] == "partner" and recruit else f" {deal.client_src}" if r["role"] == "Источник клиента" and deal.client_src else "")  # noqa: E731
+        lines += [f"• {e(('Агент/Наставник' if r['role'] == 'Агент' else r['role']) + who(r))} ({_num(r['pct'])}%): {_num(r['amount'])}$"
+                  for r in sorted(dist, key=lambda r: r["who"] != "platform")]
+    else:
+        lines += ["📊 Распределение:", f"• Платформа ({plat_pct}%): {_num(deal.platform_amount)}$",
+                  f"• Агент/Наставник ({lvl}%): {_num(deal.agent_amount)}$"]
+        if recruit or (deal.recruit_amount and float(deal.recruit_amount) > 0):
+            lines.append(f"• #{e(recruit.name if recruit else '')} ({_num(deal.recruit_pct)}%): {_num(deal.recruit_amount)}$")
+        if deal.client_src:
+            lines.append(f"• Передал клиента: {e(deal.client_src)} (10%): {_num(deal.client_src_amount)}$")
     lines += ["", f"Client: {e(deal.client_name)} {deal.client_phone or ''}", f"Owner: {e(deal.owner_name)} {deal.owner_phone or ''}",
               f"Rent: {_fmt(deal.rent_from)} – {_fmt(deal.rent_to)}"]
     if recruit:

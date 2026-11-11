@@ -70,10 +70,14 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
       <div className="calc-box">
         <div className="calc-row"><span>Цена</span><strong>{money(d.price)}</strong></div>
         <div className="calc-row"><span>Комиссия ({d.commission_pct ?? '—'}%)</span><strong>{money(d.commission_total)}</strong></div>
+        {d.distribution?.length ? d.distribution.map((r, i) => (
+          <div key={i} className="calc-row"><span>{r.role}{r.who === 'partner' && d.recruit_id ? ` · ${nameOf(d.recruit_id, d.recruit?.name)}` : ''} · {r.pct}%</span><strong>{money(r.amount)}</strong></div>
+        )) : <>
         <div className="calc-row"><span>Платформа</span><strong>{money(d.platform_amount)}</strong></div>
         {Number(d.recruit_amount) > 0 && <div className="calc-row"><span>Рекрут {d.recruit_id ? nameOf(d.recruit_id, d.recruit?.name) : ''}</span><strong>{money(d.recruit_amount)}</strong></div>}
         {Number(d.client_src_amount) > 0 && <div className="calc-row"><span>Источник: {d.client_src}</span><strong>{money(d.client_src_amount)}</strong></div>}
         <div className="calc-row"><span>Агент ({d.agent_level}%)</span><strong>{money(d.agent_amount)}</strong></div>
+        </>}
       </div>
       {d.property?.needs_check && <div className="alert alert-warn">Новый объект из сделки — проверить. {isStaff ? 'Сделку можно подтвердить после проверки объекта.' : 'Сделку подтвердят после проверки объекта оператором.'}</div>}
       <KV items={[

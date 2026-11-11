@@ -12,6 +12,7 @@ import { PropertyStatusBadge } from '../../components/domain';
 import { Badge, Button, Card, Field, Input, Seg, Select, Switch, Textarea } from '../../components/ui';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
 import { levelFor, money, todayStr } from '../../lib/format';
+import { AXES, AXIS_NOTE, PARTICIPATE, PEOPLE_HINT, defaultScenario, peopleRule, type Axis, type DistRow, type Scenario } from '../../lib/scenarios';
 
 function useDebounced<T>(v: T, ms = 300): T {
   const [d, setD] = useState(v);
@@ -27,6 +28,9 @@ export function H2O({ label, value, onChange }: { label: string; value: number |
     </div>
   );
 }
+
+// staff's manual rows → the API split: the platform is the remainder
+const splitOf = (rows: DistRow[] | null) => rows && [...rows.filter((r) => r.who !== 'platform'), { who: 'platform' as const, role: 'Платформа', pct: 100 - rows.filter((r) => r.who !== 'platform').reduce((a, r) => a + r.pct, 0) }];
 
 const SRC = ['', 'Instagram', 'Facebook', 'Telegram-канал', 'Рекомендация', 'Сайт', 'Другое'];
 
@@ -45,6 +49,11 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
     address: '', cadastral: '', ad_link: '', metro: '', client_name: '', client_phone: '', client_tg: '', owner_name: '', owner_phone: '', owner_id: 0, owner_typed: false,
     rent_from: todayStr(), rent_to: '',
   });
+  // Molecula scenario (null = the classic level scheme with recruit % and client source) and staff's manual split of the rows
+  const [sc, setSc] = useState<Scenario | null>(null);
+  const [edit, setEdit] = useState<DistRow[] | null>(null);
+  const setAxis = (a: Axis) => { setSc(sc?.axis === a ? null : defaultScenario(a)); setEdit(null); };
+  const patchSc = (p: Partial<Scenario>) => { setSc((x) => (x ? { ...x, ...p } : x)); setEdit(null); };
   const [t0, setT0] = useState<{ c: number | null; o: number | null; p: number | null; comment: string }>({ c: null, o: null, p: null, comment: '' });
   const upd = (k: keyof typeof f, v: unknown) => setF((x) => ({ ...x, [k]: v }));
   // stage 7: the object is picked from the base (its fields become read-only) or typed by hand as a new object
@@ -90,9 +99,10 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
 
   const calcIn: DealCalcIn = useMemo(() => ({
     price: Number(f.price) || 0, commission_pct: Number(f.commission_pct), commission_total: f.commission_total === '' ? null : Number(f.commission_total),
-    agent_level: Number(f.agent_level), is_exclusive: f.is_exclusive, recruit_pct: f.recruit_id ? Number(f.recruit_pct) : 0,
-    client_src: f.client_src || null, deal_type: f.deal_type, is_rerented: f.is_rerented,
-  }), [f]);
+    agent_level: Number(f.agent_level), is_exclusive: f.is_exclusive, recruit_pct: f.recruit_id && !sc ? Number(f.recruit_pct) : 0,
+    client_src: sc ? null : f.client_src || null, deal_type: f.deal_type, is_rerented: f.is_rerented,
+    scenario: sc, split: splitOf(edit),
+  }), [f, sc, edit]);
   const dIn = useDebounced(calcIn);
   const debouncing = JSON.stringify(calcIn) !== JSON.stringify(dIn);
   const calc = useQuery({ queryKey: ['calc', dIn], queryFn: () => api.deals.calc(dIn), enabled: dIn.price > 0, placeholderData: (p) => p });
@@ -111,8 +121,8 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
         is_exclusive: f.is_exclusive, is_rerented: f.is_rerented,
         price: Number(f.price), commission_pct: Number(f.commission_pct),
         commission_total: f.commission_total === '' ? null : Number(f.commission_total),
-        agent_level: Number(f.agent_level), recruit_pct: f.recruit_id ? Number(f.recruit_pct) : null,
-        client_src: f.client_src || null,
+        agent_level: Number(f.agent_level), recruit_pct: f.recruit_id && !sc ? Number(f.recruit_pct) : null,
+        client_src: sc ? null : f.client_src || null, scenario: sc, split: splitOf(edit),
         address: str(f.address), cadastral: str(f.cadastral), ad_link: str(f.ad_link), metro: str(f.metro),
         client_name: str(f.client_name), client_phone: str(f.client_phone), client_tg: str(f.client_tg),
         owner_name: str(f.owner_name), owner_phone: str(f.owner_phone), owner_id: f.owner_id || null,
@@ -139,23 +149,31 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
 
   const r = calc.data;
   const objectOk = manual ? !!f.address.trim() : !!obj && !obj.blocked;
-  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from);
+  const rule = peopleRule(sc);
+  const hasA = Number(f.agent_id) > 0, hasR = !!f.recruit_id;
+  const peopleOk = !sc || (rule === 'both' ? hasA && hasR : rule === 'either' ? hasA || hasR : hasA);
+  const splitSum = edit ? edit.filter((r) => r.who !== 'platform').reduce((a, r) => a + r.pct, 0) : 0;
+  const valid = objectOk && Number(f.price) > 0 && Number(f.agent_id) > 0 && (f.deal_type === 'sale' || !!f.rent_from) && peopleOk && splitSum <= 100;
   const calcBusy = debouncing || calc.isFetching;
   const missing = [
     !manual && !pid && 'объект (найдите в базе или «Объекта нет в базе»)', manual && !f.address.trim() && 'адрес',
-    !(Number(f.price) > 0) && 'цена', !(Number(f.agent_id) > 0) && 'агент', f.deal_type === 'rent' && !f.rent_from && 'дата начала аренды',
+    !(Number(f.price) > 0) && 'цена', !peopleOk && (rule === 'both' ? 'агента и рекрута (второго участника)' : 'агента или второго участника'), splitSum > 100 && 'доли не больше 100%', !(Number(f.agent_id) > 0) && 'агент', f.deal_type === 'rent' && !f.rent_from && 'дата начала аренды',
   ].filter(Boolean) as string[];
 
   return (
     <div className="split">
       <div className="col gap-lg">
-        <Card label="Сделка" title={leadId ? `По заявке #${leadId}` : 'Новая сделка'}>
+        <Card label="1" title={leadId ? `База расчёта · заявка #${leadId}` : 'База расчёта'}>
           <div className="col">
             <div className="row row-wrap">
-              <Seg value={f.deal_type} onChange={setType} options={[{ value: 'rent', label: 'Аренда' }, { value: 'sale', label: 'Продажа' }]} />
+              <Seg value={f.deal_type} onChange={setType} options={[{ value: 'rent', label: 'Аренда · 50%' }, { value: 'sale', label: 'Продажа · 3%' }]} />
               {f.deal_type === 'rent' && <Seg value={f.sub_type} onChange={setSub} options={[{ value: 'long', label: 'Долгосрок' }, { value: 'short', label: 'Краткосрок' }, { value: 'daily', label: 'Посуточно' }, { value: 'commercial', label: 'Коммерция' }]} />}
             </div>
             <div className="form-grid">
+              <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Сумма сделки (цена аренды), $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
+              {/* the commission is fixed for agents (backend deals.default_commission_pct ignores theirs); staff may change it */}
+              <Field label="Комиссия агентства, % от цены" hint={isStaff ? `Сейчас: ${money(r?.commission_total)}` : `Фиксированная, меняет оператор · ${money(r?.commission_total)}`}><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} disabled={!isStaff} /></Field>
+              {isStaff && <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>}
               {isStaff ? (
                 <Field label="Агент"><Select value={f.agent_id} onChange={(e) => upd('agent_id', e.target.value)} placeholder="Выбрать" options={agentList.map((a) => ({ value: a.id, label: `${a.name} (${a.level || 50}%)` }))} /></Field>
               ) : (
@@ -167,20 +185,43 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
               ) : (
                 <Field label="Уровень агента" hint="Меняет администратор или оператор"><Input value={`${f.agent_level}%`} disabled /></Field>
               )}
-              <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Цена аренды, $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
-              {/* the commission is fixed for agents (backend deals.default_commission_pct ignores theirs); staff may change it */}
-              <Field label="Комиссия, % от цены" hint={isStaff ? undefined : 'Фиксированная, меняет оператор'}><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} disabled={!isStaff} /></Field>
-              {isStaff && <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>}
-              <Field label="Источник клиента" hint="10% от комиссии"><Select value={f.client_src} onChange={(e) => upd('client_src', e.target.value)} options={SRC.slice(1).map((s) => ({ value: s, label: s }))} placeholder="Свой клиент" /></Field>
-              <Field label="Рекрут"><Select value={f.recruit_id} onChange={(e) => upd('recruit_id', e.target.value)} placeholder="Без рекрута" options={itemsOf(recruits.data).map((u) => ({ value: u.id, label: u.name }))} /></Field>
-              {f.recruit_id ? <Field label="Доля рекрута, %"><Input type="number" value={f.recruit_pct} onChange={(e) => upd('recruit_pct', e.target.value)} /></Field> : <div />}
+              <Field label="Рекрут / второй участник" hint={sc ? PEOPLE_HINT[rule] : undefined}>
+                <Select value={f.recruit_id} onChange={(e) => upd('recruit_id', e.target.value)} placeholder="Без рекрута" options={(isStaff ? agentList.filter((u) => u.id !== Number(f.agent_id)) : itemsOf(recruits.data)).map((u) => ({ value: u.id, label: u.name }))} />
+              </Field>
+              {!sc && f.recruit_id ? <Field label="Доля рекрута, %"><Input type="number" value={f.recruit_pct} onChange={(e) => upd('recruit_pct', e.target.value)} /></Field> : <div />}
+              {!sc && <Field label="Источник клиента" hint="10% от комиссии"><Select value={f.client_src} onChange={(e) => upd('client_src', e.target.value)} options={SRC.slice(1).map((x) => ({ value: x, label: x }))} placeholder="Свой клиент" /></Field>}
+              {/* exclusive confirmation (verbal / signed + screenshot) lives on the object card (session exclusive-sign) */}
               <div className="span2 row row-wrap gap-lg">
-                <Switch checked={f.is_exclusive} onChange={(v) => !ro('is_exclusive') && upd('is_exclusive', v)} label="Эксклюзив" />
+                <Switch checked={f.is_exclusive} onChange={(v) => !ro('is_exclusive') && upd('is_exclusive', v)} label={f.is_exclusive ? 'Эксклюзив объекта' : 'Неэксклюзив: агенту 50%'} />
                 <Switch checked={f.is_rerented} onChange={(v) => upd('is_rerented', v)} label="Повторная сдача" />
               </div>
             </div>
           </div>
         </Card>
+        <Card label="2" title="Что происходит в сделке?">
+          <div className="grid g2">
+            {AXES.map((a, i) => (
+              <button key={a.v} type="button" className={`choice ${sc?.axis === a.v ? 'on' : ''}`} style={i === AXES.length - 1 ? { gridColumn: '1 / -1' } : undefined} onClick={() => setAxis(a.v)} aria-pressed={sc?.axis === a.v}>
+                <span className="grow"><b>{a.t}</b><small>{a.s}</small></span>
+              </button>
+            ))}
+          </div>
+          {!sc && <div className="muted mt" style={{ fontSize: 12 }}>Сценарий не выбран: стандартная схема по уровню агента, рекруту и источнику клиента. Выберите сценарий, если сделка идёт по-другому.</div>}
+        </Card>
+        {sc && (
+          <Card label="3" title="Детали сценария">
+            <div className="col">
+              {sc.axis === 'make' && <Field label="Лестница по эксклюзивам агента" hint="1–10: 50% · 11–100: 70% · после 100: 90%. Неэксклюзивная сделка всегда 50%."><Input value={`Сейчас ${f.is_exclusive ? f.agent_level : 50}%`} disabled /></Field>}
+              {sc.axis === 'participate' && <Field label="Вариант участия"><Select value={sc.opt} onChange={(e) => patchSc({ opt: e.target.value })} options={Object.entries(PARTICIPATE).map(([k, v]) => ({ value: k, label: `${v[0]} — ${v[1]}%` }))} /></Field>}
+              {sc.axis === 'transfer' && <Field label="Роль в передаче"><Select value={sc.role} onChange={(e) => patchSc({ role: e.target.value })} options={[
+                { value: 'mentor', label: 'Наставник · полный цикл · 50%' }, { value: 'stream', label: 'Передаю поток · 25% с агентом 50% / 15% с агентом 70%' }, { value: 'keeper', label: 'Хранитель потока · 1–5%' }]} /></Field>}
+              {sc.axis === 'transfer' && sc.role === 'keeper' && <Field label="Сделок в потоке"><Input type="number" value={sc.n ?? 0} onChange={(e) => patchSc({ n: Number(e.target.value) })} /></Field>}
+              {sc.axis === 'create' && <Field label="Состояние направления"><Select value={sc.role} onChange={(e) => patchSc({ role: e.target.value })} options={[{ value: 'test', label: 'Тест направления · 50%' }, { value: 'after', label: 'Создатель направления · 25% / 15%' }]} /></Field>}
+              {((sc.axis === 'transfer' && sc.role === 'stream') || (sc.axis === 'create' && sc.role === 'after')) && <Field label="Уровень агента полного цикла"><Seg value={sc.lev ?? 50} onChange={(v) => patchSc({ lev: v })} options={[{ value: 50, label: '50%' }, { value: 70, label: '70%' }]} /></Field>}
+              <div className="alert alert-info">{AXIS_NOTE[sc.axis]}</div>
+            </div>
+          </Card>
+        )}
         <Card label="Объект и стороны" title="Детали">
           <div className="col" style={{ marginBottom: 14 }}>
             {pid ? (
@@ -250,16 +291,25 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       </div>
       <div className="col gap-lg" style={{ position: 'sticky', top: 80 }}>
         <div className="calc-box">
-          <div className="label" style={{ color: 'rgba(255,255,255,.7)' }}>Ваша доля</div>
+          <div className="row row-between"><span className="label" style={{ color: 'rgba(255,255,255,.7)' }}>Ваша доля</span>{r?.distribution && <span className="badge" style={{ background: 'rgba(255,255,255,.18)', color: '#fff' }}>Итого {Math.round(r.distribution.reduce((a, x) => a + x.pct, 0))}%</span>}</div>
           <div className="calc-big num">{r ? money(r.agent_amount) : '—'}</div>
           <div className="divider" style={{ background: 'rgba(255,255,255,.15)' }} />
           <div className="calc-row"><span>Комиссия</span><strong>{r ? money(r.commission_total) : '—'}</strong></div>
-          <div className="calc-row"><span>Платформа ({100 - Number(f.agent_level)}%)</span><strong>{r ? money(r.platform_amount) : '—'}</strong></div>
-          {Number(r?.recruit_amount) > 0 && <div className="calc-row"><span>Рекрут</span><strong>{money(r?.recruit_amount)}</strong></div>}
-          {Number(r?.client_src_amount) > 0 && <div className="calc-row"><span>Источник клиента</span><strong>{money(r?.client_src_amount)}</strong></div>}
-          <div className="calc-row"><span>Агент ({f.agent_level}%)</span><strong>{r ? money(r.agent_amount) : '—'}</strong></div>
+          {r?.distribution?.map((x, i) => <div key={i} className="calc-row"><span>{x.role} · {x.pct}%</span><strong>{money(x.amount)}</strong></div>)}
           {calcBusy && <div style={{ fontSize: 11, opacity: .6, marginTop: 6 }}>пересчёт…</div>}
         </div>
+        {isStaff && r?.distribution && (
+          <Card label="Оператор" title="Ручная правка распределения">
+            <div className="col gap-sm">
+              <Switch checked={!!edit} onChange={(v) => setEdit(v ? r.distribution!.map(({ who, role, pct }) => ({ who, role, pct })) : null)} label="Править проценты" />
+              {edit?.map((x, i) => x.who === 'platform' ? null : (
+                <div key={i} className="row row-between"><span style={{ fontSize: 13 }}>{x.role}</span>
+                  <Input type="number" style={{ width: 80 }} value={x.pct} onChange={(e) => setEdit(edit.map((y, j) => (j === i ? { ...y, pct: Number(e.target.value) || 0 } : y)))} /></div>
+              ))}
+              {edit && <div className="muted" style={{ fontSize: 12 }}>Платформа забирает остаток: {100 - splitSum}%</div>}
+            </div>
+          </Card>
+        )}
         <Button size="lg" variant="ok" block disabled={!valid || calcBusy} loading={save.isPending} onClick={() => save.mutate()}><CheckCircle2 size={18} />Отправить на подтверждение</Button>
         {missing.length > 0 && <div className="alert alert-warn" style={{ fontSize: 13 }}>Чтобы отправить, заполните: {missing.join(', ')}</div>}
         <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором заявка станет «Сдано», бот поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>

@@ -1,5 +1,6 @@
 // VITE_MOCK=1 in-memory API. Mimics §7 shapes and the main state transitions so the UI can be exercised offline.
 import { ApiError, getToken } from '../client';
+import { scenarioRows, type DistRow, type Scenario } from '../../lib/scenarios';
 import type { Deal, EventItem, Lead, LeadStatus, Property, PropertyStatus, Report, User } from '../types';
 import * as F from './fixtures';
 
@@ -63,10 +64,23 @@ function calc(b: Record<string, unknown>) {
   const pct = Number(b.commission_pct ?? 50);
   const level = Number(b.agent_level ?? 50);
   const comm = b.is_rerented ? 0 : b.commission_total ? Number(b.commission_total) : Math.round((price * pct) / 100);
-  const platform = Math.round((comm * (100 - level)) / 100);
   const recruit = Math.round((comm * Number(b.recruit_pct || 0)) / 100);
   const src = b.client_src ? Math.round(comm * 0.1) : 0;
-  return { commission_total: comm, platform_amount: platform, agent_amount: comm - platform - recruit - src, recruit_amount: recruit, client_src_amount: src };
+  const sc = b.scenario as Scenario | null | undefined;
+  if (sc && !b.is_rerented) {
+    const rows = scenarioRows(sc, level, !!b.is_exclusive).map((r) => ({ ...r, amount: r.who === 'platform' ? 0 : Math.round((comm * r.pct) / 100) }));
+    const pl = rows.find((r) => r.who === 'platform')!;
+    pl.amount = comm - rows.filter((r) => r !== pl).reduce((s, r) => s + r.amount!, 0);
+    const sum = (w: string) => rows.filter((r) => r.who === w).reduce((s, r) => s + r.amount!, 0);
+    return { commission_total: comm, platform_amount: pl.amount, agent_amount: sum('agent'), recruit_amount: sum('partner'), client_src_amount: 0, distribution: rows, scenario: sc };
+  }
+  const share = b.is_exclusive === false ? 50 : level;
+  const plat = b.is_rerented ? 0 : Math.round((comm * (100 - share)) / 100);
+  const agent = comm - plat - recruit - src;
+  const pc = (a: number) => (comm ? Math.round((a / comm) * 100) : 0);
+  const distribution: DistRow[] = [{ who: 'platform', role: 'Платформа', pct: pc(plat), amount: plat }, { who: 'agent', role: 'Агент', pct: pc(agent), amount: agent },
+    ...(recruit ? [{ who: 'partner' as const, role: 'Рекрут', pct: pc(recruit), amount: recruit }] : []), ...(src ? [{ who: 'other' as const, role: 'Источник клиента', pct: pc(src), amount: src }] : [])];
+  return { commission_total: comm, platform_amount: plat, agent_amount: agent, recruit_amount: recruit, client_src_amount: src, distribution };
 }
 function monthKey(d: string | undefined) {
   const dt = d ? new Date(d) : new Date();

@@ -7,7 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Handshake } from 'lucide-react';
 import { api } from '../api';
 import { Card, Field, Input, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
-import { money } from '../lib/format';
+import { levelFor, money } from '../lib/format';
+import { AXES, AXIS_NOTE, PARTICIPATE, scenarioRows as dealRows, type Axis } from '../lib/scenarios';
 
 type Row = { n: string; p: number; note?: string };
 
@@ -41,47 +42,8 @@ function scenarioRows(sc: number, excl: boolean, lvl: number, recD: 'lt10' | 'gt
 }
 
 // ---------------------------------------------------------------- Molecula 90/10 (moleculeRows)
-const AXES = [
-  { v: 'make', t: 'Делаю свой объект', s: 'и полный цикл' },
-  { v: 'participate', t: 'Участвую', s: 'чужой объект или клиент' },
-  { v: 'transfer', t: 'Передаю', s: 'обучение и поток сделок' },
-  { v: 'create', t: 'Создаю', s: 'новое направление' },
-  { v: 'external', t: 'Внешний контур', s: 'эксперимент с Verified Exclusive' },
-] as const;
-type Axis = typeof AXES[number]['v'];
-const PARTICIPATE: Record<string, [string, number, string]> = {
-  object_recruit_joint: ['Объект рекрута · показ + договор', 20, 'Рекрут / участник'],
-  object_recruit_sign: ['Объект рекрута · только подписание', 10, 'Рекрут / участник'],
-  object_agent_joint: ['Объект агента · показ + договор', 20, 'Участник'],
-  object_agent_sign: ['Объект агента · только подписание', 10, 'Участник'],
-  client_joint_showing: ['Клиент · совместный показ', 20, 'Источник клиента'],
-  client_transfer: ['Клиент · передача контакта', 10, 'Источник клиента'],
-  client_external: ['Клиент со стороны · внешний источник', 30, 'Внешний источник'],
-  take_exclusive: ['Чужой эксклюзив · полный цикл', 40, 'Куратор цикла'],
-};
-const AXIS_NOTE: Record<Axis, string> = {
-  make: 'Личная лестница: делаешь полный цикл сам.',
-  participate: 'Участие в чужой сделке: оплачивается конкретный объём работы.',
-  transfer: 'Передача способности и потока: это отдельная ось, не ступень личной лестницы.',
-  create: 'Новое направление: сначала тест, потом доля создателя.',
-  external: 'Экспериментальный контур. Целевая модель после подтверждения доверия: внешний агент 50% · внутренний куратор 25% · платформа 25%.',
-};
-function moleculeRows(axis: Axis, n: number, opt: string, role: string, lev: number): Row[] {
-  if (axis === 'make') { const p = n > 100 ? 90 : n > 10 ? 70 : 50; return [{ n: 'Агент · собственный цикл', p }, { n: 'Платформа', p: 100 - p }]; }
-  if (axis === 'participate') { const d = PARTICIPATE[opt] || PARTICIPATE.object_recruit_joint; return [{ n: d[2], p: d[1] }, { n: 'Владелец объекта / агент', p: 50 }, { n: 'Платформа', p: 100 - d[1] - 50 }]; }
-  if (axis === 'transfer') {
-    if (role === 'mentor') return [{ n: 'Наставник · полный цикл', p: 50 }, { n: 'Платформа', p: 50 }];
-    if (role === 'stream') { const share = lev === 70 ? 15 : 25; return [{ n: 'Передающий поток', p: share }, { n: 'Агент полного цикла', p: lev }, { n: 'Платформа', p: 100 - share - lev }]; }
-    const keeper = Math.min(5, Math.max(1, Math.floor(n / 100) || 1));
-    return [{ n: 'Хранитель потока', p: keeper }, { n: 'Платформа', p: 100 - keeper }];
-  }
-  if (axis === 'create') {
-    if (role === 'test') return [{ n: 'Инициатор теста', p: 50 }, { n: 'Платформа', p: 50 }];
-    const creator = lev === 70 ? 15 : 25;
-    return [{ n: 'Создатель направления', p: creator }, { n: 'Агент полного цикла', p: lev }, { n: 'Платформа', p: 100 - creator - lev }];
-  }
-  return [{ n: 'Внешний агент', p: 50 }, { n: 'Внутренний куратор', p: 25 }, { n: 'Платформа', p: 25 }];
-}
+const moleculeRows = (axis: Axis, n: number, opt: string, role: string, lev: number): Row[] =>
+  dealRows({ axis, n, opt, role, lev }, levelFor(n)).map((r) => ({ n: r.role, p: r.pct }));
 
 function Dist({ rows, base, title }: { rows: Row[]; base: number; title: string }) {
   const total = rows.reduce((s, r) => s + r.p, 0);
