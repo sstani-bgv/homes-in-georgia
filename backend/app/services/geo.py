@@ -19,7 +19,7 @@ _PIN = re.compile(r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)")
 _AT = re.compile(r"(?:@|[?&](?:q|query|ll|center|destination)=|^)\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})")
 _SHORT = ("maps.app.goo.gl", "goo.gl")
 # Nominatim's English district names -> the CRM's district list (frontend DISTRICTS)
-_DISTRICT = {"vake": "Ваке", "saburtalo": "Сабуртало", "bagebi": "Ваке-Багеби", "mtatsminda": "Мтацминда", "vere": "Вере",
+_DISTRICT = {"bagebi": "Ваке-Багеби", "vake": "Ваке", "saburtalo": "Сабуртало", "mtatsminda": "Мтацминда", "vere": "Вере",
              "ortachala": "Ортачала", "didube": "Дидубе", "chughureti": "Чугурети", "isani": "Исани", "samgori": "Самгори",
              "gldani": "Глдани", "nadzaladevi": "Надзаладеви", "krtsanisi": "Крцаниси", "dighomi": "Дигоми",
              "digomi": "Дигоми", "old tbilisi": "Старый город", "sololaki": "Старый город", "abanotubani": "Старый город"}
@@ -100,3 +100,16 @@ def search(q: str) -> dict:
         return {"items": [dict(h) for h in _nominatim(q)], "point": False}
     except (httpx.HTTPError, ValueError, KeyError):  # errors aren't cached (lru_cache skips raised calls)
         return {"items": [], "point": False, "error": True}
+
+
+def point_facts(lat: float, lng: float) -> dict:
+    """What a point fills in the card (Stanislav 11-11): the CRM district (OSM's suburb / city district there) and the
+    nearest metro within METRO_RADIUS_M (else none), with its distance."""
+    from app.services.properties import METRO_RADIUS_M, nearest_metro_m
+    try:
+        district = (_reverse(round(lat, 5), round(lng, 5)) or {}).get("district")  # ~1 m: a dragged marker reuses the cache
+    except (httpx.HTTPError, ValueError, KeyError):
+        district = None
+    m, tag = nearest_metro_m(lat, lng)
+    near = m <= METRO_RADIUS_M
+    return {"district": district, "metro": tag if near else None, "metro_m": round(m) if near else None}

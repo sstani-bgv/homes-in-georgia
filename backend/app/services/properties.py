@@ -1111,10 +1111,15 @@ def _int(v) -> int | None:
         return None
 
 
+def nearest_metro_m(lat: float, lng: float) -> tuple[float, str]:
+    """(metres, POST_ONE metro tag) of the closest station, any distance."""
+    return min((111_000 * math.hypot(lat - a, (lng - b) * 0.75), t) for t, (a, b) in METRO.items())
+
+
 def nearest_metro(lat: float | None, lng: float | None) -> str | None:
     if lat is None or lng is None:
         return None
-    d, tag = min((111_000 * math.hypot(lat - a, (lng - b) * 0.75), t) for t, (a, b) in METRO.items())
+    d, tag = nearest_metro_m(lat, lng)
     return tag if d <= METRO_RADIUS_M else None
 
 

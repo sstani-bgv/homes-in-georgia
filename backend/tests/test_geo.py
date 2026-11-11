@@ -72,3 +72,30 @@ def test_point_saved_on_object_and_used_by_post(client, db):
     assert properties.maps_url(db, p) == "https://maps.google.com/?q=41.71,44.76"
     r = client.patch(f"/api/properties/{p.id}", json={"lat": None, "lng": None}, headers=auth(ag)).json()
     assert r["lat"] is None
+
+
+def test_point_facts_district_and_metro(client, db, monkeypatch):
+    rev = {"Vake District": {"city_district": "Vake District", "suburb": "Vake"},
+           "Bagebi": {"city_district": "Vake District", "suburb": "Bagebi"},
+           "Saburtalo": {"city_district": "Saburtalo District", "suburb": "Nutsubidze Plateau"},
+           "Old": {"city_district": "Mtatsminda District", "suburb": "Sololaki"}}
+    pick = []
+
+    def fake_get(url, params=None, **kw):
+        return httpx.Response(200, json={"display_name": "x", "lat": params["lat"], "lon": params["lon"], "address": rev[pick[-1]]},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(geo.httpx, "get", fake_get)
+    monkeypatch.setattr(geo.time, "sleep", lambda s: None)
+    geo._reverse.cache_clear()
+    ag = make_user(db, "agent")
+    for name, (lat, lng), district, metro in [
+            ("Old", (41.7036, 44.7900), "Старый город", "Rustaveli"),  # next to Rustaveli station
+            ("Bagebi", (41.7120, 44.7320), "Ваке-Багеби", "VazhaPshavela"),  # ~1.3 km from Vazha-Pshavela
+            ("Vake District", (41.7090, 44.7550), "Ваке", None),  # Vake Park: no station within 1.5 km
+            ("Saburtalo", (41.7240, 44.7310), "Сабуртало", "VazhaPshavela")]:
+        pick.append(name)
+        r = client.get("/api/geo/point", params={"lat": lat, "lng": lng}, headers=auth(ag)).json()
+        assert (r["district"], r["metro"]) == (district, metro), name
+        assert (r["metro_m"] is None) == (metro is None) and (r["metro_m"] or 0) <= 1500
+    assert client.get("/api/geo/point?lat=10&lng=10", headers=auth(ag)).status_code == 422

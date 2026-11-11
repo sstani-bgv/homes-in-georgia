@@ -207,6 +207,12 @@ def geo_search(q: str = Query("", max_length=500), user: User = Depends(current_
     return geo.search(q)
 
 
+@router.get("/geo/point")
+def geo_point(lat: float = Query(..., ge=40, le=44), lng: float = Query(..., ge=39, le=47), user: User = Depends(current_user)):
+    """District + nearest metro (≤1.5 km, with metres) for the address field's point; the agent can still change both."""
+    return geo.point_facts(lat, lng)
+
+
 @router.get("/properties/{pid}")
 def properties_get(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return P.out(db, get_or_404(db, Property, pid, "property"), user, full=True)

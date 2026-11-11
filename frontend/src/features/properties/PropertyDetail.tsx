@@ -235,6 +235,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const { toast, set, qc } = useProp(p.id);
   const [f, setF] = useState<GenForm>(() => genOf(p));
   const saved = useRef<GenForm>(f);
+  const [metroM, setMetroM] = useState<number | null>(null);  // the auto-picked station's distance, shown by the select
   const fileRef = useRef<HTMLInputElement>(null);
   const media = p.media || [];
   const checklist = p.checklist || {};
@@ -291,10 +292,11 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <Switch checked={f.is_exclusive} onChange={(v) => upd('is_exclusive', v)} label="❗️ Exclusive listing" />
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
           <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
-          <Field label="🚇 Метро"><Select value={pf.metro || ''} placeholder="—" onChange={(e) => setPf('metro', e.target.value)} options={opts(one('metro'))} /></Field>
+          <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${metroM} м от точки на карте` : undefined}>
+            <Select value={pf.metro || ''} placeholder="—" onChange={(e) => { setMetroM(null); setPf('metro', e.target.value); }} options={opts(one('metro'))} /></Field>
           <div className="field"><span className="label">Адрес</span>
             <AddressField value={f.address} onChange={(v) => upd('address', v)} point={f.point} onPoint={(v) => upd('point', v)} disabled={ro}
-              onDistrict={(d) => setF((x) => (x.district ? x : { ...x, district: d }))} /></div>
+              onFacts={(r) => { setMetroM(r.metro_m); setF((x) => ({ ...x, district: r.district || x.district, post_fields: { ...x.post_fields, metro: r.metro || undefined } })); }} /></div>
         </div>
 
         <div className="gen-block">
@@ -897,6 +899,7 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
 
 // the old generator's tag groups (backend services/properties.py POST_ONE / POST_MANY), stored without '#'
 const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label]) => ({ value, label }));
+export const metroLabel = (tag?: string | null) => (tag ? POST_ONE.metro[1][tag] || tag : '');
 const POST_ONE: Record<string, [string, Record<string, string>]> = {
   prop_type: ['Тип', { Apartment: 'Квартира', House: 'Дом', Commercial: 'Коммерция', Duplex: 'Дуплекс', Townhouse: 'Таунхаус', Land: 'Земля', Retail: 'Ритейл', Business: 'Бизнес', Cafe: 'Кафе', Restaurant: 'Ресторан', BeautySalon: 'Салон красоты', Warehouses: 'Склад', Manufacture: 'Производство' }],
   metro: ['Метро', { LibertySquare: 'Площадь Свободы', Rustaveli: 'Руставели', Marjanishvili: 'Марджанишвили', StationSquare: 'Вокзальная площадь', Tsereteli: 'Церетели', Gotsiridze: 'Гоциридзе', Nadzaladevi: 'Надзаладеви', Didube: 'Дидубе', Grmagele: 'Грмагеле', Guramishvili: 'Гурамишвили', Sarajishvili: 'Сараджишвили', AhmeteliTheatre: 'Театр Ахметели', STUniversity: 'Техуниверситет', VazhaPshavela: 'Важа-Пшавела', Delisi: 'Делиси', TCUniversity: 'Госуниверситет', MCUniversity: 'Медуниверситет', AvlabariMetro: 'Авлабари', IsaniMetro: 'Исани', '300Aragveli': '300 Арагвели', SamgoriMetro: 'Самгори', Varketili: 'Варкетили' }],

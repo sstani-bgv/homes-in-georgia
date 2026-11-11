@@ -5,13 +5,13 @@ import { ArrowLeft, Plus } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { AddressField, type Point } from '../components/AddressField';
+import { AddressField, type Point, type PointFacts } from '../components/AddressField';
 import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Select, Tabs } from '../components/ui';
 import { ArchivedLeads, LeadBoard, MyLeadsList } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
-import { PropertyDetail } from '../features/properties/PropertyDetail';
+import { metroLabel, PropertyDetail } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
 import { DISTRICTS, phoneInput } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
@@ -21,13 +21,13 @@ type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archiv
 /** «Объект вручную»: the owner came to the office himself. His contact makes the object «Собственник» at once (no call
  * step); the card then opens the post generator, where the agent fills everything (address, price, photos...). */
 function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const empty = { owner_name: '', owner_phone: '', address: '', district: '', point: null as Point | null };
+  const empty = { owner_name: '', owner_phone: '', address: '', district: '', point: null as Point | null, facts: null as PointFacts | null };
   const [f, setF] = useState(empty);
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
   const m = useMutation({
-    mutationFn: () => api.properties.create({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, source_type: 'direct', owner_name: f.owner_name, owner_phone: f.owner_phone }),
+    mutationFn: () => api.properties.create({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, ...(f.facts?.metro ? { post_fields: { metro: f.facts.metro } } : {}), source_type: 'direct', owner_name: f.owner_name, owner_phone: f.owner_phone }),
     onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`/objects/${p.id}`); },
     onError: (e) => toast(errText(e), true),
   });
@@ -39,7 +39,8 @@ function ManualProperty({ open, onClose }: { open: boolean; onClose: () => void 
         <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XX XX XX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: phoneInput(e) })} /></Field>
         <div className="field span2"><span className="label">Адрес (можно позже)</span>
           <AddressField value={f.address} onChange={(address) => setF((x) => ({ ...x, address }))} point={f.point} onPoint={(point) => setF((x) => ({ ...x, point }))}
-            onDistrict={(d) => setF((x) => (x.district ? x : { ...x, district: d }))} /></div>
+            onFacts={(facts) => setF((x) => ({ ...x, facts, district: facts.district || x.district }))} />
+          {f.facts && <span className="faint" style={{ fontSize: 13 }}>🚇 {f.facts.metro ? `${metroLabel(f.facts.metro)} · ≈ ${f.facts.metro_m} м` : 'метро дальше 1,5 км'}</span>}</div>
         <Field label="Район"><Select value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })} placeholder="—" options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
       </div>
       <Button className="mt-lg" disabled={!f.owner_name.trim() || !f.owner_phone.trim()} loading={m.isPending} onClick={() => m.mutate()}>Создать и заполнить пост</Button>

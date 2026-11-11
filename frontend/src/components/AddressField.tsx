@@ -11,6 +11,8 @@ import type { GeoHit } from '../api/types';
 import { Input } from './ui';
 
 export type Point = { lat: number; lng: number };
+/** GET /geo/point: what a point fills in — the CRM district and the nearest metro tag within 1.5 km (+ metres) */
+export type PointFacts = { district: string | null; metro: string | null; metro_m: number | null };
 const TBILISI: L.LatLngTuple = [41.7151, 44.8271];
 const PIN = L.divIcon({ className: 'addr-pin', html: '📍', iconSize: [28, 28], iconAnchor: [14, 26] });
 const isLinkOrPoint = (s: string) => /^\s*(https?:\/\/|-?\d{1,2}\.\d+\s*,)/.test(s);
@@ -45,9 +47,10 @@ function PointMap({ point, onPoint, disabled }: { point: Point | null; onPoint: 
   return <div ref={box} className="addr-map" />;
 }
 
-export function AddressField({ value, onChange, point, onPoint, onDistrict, disabled }: {
+export function AddressField({ value, onChange, point, onPoint, onFacts, disabled }: {
   value: string; onChange: (v: string) => void; point: Point | null; onPoint: (p: Point | null) => void;
-  onDistrict?: (d: string) => void; disabled?: boolean;
+  /** after the agent picks / pastes / moves the point: fill district and metro (he can still change them) */
+  onFacts?: (f: PointFacts) => void; disabled?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -59,10 +62,15 @@ export function AddressField({ value, onChange, point, onPoint, onDistrict, disa
   }, [value]);
   const { data, isFetching } = useQuery({ queryKey: ['geo', q], queryFn: () => api.geo.search(q), enabled: q.length >= 3 && !disabled, staleTime: Infinity });
   const items = data?.items || [];
+  const asked = useRef(0);  // only the latest point's answer counts (a marker dragged twice)
+  const setPoint = (p: Point) => {
+    onPoint(p);
+    const n = ++asked.current;
+    if (onFacts) api.geo.point(p).then((f) => { if (n === asked.current) onFacts(f); }).catch(() => undefined);
+  };
   const pick = (h: GeoHit, keepText = false) => {
-    onPoint({ lat: h.lat, lng: h.lng });
+    setPoint({ lat: h.lat, lng: h.lng });
     if (!keepText) { picked.current = h.label; onChange(h.label); }
-    if (h.district) onDistrict?.(h.district);
     setOpen(false);
     setManual(false);
   };
@@ -92,7 +100,7 @@ export function AddressField({ value, onChange, point, onPoint, onDistrict, disa
       {point ? <span className="addr-state ok"><MapPin size={14} />Точка найдена — проверьте на карте, маркер можно перетащить</span>
         : notFound ? <span className="addr-state warn">{data?.error ? 'Поиск адресов сейчас недоступен' : 'Не нашли'} — уточните адрес или поставьте точку на карте</span>
           : manual ? <span className="addr-state">Нажмите на карте, где объект</span> : null}
-      {showMap && <PointMap point={point} onPoint={onPoint} disabled={disabled} />}
+      {showMap && <PointMap point={point} onPoint={setPoint} disabled={disabled} />}
     </div>
   );
 }
