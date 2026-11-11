@@ -15,6 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 COPY backend/requirements.txt backend/requirements.txt
 COPY bot/requirements.txt bot/requirements.txt
 RUN pip install -r backend/requirements.txt -r bot/requirements.txt
+# search_mode=hybrid + similar objects: SigLIP embeddings (CPU torch, ~1 GB). --build-arg WITH_EMBED=0 skips them.
+ARG WITH_EMBED=1
+COPY bot/requirements-embed.txt bot/requirements-embed.txt
+RUN if [ "$WITH_EMBED" = 1 ]; then pip install --extra-index-url https://download.pytorch.org/whl/cpu -r bot/requirements-embed.txt; fi
+# the model (~800 MB) downloads once into the botdata volume, shared by all containers
+ENV HF_HOME=/app/bot/data/hf
 COPY backend/ backend/
 COPY bot/ bot/
 COPY --from=web /web/dist frontend/dist
