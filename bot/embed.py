@@ -57,13 +57,29 @@ def _small(p):
 def encode_images(paths, batch=32):
     import torch
     from PIL import Image
+    try:  # HEIC originals from the old base (pillow-heif is a backend dependency)
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except ImportError:
+        pass
+
+    def opened(p):
+        try:
+            return Image.open(_small(p)).convert("RGB")
+        except Exception as e:  # a broken file must not kill the whole run
+            print(f"embed: skip unreadable {os.path.basename(p)}: {e}")
+
     m, pr, dev = _load()
     out = []
     for k in range(0, len(paths), batch):
-        ims = [Image.open(_small(p)).convert("RGB") for p in paths[k:k + batch]]
-        with _run, torch.no_grad():  # one model call at a time: the bot searches in several threads
-            f = m.get_image_features(**pr(images=ims, return_tensors="pt").to(dev))
-        out.append(getattr(f, "pooler_output", f).float().cpu().numpy())
+        ims = [opened(p) for p in paths[k:k + batch]]
+        ok = [i for i in ims if i is not None]
+        f = np.zeros((len(ims), m.config.vision_config.hidden_size), np.float32)  # unreadable -> zero row, order kept
+        if ok:
+            with _run, torch.no_grad():  # one model call at a time: the bot searches in several threads
+                v = m.get_image_features(**pr(images=ok, return_tensors="pt").to(dev))
+            f[[n for n, i in enumerate(ims) if i is not None]] = getattr(v, "pooler_output", v).float().cpu().numpy()
+        out.append(f)
     return _norm(np.concatenate(out)) if out else np.zeros((0, 1), np.float32)
 
 
