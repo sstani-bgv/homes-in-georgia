@@ -322,6 +322,13 @@ async def public_exclusive_sign(token: str, request: Request, file: UploadFile =
     return P.sign_view(db, token)
 
 
+@router.put("/properties/{pid}/media/order")
+def properties_media_order(pid: int, body: dict, db: Session = Depends(get_db, scope="function"),
+                           user: User = Depends(current_user)):
+    P.reorder_media(db, pid, body.get("ids") or [], user)
+    return P.out(db, get_or_404(db, Property, pid), user, full=True)
+
+
 @router.patch("/properties/{pid}/media/{mid}")
 def properties_media_room(pid: int, mid: int, body: dict, db: Session = Depends(get_db, scope="function"),
                           user: User = Depends(current_user)):

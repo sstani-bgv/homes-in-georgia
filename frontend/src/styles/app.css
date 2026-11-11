@@ -579,3 +579,9 @@ html, body { overflow-x: clip; }
 .addr-state { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
 .addr-state.ok { color: var(--ok); }
 .addr-state.warn { color: var(--warn); }
+.upload-queue progress { width: 100%; height: 6px; accent-color: var(--brand); }
+.upload-queue .uq { flex-direction: column; gap: 4px; }
+.photo-strip .ph.dragging { opacity: .4; }
+.photo-strip .ph .move { position: absolute; left: 4px; top: 4px; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255,255,255,.92); font-size: 12px; font-weight: 700; color: var(--brand); }
+.photo-strip .ph .move button { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 0; border-radius: 999px; background: none; color: var(--brand); cursor: pointer; }
+.photo-strip .ph .move button:disabled { opacity: .3; cursor: default; }

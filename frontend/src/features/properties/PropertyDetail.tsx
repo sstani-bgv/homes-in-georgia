@@ -280,8 +280,9 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const nPhoto = media.filter((m) => m.kind === 'photo').length;
   const nVideo = media.filter((m) => m.kind === 'video').length;
   const full = nPhoto >= MAX_PHOTO && nVideo >= MAX_VIDEO;
-  const [queue, setQueue] = useState<{ name: string; state: 'wait' | 'up' | 'done' | 'err'; msg?: string }[]>([]);
-  const busy = queue.some((q) => q.state === 'wait' || q.state === 'up');
+  const [queue, setQueue] = useState<{ name: string; state: 'wait' | 'prep' | 'up' | 'done' | 'err'; pct?: number; msg?: string }[]>([]);
+  const busy = queue.some((q) => q.state === 'wait' || q.state === 'prep' || q.state === 'up');
+  const doneN = queue.filter((q) => q.state === 'done').length;
   /** The ones that fit 9 photos + 1 video go up 3 at a time, photos resized first; one request per file. */
   const uploadFiles = async (picked: File[]) => {
     let ph = nPhoto, vd = nVideo;
@@ -290,18 +291,23 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
     if (fit.length < picked.length) toast(`Не добавлено ${picked.length - fit.length}: у объекта максимум ${MAX_PHOTO} фото и ${MAX_VIDEO} видео (столько уходит в пост Telegram)`, true);
     if (!fit.length) return;
     setQueue(fit.map((x) => ({ name: x.name, state: 'wait' })));
-    const mark = (i: number, state: 'up' | 'done' | 'err', msg?: string) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, state, msg } : x)));
+    const mark = (i: number, ch: Partial<(typeof queue)[number]>) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, ...ch } : x)));
     let failed = 0;
     await pool(fit, 3, async (x, i) => {
-      mark(i, 'up');
-      try { set(await api.properties.uploadMedia(p.id, [await shrinkPhoto(x)])); mark(i, 'done'); }
-      catch (e) { failed++; mark(i, 'err', errText(e)); }
+      mark(i, { state: 'prep' });
+      try {
+        const small = await shrinkPhoto(x);
+        mark(i, { state: 'up', pct: 0 });
+        set(await api.properties.uploadMediaProgress(p.id, small, (f) => mark(i, { pct: Math.round(f * 100) })));
+        mark(i, { state: 'done', pct: 100 });
+      } catch (e) { failed++; mark(i, { state: 'err', msg: errText(e) }); }
     });
     refresh();
     if (!failed) { toast(fit.length > 1 ? `Загружено файлов: ${fit.length}` : 'Файл загружен'); setQueue([]); }
   };
   const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
   const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: refresh });
+  const order = useMutation({ mutationFn: (ids: number[]) => api.properties.mediaOrder(p.id, ids), onSuccess: set, onError: (e) => { toast(errText(e), true); refresh(); } });
   const room = useMutation({ mutationFn: ([mid, r]: [number, string | null]) => api.properties.mediaRoom(p.id, mid, r), onSuccess: refresh, onError: (e) => toast(errText(e), true) });
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
   const submit = useMutation({ mutationFn: async () => { await flush(); return api.properties.submit(p.id); }, onSuccess: (r) => { set(r); toast('Отправлено на модерацию'); }, onError: (e) => toast(errText(e), true) });
@@ -416,10 +422,15 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
             </div>
             {queue.length > 0 && (
               <div className="upload-queue">
+                <div className="row row-between"><b>Загружено {doneN} из {queue.length}</b>{busy && <span className="muted">не закрывайте страницу</span>}</div>
+                <progress className="uq-total" max={queue.length} value={doneN} />
                 {queue.map((q, i) => (
                   <div key={i} className={`uq uq-${q.state}`}>
-                    <span className="uq-name">{q.name}</span>
-                    <span className="uq-state">{q.state === 'wait' ? 'в очереди' : q.state === 'up' ? 'загружается…' : q.state === 'done' ? 'готово' : q.msg || 'ошибка'}</span>
+                    <div className="row row-between gap-sm">
+                      <span className="uq-name">{q.name}</span>
+                      <span className="uq-state">{q.state === 'wait' ? 'в очереди' : q.state === 'prep' ? 'сжимаем…' : q.state === 'up' ? `${q.pct ?? 0}%` : q.state === 'done' ? 'готово' : q.msg || 'ошибка'}</span>
+                    </div>
+                    {(q.state === 'up' || q.state === 'done') && <progress max={100} value={q.pct ?? 0} />}
                   </div>
                 ))}
                 {!busy && <Button size="sm" variant="ghost" onClick={() => setQueue([])}>Скрыть</Button>}
@@ -427,7 +438,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
             )}
           </>
         )}
-        <MediaGrid p={p} grouped onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit && roomsOn ? (id, r) => room.mutate([id, r]) : undefined} />
+        <MediaGrid p={p} grouped onOrder={canEdit ? (ids) => order.mutate(ids) : undefined} onDelete={canEdit ? (id) => del.mutate(id) : undefined} onRoom={canEdit && roomsOn ? (id, r) => room.mutate([id, r]) : undefined} />
         {roomsOn && <>
           <div className="row row-between"><span className="label">Что снято · необязательно</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
           <div className="row row-wrap gap-sm">
@@ -489,14 +500,35 @@ function Lightbox({ items, index, onIndex, onClose }: { items: Shot[]; index: nu
   );
 }
 
-function MediaGrid({ p, items, grouped, onDelete, onRoom }: { p?: Property; items?: Shot[]; grouped?: boolean; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void }) {
+function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder }: { p?: Property; items?: Shot[]; grouped?: boolean; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void; onOrder?: (ids: number[]) => void }) {
   const all = items || (p ? shotsOf(p) : []);
-  // photos first, then videos: the lightbox walks them in that order
-  const media = [...all.filter((m) => m.kind !== 'video'), ...all.filter((m) => m.kind === 'video')];
+  // photos first, then videos: the lightbox walks them in that order, and a saved order is this one (the album's)
+  const [local, setLocal] = useState<Shot[] | null>(null); // the order just set, until the server's comes back
+  useEffect(() => setLocal(null), [p?.media]);
+  const media = local || [...all.filter((m) => m.kind !== 'video'), ...all.filter((m) => m.kind === 'video')];
   const [open, setOpen] = useState<number | null>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  /** move tile `from` to `to`, within its own group (photos / videos) */
+  const move = (from: number, to: number) => {
+    if (!onOrder || to < 0 || to >= media.length || from === to || media[from].kind !== media[to].kind) return;
+    const next = [...media];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    setLocal(next);
+    onOrder(next.map((m) => Number(m.id)));
+  };
   if (!media.length) return <div className="muted" style={{ fontSize: 13 }}>Файлов пока нет</div>;
   const tile = (m: Shot, i: number) => (
-    <div className="ph" key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}>
+    <div className={`ph ${drag === i ? 'dragging' : ''}`} key={m.id} onClick={() => setOpen(i)} style={{ cursor: 'zoom-in' }}
+      draggable={!!onOrder} onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDrag(null)}
+      onDragOver={(e) => { if (drag !== null && media[drag].kind === m.kind) e.preventDefault(); }}
+      onDrop={(e) => { e.preventDefault(); if (drag !== null) move(drag, i); setDrag(null); }}>
+      {onOrder && (
+        <span className="move" onClick={(e) => e.stopPropagation()}>
+          <button type="button" aria-label="Раньше" disabled={i === 0 || media[i - 1].kind !== m.kind} onClick={() => move(i, i - 1)}><ChevronLeft size={14} /></button>
+          <span className="num">{i - (m.kind === 'video' ? media.findIndex((x) => x.kind === 'video') : 0) + 1}</span>
+          <button type="button" aria-label="Позже" disabled={i === media.length - 1 || media[i + 1].kind !== m.kind} onClick={() => move(i, i + 1)}><ChevronRight size={14} /></button>
+        </span>
+      )}
       {m.kind === 'video' ? <>
         <video src={`${mediaUrl(m.src)}#t=0.1`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         <span className="video-badge"><Play size={12} fill="currentColor" />Видео</span>

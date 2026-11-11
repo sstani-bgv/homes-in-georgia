@@ -1,5 +1,5 @@
 // Typed API functions, straight from docs/ARCHITECTURE.md §7.
-import { http } from './client';
+import { http, uploadWithProgress } from './client';
 import {
   normAgentStat, normAuth, normBoard, normCabinet, normClient, normCounter, normDashboard, normEvent, normLead, normListing, normPage,
   normProperty, normRecommend, normReport,
@@ -77,6 +77,12 @@ export const api = {
       fd.append('file', file);
       return http.post<Property>(`/properties/${id}/exclusive-contract`, fd);
     },
+    uploadMediaProgress: (id: number, file: File, onProgress: (f: number) => void) => {
+      const fd = new FormData();
+      fd.append('files', file);
+      return uploadWithProgress<Property>(`/properties/${id}/media`, fd, onProgress);
+    },
+    mediaOrder: (id: number, ids: number[]) => http.put<Property>(`/properties/${id}/media/order`, { ids }),
     deleteMedia: (id: number, mid: number) => http.del<unknown>(`/properties/${id}/media/${mid}`),
     mediaRoom: (id: number, mid: number, room: string | null) => http.patch<{ id: number; room: string | null }>(`/properties/${id}/media/${mid}`, { room }),
     checklist: (id: number, checklist: Record<string, boolean>) => http.post<Property>(`/properties/${id}/checklist`, { checklist }),

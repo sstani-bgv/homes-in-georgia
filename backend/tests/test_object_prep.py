@@ -86,3 +86,21 @@ def test_rooms_optional_and_switchable(db):
     assert properties.out(db, p, ag, full=True)["room_picker"] is True
     settings.set(db, "room_picker", "0")
     assert properties.out(db, p, ag, full=True)["room_picker"] is False
+
+
+def test_media_order_saved_and_rooms_photo_only(db, client):
+    ag, p = _object(db, "ss904")
+    properties.upload_media(db, p.id, [("a.jpg", b"\xff\xd8x"), ("b.jpg", b"\xff\xd8x")], "Кухня", ag)
+    properties.upload_media(db, p.id, [("v.mp4", b"\0v")], "Кухня", ag)
+    a, b, v = properties.media(db, p.id)
+    assert (a.room, v.room) == ("Кухня", None)  # a video never gets a room
+    assert properties.set_media_room(db, p.id, v.id, "Спальня 1", ag).room is None
+    r = client.put(f"/api/properties/{p.id}/media/order", headers=auth(ag), json={"ids": [v.id, b.id, a.id]})
+    assert r.status_code == 200, r.text
+    assert [m["id"] for m in r.json()["media"]] == [v.id, b.id, a.id]
+    db.expire_all()
+    assert [m.id for m in properties.media(db, p.id)] == [v.id, b.id, a.id]  # the album (notify.media_paths) reads position
+    r = client.put(f"/api/properties/{p.id}/media/order", headers=auth(ag), json={"ids": [a.id, b.id]})
+    assert r.status_code == 409 and r.json()["code"] == "bad_order"
+    other = make_user(db, "agent")
+    assert client.put(f"/api/properties/{p.id}/media/order", headers=auth(other), json={"ids": [a.id, b.id, v.id]}).status_code == 403

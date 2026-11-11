@@ -811,8 +811,9 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
         storage.put(key, content)
         storage.put_preview(key, content)
         pos += 1
-        m = PropertyMedia(property_id=p.id, kind="video" if ext in VIDEO_EXT else "photo",
-                          path=key, room=room, position=pos, uploaded_by=actor.id)
+        kind = "video" if ext in VIDEO_EXT else "photo"
+        m = PropertyMedia(property_id=p.id, kind=kind, path=key, room=room if kind == "photo" else None,  # rooms: photos only
+                          position=pos, uploaded_by=actor.id)
         db.add(m)
         out.append(m)
     if p.status in ("owner_confirmed", "shoot_scheduled", "returned"):
@@ -913,9 +914,26 @@ def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: Use
     m = db.get(PropertyMedia, mid)
     if not m or m.property_id != p.id:
         raise DomainError("not_found", "media not found")
-    m.room = (room or "").strip() or None
+    m.room = ((room or "").strip() or None) if m.kind == "photo" else None  # a video has no room
     db.commit()
     return m
+
+
+def reorder_media(db: Session, pid: int, ids: list[int], actor: User) -> None:
+    """The agent's order of the photos/videos (drag-and-drop / arrows): position = index; the post album follows it."""
+    p = _prop(db, pid, lock=True)
+    _require_media_editable(p, actor)
+    rows = {m.id: m for m in media(db, p.id)}
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        ids = []
+    if sorted(ids) != sorted(rows):
+        raise DomainError("bad_order", "Порядок файлов устарел — обновите страницу", 409)
+    for i, mid in enumerate(ids):
+        rows[mid].position = i
+    log_event(db, "property", p.id, "media_reordered", actor, ids=ids)
+    db.commit()
 
 
 def delete_media(db: Session, pid: int, mid: int, actor: User) -> None:
