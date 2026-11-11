@@ -24,8 +24,8 @@ from app.telegram.client import cb, kb
 
 log = logging.getLogger(__name__)
 e = html.escape
-STAFF = ("operator", "admin", "superadmin")
-FIELD = ("agent", "recruit")
+STAFF = ("operator", "admin", "superadmin", "superagent")
+FIELD = ("agent", "recruit", "superagent")
 
 
 # ---------- services (sync, in a thread: one session per call) ----------

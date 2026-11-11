@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import type { Role } from './api/types';
+import { ADMIN_ROLES, STAFF_ROLES } from './api/types';
 import { useAuth } from './auth/AuthContext';
 import { Empty, Loading } from './components/ui';
 import { AppLayout } from './layout/AppLayout';
@@ -53,7 +54,7 @@ function NotFound() {
   );
 }
 
-const STAFF: Role[] = ['superadmin', 'admin', 'operator'];
+const STAFF = STAFF_ROLES;
 
 export function App() {
   return (
@@ -97,7 +98,7 @@ export function App() {
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="admin" element={<RequireAuth roles={['superadmin', 'admin']}><AdminPage /></RequireAuth>} />
+        <Route path="admin" element={<RequireAuth roles={ADMIN_ROLES}><AdminPage /></RequireAuth>} />
         <Route path="me" element={<CabinetPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>

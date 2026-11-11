@@ -53,7 +53,7 @@ export function ReportForm({ kind, onDone }: { kind: ReportKind; onDone?: () => 
   const counters = useQuery({ queryKey: ['counters', 'now'], queryFn: () => api.reports.counters(), enabled: !!def.counter });
   const all = itemsOf(users.data);
   const recruits = all.filter((u) => u.role === 'recruit');
-  const mentors = all.filter((u) => ['agent', 'superadmin', 'admin'].includes(u.role));
+  const mentors = all.filter((u) => ['agent', 'superagent', 'superadmin', 'admin'].includes(u.role));
   const initial = useMemo(() => {
     const v: Record<string, string> = {};
     def.fields.forEach((f) => { if (f.type === 'date') v[f.k] = todayStr(); });

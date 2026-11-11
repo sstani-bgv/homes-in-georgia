@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import FIELD, ROLES, STAFF, User
+from app.models import ADMINS, FIELD, ROLES, STAFF, SUPER, User
 from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
@@ -119,7 +119,7 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
     data = dict(data)
     pw = data.pop("password", None)
     _check(data)
-    if actor is not None and actor.role != "superadmin" and data.get("role") in ("superadmin", "admin"):
+    if actor is not None and actor.role not in SUPER and data.get("role") in ADMINS:
         raise DomainError("forbidden", "only a superadmin can create admins")
     if not data.get("name"):
         raise DomainError("name_required", "name is required")
@@ -148,9 +148,9 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None) -> User
     _check(data)
     if actor is not None and actor.role not in STAFF and "level" in data and data["level"] != u.level:
         raise DomainError("forbidden", "only an admin or operator changes an agent's level")
-    if actor is not None and actor.role != "superadmin" and (
-            u.role in ("superadmin", "admin") and u.id != actor.id
-            or data.get("role") in ("superadmin", "admin") and data.get("role") != u.role):
+    if actor is not None and actor.role not in SUPER and (
+            u.role in ADMINS and u.id != actor.id
+            or data.get("role") in ADMINS and data.get("role") != u.role):
         raise DomainError("forbidden", "only a superadmin can change admins")
     if data.get("tg_id"):
         other = by_tg(db, data["tg_id"])
@@ -202,7 +202,7 @@ def field_users(db: Session) -> list[User]:
 def ensure_bootstrap(db: Session) -> list[User]:
     """Create the bootstrap superadmin(s) from env if the platform has none."""
     created = []
-    if db.scalar(select(func.count()).select_from(User).where(User.role == "superadmin")):
+    if db.scalar(select(func.count()).select_from(User).where(User.role.in_(SUPER))):  # a superagent counts: never re-promote the owner
         return created
     tg_ids = settings.superadmin_tg_ids
     if settings.ADMIN_BOOTSTRAP_LOGIN and settings.ADMIN_BOOTSTRAP_PASSWORD:

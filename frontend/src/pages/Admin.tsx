@@ -4,17 +4,20 @@ import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Role, Settings, User } from '../api/types';
+import { ADMIN_ROLES, SUPER_ROLES } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
 import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneInput } from '../lib/format';
 import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
 
-const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit'];
+const ROLES: Role[] = ['superadmin', 'superagent', 'admin', 'operator', 'agent', 'recruit'];
 
 function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: only a superadmin/superagent grants admin roles
   const [f, setF] = useState<Partial<User> & { password?: string }>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
   const set = <K extends keyof User>(k: K, v: User[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = useMutation({
@@ -35,7 +38,7 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
     <div className="col gap-lg">
       <div className="form-grid">
         <Field label="Имя" className="span2"><Input value={f.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>
-        <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
         <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
@@ -47,7 +50,7 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
           </div>
         </Field>
         {f.role === 'recruit' ? (
-          <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent').map((u) => ({ value: u.id, label: u.name }))} /></Field>
+          <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.role === 'superagent').map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
         <Field label="Логин для входа"><Input value={f.login || ''} onChange={(e) => set('login', e.target.value)} autoComplete="off" /></Field>
         <Field label={user ? 'Новый пароль' : 'Пароль'}><Input type="password" value={f.password || ''} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></Field>
@@ -91,7 +94,7 @@ function Users() {
   const row = (u: User) => (
                 <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
                   <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
-                  <td><Badge tone={u.role === 'superadmin' || u.role === 'admin' ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
+                  <td><Badge tone={ADMIN_ROLES.includes(u.role) ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
                   <td className="num">{u.level ? `${u.level}%` : '—'}</td>
                   <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
                   <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>

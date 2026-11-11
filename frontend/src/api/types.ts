@@ -1,6 +1,13 @@
 // Types mirror docs/ARCHITECTURE.md §4 / §7. Optional fields are tolerant to backend variations.
 
-export type Role = 'superadmin' | 'admin' | 'operator' | 'agent' | 'recruit';
+export type Role = 'superadmin' | 'superagent' | 'admin' | 'operator' | 'agent' | 'recruit';
+/** superagent = superadmin permissions + a working agent (backend models/people.py: SUPER/ADMINS/STAFF and FIELD). */
+export const SUPER_ROLES: Role[] = ['superadmin', 'superagent'];
+export const ADMIN_ROLES: Role[] = [...SUPER_ROLES, 'admin'];
+export const STAFF_ROLES: Role[] = [...ADMIN_ROLES, 'operator'];
+export const FIELD_ROLES: Role[] = ['agent', 'recruit', 'superagent'];
+/** users.list role filter for agent pickers (deal form, reassignment, leaderboard filters). */
+export const FIELD_FILTER = FIELD_ROLES.join(',');
 
 export interface Page<T> { items: T[]; total: number }
 

@@ -6,6 +6,7 @@ import {
   Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { ADMIN_ROLES, STAFF_ROLES } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
@@ -14,7 +15,7 @@ import { Avatar, Badge, Drawer, Modal } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 
 interface NavItem { to: string; label: string; icon: LucideIcon; roles?: Role[] }
-const STAFF: Role[] = ['superadmin', 'admin', 'operator'];
+const STAFF = STAFF_ROLES;
 export const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/objects', label: 'Объекты', icon: Building2 },
@@ -25,7 +26,7 @@ export const NAV: NavItem[] = [
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
-  { to: '/admin', label: 'Управление', icon: Settings, roles: ['superadmin', 'admin'] },
+  { to: '/admin', label: 'Управление', icon: Settings, roles: ADMIN_ROLES },
   { to: '/me', label: 'Кабинет', icon: CircleUser },
 ];
 

@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings as env
-from app.models import (FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
+from app.models import (ADMINS, FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
 from app.services import catalog, jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import extract_phones
@@ -325,10 +325,10 @@ def assign_agent(db: Session, lead_id: int, agent_id: int, actor: User | None) -
     _require_status(lead, "new", "operator_taken", "agent_assigned")
     if actor is not None and actor.role not in STAFF:
         raise forbidden("only operators assign agents")
-    if actor is not None and lead.operator_id and lead.operator_id != actor.id and actor.role not in ("admin", "superadmin"):
+    if actor is not None and lead.operator_id and lead.operator_id != actor.id and actor.role not in ADMINS:
         raise DomainError("already_taken", "lead is led by another operator")
     agent = get_or_404(db, User, int(agent_id), "agent")
-    if agent.role not in FIELD + ("admin", "superadmin") or not agent.is_active:
+    if agent.role not in FIELD + ADMINS or not agent.is_active:
         raise DomainError("bad_agent", "user is not an active agent")
     took = actor is not None and lead.operator_id is None
     if took:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import User
+from app.models import ADMINS, STAFF, User
 from app.services.errors import DomainError
 
 ALG = "HS256"
@@ -50,9 +50,9 @@ def require_roles(*roles: str):
     return dep
 
 
-STAFF_ROLES = ("superadmin", "admin", "operator")
-ADMIN_ROLES = ("superadmin", "admin")
-AGENT_PLUS = ("superadmin", "admin", "operator", "agent")
+STAFF_ROLES = STAFF
+ADMIN_ROLES = ADMINS
+AGENT_PLUS = STAFF + ("agent",)
 
 
 def paginate(db: Session, stmt, mapper, limit: int = 50, offset: int = 0) -> dict:

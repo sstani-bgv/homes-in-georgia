@@ -5,6 +5,7 @@ import { BookOpen, CalendarClock, CalendarDays, FileText } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { PropertyStatus } from '../api/types';
+import { FIELD_FILTER } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PropertyStatusBadge } from '../components/domain';
 import { Avatar, Badge, Card, Drawer, Empty, ErrorBox, Loading, PageHead, Progress, Seg, Stat, Tabs } from '../components/ui';
@@ -222,7 +223,7 @@ export function CabinetPage() {
   const tab = (params.get('tab') as Tab) || 'overview';
   const picked = isStaff ? Number(params.get('user')) || undefined : undefined;
   const uid = picked ?? user?.id ?? 0;
-  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff });
+  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: FIELD_FILTER }), enabled: isStaff });
   const pick = isStaff && (
     <select className="select" style={{ width: 'auto' }} aria-label="Чей кабинет" value={picked ?? ''} onChange={(e) => set('user', e.target.value)}>
       <option value="">Мой кабинет</option>

@@ -4,10 +4,13 @@ from sqlalchemy.orm import relationship
 
 from app.db import Base
 
-ROLES = ("superadmin", "admin", "operator", "agent", "recruit")
-STAFF = ("superadmin", "admin", "operator")
-ADMINS = ("superadmin", "admin")
-FIELD = ("agent", "recruit")
+ROLES = ("superadmin", "superagent", "admin", "operator", "agent", "recruit")
+# superagent = superadmin permissions + a working agent (owner who also sells): in SUPER/ADMINS/STAFF AND in FIELD.
+# Restrictions are always "role not in STAFF", so the agent side never limits a superagent.
+SUPER = ("superadmin", "superagent")
+STAFF = SUPER + ("admin", "operator")
+ADMINS = SUPER + ("admin",)
+FIELD = ("agent", "recruit", "superagent")
 DEFAULT_PLANS = {"photo": 15, "showing": 15, "stickers": 15, "rental": 15}
 
 

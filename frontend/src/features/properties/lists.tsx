@@ -6,6 +6,7 @@ import { Archive, ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-rea
 import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
+import { FIELD_FILTER } from '../../api/types';
 import { dragBoardProps } from '../leads/LeadBoard';
 import { useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
@@ -413,7 +414,7 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
   const [page, setPage] = useState(0);
   const fixedAgent = agentId !== undefined;  // the cabinet: one agent's objects, no agent select
   // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
-  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: 'agent,recruit' }), enabled: isStaff && !mine && !fixedAgent });
+  const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: FIELD_FILTER }), enabled: isStaff && !mine && !fixedAgent });
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ['properties', 'list', scope, q, status, agentId ?? agent, page],
     queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agentId ?? (agent ? Number(agent) : undefined), status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),

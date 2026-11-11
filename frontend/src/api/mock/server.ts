@@ -2,6 +2,7 @@
 import { ApiError, getToken } from '../client';
 import { scenarioRows, type DistRow, type Scenario } from '../../lib/scenarios';
 import type { Deal, EventItem, Lead, LeadStatus, Property, PropertyStatus, Report, User } from '../types';
+import { STAFF_ROLES } from '../types';
 import * as F from './fixtures';
 
 const delay = (ms = 160) => new Promise((r) => setTimeout(r, ms));
@@ -17,7 +18,7 @@ function currentUser(): User {
   if (!u) throw new ApiError(401, 'Требуется вход');
   return u;
 }
-const isStaff = (u: User) => ['superadmin', 'admin', 'operator'].includes(u.role);
+const isStaff = (u: User) => STAFF_ROLES.includes(u.role);
 
 function levelFor(n: number) { return n < 11 ? 50 : n < 101 ? 70 : 90; }
 function nextLevelAt(n: number) { return n < 11 ? 11 : n < 101 ? 101 : null; }

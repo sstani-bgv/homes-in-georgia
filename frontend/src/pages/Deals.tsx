@@ -6,6 +6,7 @@ import { CheckCircle2, FileText, Plus, XCircle } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Deal } from '../api/types';
+import { FIELD_FILTER } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, KV, Loading, PageHead, Seg, Select, Stat, Switch, Tabs, Textarea } from '../components/ui';
@@ -118,7 +119,7 @@ export function DealsList({ onOpen, agentId }: { onOpen: (id: number) => void; a
   const [month, setMonth] = useState(agentId === undefined ? monthKey() : '');
   const [agent, setAgent] = useState('');
   const [status, setStatus] = useState('');
-  const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: isStaff });
+  const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: FIELD_FILTER, active: true }), enabled: isStaff });
   const { data, isLoading, error } = useQuery({ queryKey: ['deals', month, agentId ?? agent, status], queryFn: () => api.deals.list({ month, agent_id: agentId ?? (agent ? Number(agent) : undefined), status }) });
   const items = itemsOf(data);
   const nameOf = useUserNames();

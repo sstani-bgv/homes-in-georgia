@@ -225,7 +225,7 @@ def dashboard(db: Session, month: str | None = None) -> dict:
     open_leads = db.scalar(select(func.count()).select_from(Lead).where(Lead.status.not_in(("rented", "refused")))) or 0
     overdue = db.scalar(select(func.count()).select_from(Lead).where(Lead.sla_due_at < now())) or 0
     last = db.scalars(select(Deal).where(Deal.status.in_(LIVE)).order_by(Deal.created_at.desc()).limit(10))
-    names = dict(db.execute(select(User.id, User.name).where(User.role.in_(FIELD + ("admin", "superadmin", "operator")))).all())
+    names = dict(db.execute(select(User.id, User.name).where(User.role.in_(FIELD + STAFF))).all())
     return {
         "month": mo, "deals_month": deals_summary(db, mo), "deals_all": deals_summary(db),
         "active_objects": active_objects, "channel_active_listings": channel_active, "open_leads": open_leads,

@@ -8,6 +8,7 @@ import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronD
 import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
+import { FIELD_FILTER } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
@@ -972,7 +973,7 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState('');
   const [reason, setReason] = useState('');
-  const agents = useQuery({ queryKey: ['users', 'field'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: open });
+  const agents = useQuery({ queryKey: ['users', 'field'], queryFn: () => api.users.list({ role: FIELD_FILTER, active: true }), enabled: open });
   const m = useMutation({
     mutationFn: async () => { await (request ? api.properties.transferRequest(p.id, Number(to), reason) : api.owners.transfer(p.owner!.id, Number(to), reason)); },
     onSuccess: () => { ['property', 'property-history', 'property-post'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(request ? REQUEST_SENT : 'Собственник передан агенту'); setOpen(false); },

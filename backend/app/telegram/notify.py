@@ -64,7 +64,7 @@ def operators_targets():
         return [(chat, topic)]
     if store.setting("lead_target") == "group" and (gid := store.setting("group_chat_id")):
         return [(gid, None)]
-    return [(t, None) for t in store.staff_tg_ids(("operator", "admin", "superadmin"))]
+    return [(t, None) for t in store.staff_tg_ids(("operator", "admin", "superadmin", "superagent"))]
 
 
 def superadmins():

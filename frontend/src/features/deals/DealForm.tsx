@@ -6,6 +6,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../api';
 import { ApiError, itemsOf } from '../../api/client';
 import type { Deal, DealCalcIn } from '../../api/types';
+import { FIELD_FILTER } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
 import { PropertyStatusBadge } from '../../components/domain';
@@ -39,7 +40,7 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
   const { user, isStaff } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
-  const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: 'agent,recruit', active: true }), enabled: isStaff });
+  const agents = useQuery({ queryKey: ['users', 'agents'], queryFn: () => api.users.list({ role: FIELD_FILTER, active: true }), enabled: isStaff });
   const recruits = useQuery({ queryKey: ['users', 'recruits'], queryFn: () => api.users.list({ role: 'recruit', active: true }) });
   const lead = useQuery({ queryKey: ['lead', leadId], queryFn: () => api.leads.get(leadId!), enabled: !!leadId });
 
