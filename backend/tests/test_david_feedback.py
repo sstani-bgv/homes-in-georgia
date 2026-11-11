@@ -169,7 +169,8 @@ def test_take_prefills_the_generator_from_the_ad(db):
     from app.models import Listing
     assert properties.prefill(p, db.get(Listing, "mh77"))
     assert p.post_fields["pets"] == "Allowed" and p.post_fields["metro"] == "Rustaveli"
-    assert properties.nearest_metro(41.75, 44.87) is None  # 6 km from any station: no metro rather than a wrong one
+    assert properties.nearest_metro(41.75, 44.87) == "Nadzaladevi"  # 6 km: still the nearest station (Stanislav 11-11)
+    assert properties.nearest_metro(41.85, 44.95) is None  # 13 km, outside Tbilisi: no metro rather than a wrong one
 
 
 def test_published_object_discount_pause_resume(db):

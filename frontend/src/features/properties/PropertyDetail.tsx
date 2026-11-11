@@ -12,7 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea } from '../../components/ui';
-import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
+import { ARCHIVE_REASON, DISTRICTS, distLabel, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
@@ -335,7 +335,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           {f.is_exclusive && <div ref={exRef} className="outcome-card"><ExclusiveContract p={p} canEdit={canEdit} nested /></div>}
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
           <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
-          <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${metroM} м от точки на карте` : undefined}>
+          <Field label="🚇 Метро" hint={metroM != null && pf.metro ? `≈ ${distLabel(metroM)} от точки на карте` : undefined}>
             <Select value={pf.metro || ''} placeholder="—" onChange={(e) => { setMetroM(null); setPf('metro', e.target.value); }} options={opts(one('metro'))} /></Field>
           <div className="field"><span className="label">Адрес</span>
             <AddressField value={f.address} onChange={(v) => upd('address', v)} point={f.point} onPoint={(v) => upd('point', v)} disabled={ro}

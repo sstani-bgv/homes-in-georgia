@@ -13,7 +13,7 @@ import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
 import { metroLabel, PropertyDetail } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
-import { DISTRICTS, phoneInput } from '../lib/format';
+import { DISTRICTS, distLabel, phoneInput } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 
 type ObjTab = 'new' | 'board' | 'review' | 'requests' | 'mine' | 'all' | 'archive';
@@ -40,7 +40,7 @@ export function ManualProperty({ open, onClose, base = '' }: { open: boolean; on
         <div className="field span2"><span className="label">Адрес (можно позже)</span>
           <AddressField value={f.address} onChange={(address) => setF((x) => ({ ...x, address }))} point={f.point} onPoint={(point) => setF((x) => ({ ...x, point }))}
             onFacts={(facts) => setF((x) => ({ ...x, facts, district: facts.district || x.district }))} />
-          {f.facts && <span className="faint" style={{ fontSize: 13 }}>🚇 {f.facts.metro ? `${metroLabel(f.facts.metro)} · ≈ ${f.facts.metro_m} м` : 'метро дальше 1,5 км'}</span>}</div>
+          {f.facts && <span className="faint" style={{ fontSize: 13 }}>🚇 {f.facts.metro ? `${metroLabel(f.facts.metro)} · ≈ ${distLabel(f.facts.metro_m ?? 0)}` : 'метро не найдено (точка за городом)'}</span>}</div>
         <Field label="Район"><Select value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })} placeholder="—" options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
       </div>
       <Button className="mt-lg" disabled={!f.owner_name.trim() || !f.owner_phone.trim()} loading={m.isPending} onClick={() => m.mutate()}>Создать и заполнить пост</Button>

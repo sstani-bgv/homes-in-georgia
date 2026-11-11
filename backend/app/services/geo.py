@@ -104,7 +104,7 @@ def search(q: str) -> dict:
 
 def point_facts(lat: float, lng: float) -> dict:
     """What a point fills in the card (Stanislav 11-11): the CRM district (OSM's suburb / city district there) and the
-    nearest metro within METRO_RADIUS_M (else none), with its distance."""
+    nearest metro at any distance up to METRO_RADIUS_M (a sanity cap: outside Tbilisi none), with its distance."""
     from app.services.properties import METRO_RADIUS_M, nearest_metro_m
     try:
         district = (_reverse(round(lat, 5), round(lng, 5)) or {}).get("district")  # ~1 m: a dragged marker reuses the cache

@@ -92,10 +92,13 @@ def test_point_facts_district_and_metro(client, db, monkeypatch):
     for name, (lat, lng), district, metro in [
             ("Old", (41.7036, 44.7900), "Старый город", "Rustaveli"),  # next to Rustaveli station
             ("Bagebi", (41.7120, 44.7320), "Ваке-Багеби", "VazhaPshavela"),  # ~1.3 km from Vazha-Pshavela
-            ("Vake District", (41.7090, 44.7550), "Ваке", None),  # Vake Park: no station within 1.5 km
+            ("Vake District", (41.7090, 44.7550), "Ваке", "Delisi"),  # Vake Park: ~2 km, the nearest still fills (11-11)
             ("Saburtalo", (41.7240, 44.7310), "Сабуртало", "VazhaPshavela")]:
         pick.append(name)
         r = client.get("/api/geo/point", params={"lat": lat, "lng": lng}, headers=auth(ag)).json()
         assert (r["district"], r["metro"]) == (district, metro), name
-        assert (r["metro_m"] is None) == (metro is None) and (r["metro_m"] or 0) <= 1500
+        assert (r["metro_m"] is None) == (metro is None) and (r["metro_m"] or 0) <= 8000
+    pick.append("Old")  # clearly outside Tbilisi (>8 km from any station): no metro rather than a wrong one
+    r = client.get("/api/geo/point", params={"lat": 41.85, "lng": 44.95}, headers=auth(ag)).json()
+    assert (r["metro"], r["metro_m"]) == (None, None)
     assert client.get("/api/geo/point?lat=10&lng=10", headers=auth(ag)).status_code == 422

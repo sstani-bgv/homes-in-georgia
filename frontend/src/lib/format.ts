@@ -183,3 +183,5 @@ export function phoneInput(e: { target: HTMLInputElement; nativeEvent: Event }):
   if (document.activeElement === el) el.setSelectionRange(caret, caret);
   return f;
 }
+/** 640 → «640 м», 2315 → «2,3 км» (the metro distance from the map point). */
+export function distLabel(m: number): string { return m > 1000 ? `${(m / 1000).toFixed(1).replace('.', ',')} км` : `${Math.round(m)} м`; }

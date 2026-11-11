@@ -1126,7 +1126,7 @@ METRO_NAME = {"Liberty Square": "LibertySquare", "Rustaveli": "Rustaveli", "Marj
               "Technical University": "STUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
               "State University": "TCUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
               "Isani": "IsaniMetro", "300 Aragveli": "300Aragveli", "Samgori": "SamgoriMetro", "Varketili": "Varketili"}
-METRO_RADIUS_M = 1500  # farther than that the post says no metro rather than a wrong one
+METRO_RADIUS_M = 8000  # the nearest station always fills (Stanislav 11-11); only points clearly outside Tbilisi get none
 _P_TYPE = {"apartment": "Apartment", "house": "House", "commercial": "Commercial"}
 _P_BUILDING = {"new": "NewBuilding", "old": "OldBuilding", "historical": "HistoricalBuilding"}
 _P_DESIGN = {"new": "New", "mixed": "Mixed", "old": "Old", "retro": "Retro", "needs_repair": "UnderRepair"}
