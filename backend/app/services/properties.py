@@ -2,6 +2,7 @@
 import logging
 import math
 import os
+import hashlib
 import html as html_
 import re
 import uuid
@@ -10,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+import jwt
 from sqlalchemy import Text, and_, case, cast, func, or_, select
 from sqlalchemy import update as update_
 from sqlalchemy.dialects.postgresql import JSONB
@@ -48,6 +50,7 @@ MAX_UPLOAD = 300 * 1024 * 1024
 # the owner's signed exclusive contract (PDF): a property_media row of its own kind, never in a post/album/slideshow
 CONTRACT = "exclusive_contract"
 POST_KINDS = ("photo", "video")
+MAX_CONTRACT = 20 * 1024 * 1024
 # the agent's media and checklist are open until «Готово — отправить оператору»; after that only staff change them,
 # unless the operator returns the object (returned)
 AGENT_MEDIA_STATUSES = ("owner_confirmed", "shoot_scheduled", "media_uploaded", "returned")
@@ -804,15 +807,12 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
     return out
 
 
-def upload_contract(db: Session, pid: int, name: str, content: bytes, actor: User) -> PropertyMedia:
-    """The signed exclusive contract PDF (hig-sign); replaces the previous one. Needed by submit_for_review."""
-    p = _prop(db, pid, lock=True)
-    _require_media_editable(p, actor)
-    _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
+def _store_contract(db: Session, p: Property, content: bytes, uploaded_by: int | None) -> PropertyMedia:
+    """Save the PDF as the object's exclusive contract (replacing the previous one); the caller commits."""
     if not content.startswith(b"%PDF"):
         raise DomainError("bad_file", "Договор — только PDF")
-    if len(content) > MAX_UPLOAD:
-        raise DomainError("too_large", f"file is too large: {name}")
+    if len(content) > MAX_CONTRACT:
+        raise DomainError("too_large", "PDF договора слишком большой")
     for old in db.scalars(select(PropertyMedia).where(PropertyMedia.property_id == p.id, PropertyMedia.kind == CONTRACT)):
         try:
             storage.delete(old.path)
@@ -821,24 +821,67 @@ def upload_contract(db: Session, pid: int, name: str, content: bytes, actor: Use
         db.delete(old)
     key = f"properties/{p.id}/{uuid.uuid4().hex}.pdf"
     storage.put(key, content)
-    m = PropertyMedia(property_id=p.id, kind=CONTRACT, path=key, position=0, uploaded_by=actor.id)
+    m = PropertyMedia(property_id=p.id, kind=CONTRACT, path=key, position=0, uploaded_by=uploaded_by)
     db.add(m)
+    return m
+
+
+def upload_contract(db: Session, pid: int, name: str, content: bytes, actor: User) -> PropertyMedia:
+    """The agent uploads a contract signed on paper / elsewhere; replaces the previous one. Needed by submit_for_review."""
+    p = _prop(db, pid, lock=True)
+    _require_media_editable(p, actor)
+    _require_status(p, *AGENT_MEDIA_STATUSES, "review", "published")
+    m = _store_contract(db, p, content, actor.id)
     log_event(db, "property", p.id, "exclusive_contract_uploaded", actor)
     db.commit()
     return m
 
 
-def sign_url(db: Session, p: Property, user: User) -> str | None:
-    """EXCLUSIVE_SIGN_URL with {id} {address} {owner} {phone} {agent} filled (URL-encoded): the owner's signing link.
-    None when it isn't configured or the user may not see the owner's contacts."""
-    tpl = (env.EXCLUSIVE_SIGN_URL or "").strip()
-    if not tpl or not can_see_owner(p, user):
-        return None
+# ---- the owner signs the exclusive confirmation himself (ported from hig-sign): a public link, no CRM login.
+# The token is the object id signed with SECRET_KEY (no table): it works while the object is exclusive and unsigned.
+
+def sign_token(pid: int) -> str:
+    return jwt.encode({"pid": int(pid), "purpose": "exclusive"}, env.SECRET_KEY, algorithm="HS256")
+
+
+def _signable(db: Session, token: str, lock: bool = False) -> Property:
+    try:
+        d = jwt.decode(token, env.SECRET_KEY, algorithms=["HS256"])
+        if d.get("purpose") != "exclusive":
+            raise jwt.PyJWTError()
+    except jwt.PyJWTError:
+        raise DomainError("not_found", "Ссылка недействительна")
+    p = db.get(Property, int(d["pid"]), with_for_update=lock, populate_existing=lock)
+    if not p or not p.is_exclusive or p.status == "archived":
+        raise DomainError("not_found", "Ссылка больше не действует. Попросите агента прислать новую")
+    return p
+
+
+def sign_view(db: Session, token: str) -> dict:
+    """What the owner's page prefills (he corrects it): the object and the owner contacts from the card."""
+    p = _signable(db, token)
     owner = db.get(Owner, p.owner_id) if p.owner_id else None
-    agent = db.get(User, p.agent_id) if p.agent_id else None
-    vals = {"id": p.id, "address": p.address or "", "owner": owner and owner.name or "", "phone": owner and owner.phone or "",
-            "agent": agent and agent.name or ""}
-    return re.sub(r"\{(\w+)\}", lambda m: quote(str(vals[m[1]]), safe="") if m[1] in vals else m[0], tpl)
+    c = contract(db, p.id)
+    return {"id": p.id, "address": p.address or "", "cadastral_code": p.cadastral_code or "",
+            "owner_name": owner and owner.name or "", "owner_phone": owner and owner.phone or "",
+            "signed_at": c.created_at if c else None}
+
+
+def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | None, user_agent: str | None) -> PropertyMedia:
+    """The owner confirmed and signed: his PDF (built in the browser, hig-sign style) becomes the object's contract."""
+    p = _signable(db, token, lock=True)
+    if contract(db, p.id):
+        raise DomainError("already_signed", "Договор уже подписан")
+    f = {k: str(data.get(k) or "").strip()[:200] for k in ("full_name", "personal_id", "phone", "cadastral_code")}
+    if not (f["full_name"] and f["personal_id"] and f["phone"]):
+        raise DomainError("missing_fields", "Заполните ФИО, личный номер и телефон")
+    if data.get("consent") is not True:
+        raise DomainError("consent_required", "Нужно согласие с условиями")
+    m = _store_contract(db, p, pdf, None)
+    log_event(db, "property", p.id, "exclusive_contract_signed", None, label=f["full_name"], **f, ip=ip,
+              user_agent=(user_agent or "")[:300], pdf_sha256=hashlib.sha256(pdf).hexdigest())
+    db.commit()
+    return m
 
 
 def contract(db: Session, pid: int) -> PropertyMedia | None:
@@ -1576,7 +1619,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         d["exclusive_contract"] = {"id": c.id, "url": f"/api/media/{c.path}", "created_at": c.created_at} if c else None
         if p.is_exclusive and not c:
             d["missing"].append("эксклюзивный договор (PDF)")
-        d["exclusive_sign_url"] = sign_url(db, p, user) if p.is_exclusive else None
+        d["exclusive_sign_token"] = sign_token(p.id) if p.is_exclusive and can_see_owner(p, user) else None
         listing = db.get(Listing, p.listing_id) if p.listing_id else None
         d["listing"] = listing_out(listing, full=can_see_owner(p, user)) if listing else None
         d.update(card(db, p, user))

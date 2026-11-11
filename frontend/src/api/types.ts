@@ -102,9 +102,9 @@ export interface Media { id: number; kind: 'photo' | 'video'; path: string; url?
 export interface Property {
   /** «Сдан» typed by hand (old-base objects without a deal in the CRM): the lease end goes to the calendar */
   rent_from?: string | null; rent_to?: string | null; tenant_name?: string | null; tenant_phone?: string | null; tenant_tg?: string | null;
-  /** exclusive object: the owner's signed contract PDF (not a post file) and the hig-sign link (EXCLUSIVE_SIGN_URL) */
+  /** exclusive object: the owner's signed contract PDF (not a post file) and the token of his signing page /sign/<token> */
   exclusive_contract?: { id: number; url: string; created_at: string } | null;
-  exclusive_sign_url?: string | null;
+  exclusive_sign_token?: string | null;
   missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
   id: number;
   listing_id?: string | null;

@@ -1,7 +1,7 @@
 """Funnel 1: new listings, properties, owners."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -289,6 +289,23 @@ async def properties_contract(pid: int, file: UploadFile = File(...), db: Sessio
                               user: User = Depends(current_user)):
     P.upload_contract(db, pid, file.filename or "contract.pdf", await file.read(), user)
     return P.out(db, get_or_404(db, Property, pid), user, full=True)
+
+
+# the owner's exclusive confirmation page (frontend /sign/<token>): no CRM login, the token is the access
+@router.get("/public/exclusive/{token}")
+def public_exclusive(token: str, db: Session = Depends(get_db, scope="function")):
+    return P.sign_view(db, token)
+
+
+@router.post("/public/exclusive/{token}")
+async def public_exclusive_sign(token: str, request: Request, file: UploadFile = File(...), full_name: str = Form(""),
+                                personal_id: str = Form(""), phone: str = Form(""), cadastral_code: str = Form(""),
+                                consent: bool = Form(False), db: Session = Depends(get_db, scope="function")):
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client and request.client.host)
+    P.sign_contract(db, token, {"full_name": full_name, "personal_id": personal_id, "phone": phone,
+                                "cadastral_code": cadastral_code, "consent": consent},
+                    await file.read(), ip, request.headers.get("user-agent"))
+    return P.sign_view(db, token)
 
 
 @router.patch("/properties/{pid}/media/{mid}")

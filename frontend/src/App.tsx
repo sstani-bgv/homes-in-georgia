@@ -11,6 +11,7 @@ import { CalendarPage, MCalendar } from './pages/Calendar';
 import { ContractsPage, MContracts } from './pages/Contracts';
 import { DashboardPage } from './pages/Dashboard';
 import { DealsPage } from './pages/Deals';
+import { ExclusiveSignPage } from './pages/ExclusiveSign';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
 import { MDeal, MDealView, MLead, MLeads, MMe, MNew, MNotFound, MProperties, MProperty, MReports, MobileLayout } from './pages/Mobile';
@@ -58,6 +59,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/sign/:token" element={<ExclusiveSignPage />} />
       <Route path="/m" element={<RequireAuth><MobileLayout /></RequireAuth>}>
         <Route index element={<Navigate to="/m/leads" replace />} />
         <Route path="leads" element={<MLeads />} />

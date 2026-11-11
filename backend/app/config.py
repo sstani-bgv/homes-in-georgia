@@ -70,9 +70,6 @@ class Settings(BaseSettings):
     POST_VIEWING_SURVEY_MIN: int = 60
     T14_DAYS: int = 14
     CONTRACT_REMIND_DAYS: str = "30,7,1"
-    # the owner's exclusive-contract signing link (hig-sign); {id} {address} {owner} {phone} {agent} are filled from the
-    # object. Empty = no link in the post generator, the agent only uploads the signed PDF.
-    EXCLUSIVE_SIGN_URL: str = ""
     MEDIA_DIR: str = str(REPO_ROOT / "data" / "media")
     MEDIA_STORAGE: str = "local"        # local: files under MEDIA_DIR | s3: S3-compatible bucket (app/storage.py)
     S3_ENDPOINT: str = ""               # e.g. https://<account>.r2.cloudflarestorage.com, http://localhost:9000 (MinIO)

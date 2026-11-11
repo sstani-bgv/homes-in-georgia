@@ -1,7 +1,6 @@
 """Exclusive object: «Отправить оператору» needs the owner's signed contract PDF; the PDF never goes into the post."""
 import pytest
 
-from app.config import settings
 from app.services import properties
 from app.services.errors import DomainError
 from tests.conftest import make_user
@@ -10,7 +9,7 @@ from tests.test_david_feedback import _code, _ready
 PDF = b"%PDF-1.4 signed"
 
 
-def test_exclusive_submit_needs_contract_pdf(db, monkeypatch):
+def test_exclusive_submit_needs_contract_pdf(db):
     ag = make_user(db, "agent")
     plain = _ready(db, ag, "ss1", address="Пекини 1")
     assert _code(db, plain.id, ag)[0] == "ok"  # not exclusive: unaffected
@@ -28,10 +27,8 @@ def test_exclusive_submit_needs_contract_pdf(db, monkeypatch):
     properties.upload_contract(db, p.id, "old.pdf", PDF, ag)
     c = properties.upload_contract(db, p.id, "c.pdf", PDF, ag)  # replaces the first one
 
-    monkeypatch.setattr(settings, "EXCLUSIVE_SIGN_URL", "https://sign.test/x?obj={id}&owner={owner}&addr={address}")
     d = properties.out(db, p, ag, full=True)
     assert d["exclusive_contract"]["id"] == c.id and "эксклюзивный договор (PDF)" not in d["missing"]
-    assert d["exclusive_sign_url"] == f"https://sign.test/x?obj={p.id}&owner=%D0%93%D0%B8%D0%BE%D1%80%D0%B3%D0%B8&addr=%D0%9F%D0%B5%D0%BA%D0%B8%D0%BD%D0%B8%202"
     # the PDF is not a post file: not in the card's media, the album, nor pickable for publishing
     assert [m["kind"] for m in d["media"]] == ["photo"]
     assert c.id not in {m.id for m in properties.media(db, p.id)}
@@ -53,3 +50,31 @@ def test_contract_only_upload_does_not_count_as_media(db):
         properties.delete_media(db, p.id, m.id, ag)
     properties.upload_contract(db, p.id, "c.pdf", PDF, ag)
     assert _code(db, p.id, ag)[0] == "no_media"
+
+
+def test_owner_signs_by_public_link(db, client):
+    ag = make_user(db, "agent")
+    p = _ready(db, ag, "ss4", address="Пекини 4")
+    p.is_exclusive = True
+    db.commit()
+    token = properties.out(db, p, ag, full=True)["exclusive_sign_token"]
+    assert client.get("/api/public/exclusive/garbage").status_code == 404
+
+    v = client.get(f"/api/public/exclusive/{token}").json()  # no login: the token is the access
+    assert (v["address"], v["owner_name"], v["signed_at"]) == ("Пекини 4", "Гиорги", None)
+    form = {"full_name": "Гиорги Беридзе", "personal_id": "01001012345", "phone": "+995 555 12 34 56", "consent": "true"}
+    r = client.post(f"/api/public/exclusive/{token}", data={**form, "consent": "false"}, files={"file": ("c.pdf", PDF)})
+    assert r.json()["code"] == "consent_required" and properties.contract(db, p.id) is None
+    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF)})
+    assert r.status_code == 200 and r.json()["signed_at"]
+    db.expire_all()
+    assert properties.contract(db, p.id) and _code(db, p.id, ag)[0] == "ok"
+    from app.models import Event
+    ev = db.query(Event).filter_by(entity_id=str(p.id), action="exclusive_contract_signed").one()
+    assert ev.data["personal_id"] == "01001012345" and len(ev.data["pdf_sha256"]) == 64
+    r = client.post(f"/api/public/exclusive/{token}", data=form, files={"file": ("c.pdf", PDF)})
+    assert r.json()["code"] == "already_signed"
+
+    p.is_exclusive = False  # no longer exclusive: the link stops working
+    db.commit()
+    assert client.get(f"/api/public/exclusive/{token}").status_code == 404

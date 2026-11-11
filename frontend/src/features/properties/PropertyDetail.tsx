@@ -745,28 +745,32 @@ function PostComposer({ p }: { p: Property }) {
   );
 }
 
-/** Exclusive object: the owner signs the exclusive contract by the hig-sign link (EXCLUSIVE_SIGN_URL), the agent uploads
- * the signed PDF; without it «Отправить на модерацию» is blocked (backend submit_for_review). The PDF is not a post file. */
+/** Exclusive object: the owner signs the exclusivity confirmation by the link (/sign/<token>, pages/ExclusiveSign) and the
+ * PDF lands here by itself; or the agent uploads one signed elsewhere. Without it «Отправить на модерацию» is blocked
+ * (backend submit_for_review). The PDF is not a post file. */
 function ExclusiveContract({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const { toast, set } = useProp(p.id);
   const ref = useRef<HTMLInputElement>(null);
   const c = p.exclusive_contract;
-  const link = p.exclusive_sign_url;
+  const link = p.exclusive_sign_token ? `${window.location.origin}/sign/${p.exclusive_sign_token}` : '';
   const up = useMutation({ mutationFn: (file: File) => api.properties.uploadContract(p.id, file), onSuccess: (r) => { set(r); toast('Договор загружен'); }, onError: (e) => toast(errText(e), true) });
   const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(link || '') : Promise.reject()).then(() => toast('Ссылка скопирована'), () => toast('Не удалось скопировать', true));
-  const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('Подпишите, пожалуйста, договор эксклюзивного сотрудничества с Homes in Georgia')}`;
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link || '')}&text=${encodeURIComponent('Подтвердите, пожалуйста, эксклюзивное сотрудничество с Rent in Tbilisi и подпишите по ссылке')}`;
   return (
     <div className="gen-block">
       <span className="gen-title">Эксклюзивный договор</span>
-      {c ? <div className="alert alert-ok">Договор загружен {fmtDateTime(c.created_at)} · <a href={mediaUrl(c.url)} target="_blank" rel="noreferrer"><FileText size={14} /> скачать PDF</a></div>
+      {c ? <div className="alert alert-ok">Договор подписан {fmtDateTime(c.created_at)} · <a href={mediaUrl(c.url)} target="_blank" rel="noreferrer"><FileText size={14} /> скачать PDF</a></div>
         : <div className="alert alert-warn">Нет договора: без подписанного PDF объект нельзя отправить оператору</div>}
       {canEdit && <>
-        {link ? <div className="row row-wrap gap-sm">
-          <Button onClick={copy}><Copy size={16} />Скопировать ссылку</Button>
-          <a className="btn" href={share} target="_blank" rel="noreferrer"><Send size={16} />Отправить собственнику</a>
-        </div> : <div className="muted" style={{ fontSize: 12 }}>Ссылка на подписание не настроена — оформите договор как обычно и загрузите подписанный PDF.</div>}
+        {link && !c && <>
+          <div className="muted" style={{ fontSize: 12 }}>Отправьте собственнику ссылку: он заполнит данные и распишется, PDF появится здесь сам. Обновите карточку после подписи.</div>
+          <div className="row row-wrap gap-sm">
+            <Button onClick={copy}><Copy size={16} />Скопировать ссылку</Button>
+            <a className="btn" href={share} target="_blank" rel="noreferrer"><Send size={16} />Отправить собственнику</a>
+          </div>
+        </>}
         <input ref={ref} type="file" accept="application/pdf" hidden onChange={(e) => { const fl = e.target.files?.[0]; if (fl) up.mutate(fl); e.target.value = ''; }} />
-        <Button block loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={16} />{c ? 'Заменить PDF договора' : 'Загрузить подписанный PDF'}</Button>
+        <Button block loading={up.isPending} onClick={() => ref.current?.click()}><Upload size={16} />{c ? 'Заменить PDF договора' : 'Или загрузить подписанный PDF'}</Button>
       </>}
     </div>
   );
