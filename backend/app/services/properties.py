@@ -1159,12 +1159,25 @@ def _human(tag: str) -> str:
     return " ".join([w[0]] + [x if x.isupper() else x.lower() for x in w[1:]]) if w else tag
 
 
+# a line of an agency post that the rich post already shows as fields (old-base objects keep the whole old post as
+# their description): hashtags, the 📍 maps link, amenities, price/deposit, contacts, the «APARTMENTS ON MAP» footer
+HGE_MAP = "https://hge.ge/map/"
+POST_SERVICE_LINE = re.compile(r"#\w|^\s*[📍🏢✨🏠✅✖️👬🕐💰📲🚇🌟📱🗳🎥❗]|\]\(https?://|commission|deposit|sq\.?\s?m|\+995|apartments on map", re.I)
+
+
+def prose(text: str | None) -> str:
+    """The description's own words for the rich post: the agency post's service lines dropped, blank runs squeezed."""
+    lines = [ln.strip() for ln in (text or "").replace("\xa0", " ").splitlines()]
+    keep = [ln for ln in lines if not POST_SERVICE_LINE.search(ln)]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
+
+
 def post_rich(db: Session, p: Property, media: list[str]) -> str:
     """The post as a Telegram rich message (Bot API sendRichMessage) in the @tbilisi_rent style (Irakli's video
     2026-11-09): photo slideshow, «$price · beds · district» title, «building · m² · floor · ID» line, 📍 address (the
     map link) and Ⓜ metro, the description, collapsed «Parameters and amenities» (a table + one ✅ line) and «Tags», then
-    two buttons: «On the map» and «I like it» (our bot: a lead). No map block and no footer: the button opens the map,
-    the contacts sit in Tags. media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
+    two buttons in a row: «On the map» (hge.ge/map, the agency's map) and «I like it» (our bot: a lead). No map block,
+    no footer (the contacts sit in Tags); an old-base description is cut to its own words (prose()). media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
     f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
     sale = f.get("deal") == "Sale"
     district = DISTRICT_TAG.get((p.district or "").strip(), "#" + (p.district or "Tbilisi").replace(" ", "")).lstrip("#")
@@ -1187,7 +1200,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
              f.get("metro") and f"Ⓜ️ {h(_split(f['metro']))}"]
     if any(where):
         out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
-    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", (p.description or "").strip()) if x)
+    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", prose(p.description)) if x)
     if text:
         out.append("<p>" + h(text).replace("\n", "<br>") + "</p>")
     am = f.get("amenities") or []
@@ -1213,9 +1226,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
                '<a href="https://youtube.com/@rentintbilisi">YouTube</a></p></details>')
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
     bot = f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}"  # bot.on_start -> journey.on_post_start: a lead
-    if url:
-        out.append("<tg-button-row>" + btn("📍 On the map", url) + "</tg-button-row>")
-    out.append("<tg-button-row>" + btn("❤️ I like it", bot, ' style="primary"') + "</tg-button-row>")
+    # the agency's own map of all listings (the old posts' «APARTMENTS ON MAP»); the 📍 address above is the pin
+    out.append("<tg-button-row>" + btn("📍 On the map", HGE_MAP) + btn("❤️ I like it", bot, ' style="primary"') + "</tg-button-row>")
     return "".join(out)
 
 

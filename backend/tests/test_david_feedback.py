@@ -208,7 +208,18 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16" in h  # contacts inside Tags
     assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
     assert h.count("<tg-button ") == 2 and h.count(f"?start=p{p.id}") == 1 and "RentInTbilisi_bot" not in h and "Contact" not in h
-    assert h.endswith('style="primary" url="https://t.me/' + properties.env.BOT_USERNAME.lstrip("@") + f'?start=p{p.id}">❤️ I like it</tg-button></tg-button-row>')
+    assert h.endswith('<tg-button-row><tg-button type="url" url="https://hge.ge/map/">📍 On the map</tg-button><tg-button type="url" style="primary" url="https://t.me/'
+                      + properties.env.BOT_USERNAME.lstrip("@") + f'?start=p{p.id}">❤️ I like it</tg-button></tg-button-row>')
+
+
+def test_rich_post_keeps_only_the_description_prose_of_an_old_post():
+    """An old-base object's description is the whole agency post: the rich post keeps only its own words."""
+    old = ("#DidiDigomi 🚇 #Sarajishvili \n📍[11 Ioane Petretse St](https://www.google.com/maps/place/x) \n \n"
+           "Bright flat with a view of the park.\nNew furniture.\n \n🏢 #2Bed #Apartment for #Rent \n✅\xa0#WiFi  ✅\xa0#TV\n"
+           "✖️\xa0ParkingPlace \n👬Tenants: 1-4 \n💰 800$ + Deposit 800$ \n0% Commission \n#Price700to900 \n"
+           "📲 @David_Tibelashvili |  \n+995 599 20 67 16 #Eduard \n📍[**APARTMENTS ON MAP**](https://hge.ge/map/)📍")
+    assert properties.prose(old) == "Bright flat with a view of the park.\nNew furniture."
+    assert properties.prose("Сдаю уютную квартиру в Ваке.\nРядом парк.") == "Сдаю уютную квартиру в Ваке.\nРядом парк."
 
 
 def test_published_object_takes_leads_when_its_source_ad_is_gone(db):
