@@ -14,7 +14,11 @@ export type Point = { lat: number; lng: number };
 /** GET /geo/point: what a point fills in — the CRM district and the nearest metro tag within 1.5 km (+ metres) */
 export type PointFacts = { district: string | null; metro: string | null; metro_m: number | null };
 const TBILISI: L.LatLngTuple = [41.7151, 44.8271];
-const PIN = L.divIcon({ className: 'addr-pin', html: '📍', iconSize: [28, 28], iconAnchor: [14, 26] });
+/** Brand drop pin, tip anchored on the point (the old 📍 emoji sat off the point and read as clutter, Stanislav 11-11). */
+const PIN = L.divIcon({
+  className: 'addr-pin', iconSize: [34, 44], iconAnchor: [17, 43],
+  html: '<svg viewBox="0 0 34 44" width="34" height="44"><path d="M17 43C17 43 32 27.5 32 16.5A15 15 0 0 0 2 16.5C2 27.5 17 43 17 43Z" fill="#E3172D" stroke="#fff" stroke-width="2"/><circle cx="17" cy="16.5" r="5.5" fill="#fff"/></svg>',
+});
 const isLinkOrPoint = (s: string) => /^\s*(https?:\/\/|-?\d{1,2}\.\d+\s*,)/.test(s);
 
 function PointMap({ point, onPoint, disabled }: { point: Point | null; onPoint: (p: Point) => void; disabled?: boolean }) {
@@ -40,6 +44,9 @@ function PointMap({ point, onPoint, disabled }: { point: Point | null; onPoint: 
     const at: L.LatLngTuple = [point.lat, point.lng];
     if (!marker.current) {
       marker.current = L.marker(at, { icon: PIN, draggable: !disabled }).addTo(m);
+      const lift = (on: boolean) => () => marker.current?.getElement()?.classList.toggle('lift', on);
+      marker.current.on('dragstart', lift(true));
+      marker.current.on('dragend', lift(false));
       marker.current.on('dragend', () => { const ll = marker.current!.getLatLng(); cb.current({ lat: ll.lat, lng: ll.lng }); });
     } else marker.current.setLatLng(at);
     if (!m.getBounds().pad(-0.2).contains(at)) m.setView(at, Math.max(m.getZoom(), 16));
@@ -97,10 +104,11 @@ export function AddressField({ value, onChange, point, onPoint, onFacts, disable
             onClick={() => { setOpen(false); setManual(true); }}>Не тот — поставлю точку на карте сам</button>
         </div>
       )}
-      {point ? <span className="addr-state ok"><MapPin size={14} />Точка найдена — проверьте на карте, маркер можно перетащить</span>
+      {point ? <span className="addr-state ok"><MapPin size={14} />Точка найдена — проверьте на карте</span>
         : notFound ? <span className="addr-state warn">{data?.error ? 'Поиск адресов сейчас недоступен' : 'Не нашли'} — уточните адрес или поставьте точку на карте</span>
           : manual ? <span className="addr-state">Нажмите на карте, где объект</span> : null}
       {showMap && <PointMap point={point} onPoint={setPoint} disabled={disabled} />}
+      {point && !disabled && <span className="faint" style={{ fontSize: 12 }}>Перетащите точку, если она стоит не там</span>}
     </div>
   );
 }

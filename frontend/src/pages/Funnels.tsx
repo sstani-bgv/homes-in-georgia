@@ -36,7 +36,7 @@ export function ManualProperty({ open, onClose, base = '' }: { open: boolean; on
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Собственник пришёл сам: объект сразу в статусе «Собственник», дальше откроется пост-генератор — там цена, параметры и фото.</div>
       <div className="form-grid">
         <Field label="Имя собственника"><Input value={f.owner_name} onChange={(e) => setF({ ...f, owner_name: e.target.value })} /></Field>
-        <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XX XX XX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: phoneInput(e) })} /></Field>
+        <Field label="Телефон собственника"><Input type="tel" inputMode="tel" placeholder="+995 5XX XXX XXX" value={f.owner_phone} onChange={(e) => setF({ ...f, owner_phone: phoneInput(e) })} /></Field>
         <div className="field span2"><span className="label">Адрес (можно позже)</span>
           <AddressField value={f.address} onChange={(address) => setF((x) => ({ ...x, address }))} point={f.point} onPoint={(point) => setF((x) => ({ ...x, point }))}
             onFacts={(facts) => setF((x) => ({ ...x, facts, district: facts.district || x.district }))} />

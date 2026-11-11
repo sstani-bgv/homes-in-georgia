@@ -709,7 +709,7 @@ function Lease({ p }: { p: Property }) {
         <Field label="Сдан с"><Input type="date" value={f.rent_from} onChange={set('rent_from')} /></Field>
         <Field label="Договор до"><Input type="date" value={f.rent_to} onChange={set('rent_to')} /></Field>
         <Field label="Арендатор"><Input value={f.tenant_name} onChange={set('tenant_name')} placeholder="Имя" /></Field>
-        <Field label="Телефон"><Input value={f.tenant_phone} onChange={(e) => setF({ ...f, tenant_phone: phoneInput(e) })} inputMode="tel" placeholder="+995 5XX XX XX XX" /></Field>
+        <Field label="Телефон"><Input value={f.tenant_phone} onChange={(e) => setF({ ...f, tenant_phone: phoneInput(e) })} inputMode="tel" placeholder="+995 5XX XXX XXX" /></Field>
         <Field label="Telegram"><Input value={f.tenant_tg} onChange={set('tenant_tg')} placeholder="@username" /></Field>
       </div>
       <div className="row mt">

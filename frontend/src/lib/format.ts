@@ -138,7 +138,7 @@ export function pluralForm(n: number): 0 | 1 | 2 {
 /** two-digit prefixes of 3-digit country codes (+380, +374, +971, +998…); the rest are 2 digits, +1/+7 one */
 const CC3 = ['21', '22', '23', '24', '25', '26', '29', '35', '37', '38', '42', '50', '59', '67', '68', '69', '80', '85', '87', '88', '96', '97', '99'];
 
-/** «599206716» / «+995599206716» / «0599-20-67-16» → «+995 599 20 67 16»; foreign → «+7 916 123 45 67».
+/** «599206716» / «+995599206716» / «0599-20-67-16» → «+995 599 206 716»; foreign → «+7 916 123 45 67».
  *  Text with letters/commas or >15 digits (two numbers in one field) is returned untouched, so no digit is ever lost. */
 export function formatPhone(raw?: string | null): string {
   const s = raw ?? '';
@@ -152,7 +152,7 @@ export function formatPhone(raw?: string | null): string {
   if (d.startsWith('995')) nat = d.slice(3);
   else if ('995'.startsWith(d)) return (plus ? '+' : '') + d; // still typing «+99…»
   else if (!plus && d.replace(/^0/, '').length <= 9) nat = d.replace(/^0/, ''); // local Georgian number
-  if (nat !== null) return ['+995', nat.slice(0, 3), nat.slice(3, 5), nat.slice(5, 7), nat.slice(7)].filter(Boolean).join(' ');
+  if (nat !== null) return ['+995', nat.slice(0, 3), nat.slice(3, 6), nat.slice(6)].filter(Boolean).join(' ');
   const ccLen = /^[17]/.test(d) ? 1 : CC3.includes(d.slice(0, 2)) ? 3 : 2;
   const r = d.slice(ccLen);
   const tail = r.length >= 7 ? r.slice(-4) : '';
