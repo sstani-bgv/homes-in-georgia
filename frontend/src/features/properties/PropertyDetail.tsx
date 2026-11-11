@@ -16,6 +16,7 @@ import { ARCHIVE_REASON, DISTRICTS, SOURCE_LABEL, bedroomsLabel, demandLabel, fm
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
 import { OwnerSuggest } from '../../components/OwnerSuggest';
+import { AddressField, type Point } from '../../components/AddressField';
 
 const REQUEST_SENT = 'Изменение ушло оператору на проверку';
 
@@ -178,7 +179,7 @@ function ShootStep({ p }: { p: Property }) {
 
 type GenForm = {
   is_exclusive: boolean; district: string; address: string; price: string; bedrooms: string; area: string; floor: string;
-  total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields;
+  total_floors: string; owner_name: string; owner_phone: string; owner_id?: number; post_fields: PostFields; point: Point | null;
 };
 const BEDROOM_CHIPS: Record<string, string> = { 0: 'Студия', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5+' };
 // the old generator's sale block (backend SALE_AMENITIES): its own type order, beds up to 6+, only these amenities
@@ -191,6 +192,8 @@ const genOf = (p: Property): GenForm => ({
   is_exclusive: !!p.is_exclusive, district: str(p.district), address: str(p.address), price: str(p.price), bedrooms: str(p.bedrooms),
   area: str(p.area), floor: str(p.floor), total_floors: str(p.total_floors),
   owner_name: str(p.owner?.name), owner_phone: str(p.owner?.phone), post_fields: { deal: 'Rent', ...(p.post_fields || {}) },
+  // the agent's point, else the origin ad's pin to check (saved only once he moves / picks it)
+  point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : p.listing?.lat != null && p.listing?.lng != null ? { lat: p.listing.lat, lng: p.listing.lng } : null,
 });
 /** what changed in the generator since the last save, in PATCH /properties shape */
 function genDiff(a: GenForm, b: GenForm): Record<string, unknown> {
@@ -198,6 +201,7 @@ function genDiff(a: GenForm, b: GenForm): Record<string, unknown> {
   const num = (x: string) => (x.trim() === '' ? null : Number(x));
   (['district', 'address'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = b[k].trim() || null; });
   (['price', 'bedrooms', 'area', 'floor', 'total_floors'] as const).forEach((k) => { if (a[k] !== b[k]) out[k] = num(b[k]); });
+  if (a.point?.lat !== b.point?.lat || a.point?.lng !== b.point?.lng) { out.lat = b.point?.lat ?? null; out.lng = b.point?.lng ?? null; }
   if (a.is_exclusive !== b.is_exclusive) out.is_exclusive = b.is_exclusive;
   if (b.owner_id && b.owner_id !== a.owner_id) out.owner_id = b.owner_id;
   else if (a.owner_name !== b.owner_name || a.owner_phone !== b.owner_phone) { out.owner_name = b.owner_name; out.owner_phone = b.owner_phone; }
@@ -288,7 +292,9 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
           <Field label="Описание (необязательно)"><Input value={pf.headline || ''} placeholder="Например: No one lived" onChange={(e) => setPf('headline', e.target.value)} /></Field>
           <Field label="Район"><Select value={f.district} placeholder="—" onChange={(e) => upd('district', e.target.value)} options={DISTRICTS.map((d) => ({ value: d, label: d }))} /></Field>
           <Field label="🚇 Метро"><Select value={pf.metro || ''} placeholder="—" onChange={(e) => setPf('metro', e.target.value)} options={opts(one('metro'))} /></Field>
-          <Field label="Адрес"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} /></Field>
+          <div className="field"><span className="label">Адрес</span>
+            <AddressField value={f.address} onChange={(v) => upd('address', v)} point={f.point} onPoint={(v) => upd('point', v)} disabled={ro}
+              onDistrict={(d) => setF((x) => (x.district ? x : { ...x, district: d }))} /></div>
         </div>
 
         <div className="gen-block">
