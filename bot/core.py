@@ -442,11 +442,19 @@ def understand(cl):
             with db.tx() as c:
                 ds = [r[0] for r in c.execute(f"SELECT l.district FROM listings l WHERE {CLIENT_SEARCH} AND l.district != '' "
                                               "GROUP BY l.district ORDER BY COUNT(*) DESC LIMIT 40")]
-            res = ask(QUERY_PROMPT.format(msgs=key, lang=LANG_NAME[lang], districts=", ".join(ds)), QUERY, timeout=120)
-            p = res.get("place") and geocode(res["place"])
-            st["near"] = [key, [list(p), res.get("label") or res["place"], res.get("radius_km") or 2.0] if p else None]
-            st["query"] = [key, {k: res.get(k) for k in QUERY_KEYS}]
-        q = st["query"][1]
+            try:
+                res = ask(QUERY_PROMPT.format(msgs=key, lang=LANG_NAME[lang], districts=", ".join(ds)), QUERY, timeout=120)
+            except Exception as e:  # Codex down: no hard conditions from the text, its words rank by embeddings; not cached
+                print("understand: codex failed, ranking by embeddings only:", str(e).splitlines()[-1][:200] if str(e) else e)
+                res = None
+            if res is None:
+                q = {**q, "style": key}
+            else:
+                p = res.get("place") and geocode(res["place"])
+                st["near"] = [key, [list(p), res.get("label") or res["place"], res.get("radius_km") or 2.0] if p else None]
+                st["query"] = [key, {k: res.get(k) for k in QUERY_KEYS}]
+        if st.get("query") and st["query"][0] == key:
+            q = st["query"][1]
     q = merge_query(q, profile_query(cl))
     if st["pin"]:
         return q, (tuple(st["pin"]), st["pin_label"] or t(lang, "pin"), st["pin_radius"] or 2.0)
@@ -583,6 +591,7 @@ def search_hybrid(cl):
                   dist if anchor else None, embed.load(), embed)
     top20 = sorted(cands, key=lambda i: -scores[i["id"]])[:HYBRID_POOL]
     cap = q.get("max_price_usd") and q["max_price_usd"] * 1.1
+    res = None
     if top20 and db.get_setting("final_llm") != "off":
         fb = ""
         if liked:
@@ -599,7 +608,11 @@ def search_hybrid(cl):
         if anchor:
             prompt += (f"\n\nКлиент хочет жить рядом с: {anchor[1]} (желательно в пределах {anchor[2]:g} км). "
                        "Столбец «км» — расстояние до этого места (адреса геокодированы примерно). Ближе = лучше при прочих равных.")
-        res = ask(prompt, PICK, images=st["images"][-5:], timeout=240)
+        try:
+            res = ask(prompt, PICK, images=st["images"][-5:], timeout=240)
+        except Exception as e:  # Codex down: the top 5 by score with templated reasons, as final_llm=off
+            print("search_hybrid: codex failed, top 5 by score:", str(e).splitlines()[-1][:200] if str(e) else e)
+    if res is not None:
         ok = {i["id"] for i in top20}
         picked = [(x["id"], x["reason"]) for x in res["top"] if x["id"] in ok]
         picked = list(dict(picked).items())[:5]
