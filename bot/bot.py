@@ -484,6 +484,8 @@ async def on_button(update: Update, ctx):
         await on_lang_button(update, ctx)
     elif q.data.startswith("mod:"):
         await on_staff_button(update, ctx, q.data)
+    elif q.data.startswith("plike:"):  # «❤️ I like it» under a channel rich post: the bot opens itself on /start p<id>
+        await q.answer(url=f"https://t.me/{ctx.bot.username}?start=p{q.data.split(':', 1)[1]}")
     elif await journey.on_callback(update, ctx, lambda: client_of(q.from_user, update.effective_chat and update.effective_chat.id)):
         pass
     elif q.data.startswith(("like:", "no:")):

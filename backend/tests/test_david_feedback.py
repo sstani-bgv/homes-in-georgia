@@ -207,9 +207,10 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert "<details><summary>Parameters and amenities</summary>" in h  # collapsed, as in Irakli's video
     assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16" in h  # contacts inside Tags
     assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
-    assert h.count("<tg-button ") == 2 and h.count(f"?start=p{p.id}") == 1 and "RentInTbilisi_bot" not in h and "Contact" not in h
-    assert h.endswith('<tg-button-row><tg-button type="url" url="https://hge.ge/map/">📍 On the map</tg-button><tg-button type="url" style="primary" url="https://t.me/'
-                      + properties.env.BOT_USERNAME.lstrip("@") + f'?start=p{p.id}">❤️ I like it</tg-button></tg-button-row>')
+    assert h.count("<tg-button ") == 2 and "RentInTbilisi_bot" not in h and "Contact" not in h and "hge.ge/map" not in h
+    # «On the map»: our /map page with the object's pin; «I like it»: a plain bot button (callback), no link arrow
+    assert '<tg-button type="url" url="' + properties.env.PUBLIC_URL.rstrip("/") + '/map?pin=41.700000%2C44.760000&amp;' in h
+    assert h.endswith(f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button></tg-button-row>')
 
 
 def test_rich_post_keeps_only_the_description_prose_of_an_old_post():
@@ -220,6 +221,8 @@ def test_rich_post_keeps_only_the_description_prose_of_an_old_post():
            "📲 @David_Tibelashvili |  \n+995 599 20 67 16 #Eduard \n📍[**APARTMENTS ON MAP**](https://hge.ge/map/)📍")
     assert properties.prose(old) == "Bright flat with a view of the park.\nNew furniture."
     assert properties.prose("Сдаю уютную квартиру в Ваке.\nРядом парк.") == "Сдаю уютную квартиру в Ваке.\nРядом парк."
+    m = properties.MAPS_POINT.search("📍[x](https://www.google.com/maps/place/x/@41.7918386,44.7574398,16z/data=!3d41.7918386!4d44.7574398)")
+    assert (float(m[1] or m[3]), float(m[2] or m[4])) == (41.7918386, 44.7574398)  # «On the map» pin for an old-base object
 
 
 def test_published_object_takes_leads_when_its_source_ad_is_gone(db):

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from sqlalchemy import Text, and_, case, cast, func, or_, select
 from sqlalchemy import update as update_
@@ -1161,7 +1161,7 @@ def _human(tag: str) -> str:
 
 # a line of an agency post that the rich post already shows as fields (old-base objects keep the whole old post as
 # their description): hashtags, the 📍 maps link, amenities, price/deposit, contacts, the «APARTMENTS ON MAP» footer
-HGE_MAP = "https://hge.ge/map/"
+MAPS_POINT = re.compile(r"!3d(4[01]\.\d+)!4d(4[3-6]\.\d+)|@(4[01]\.\d+),(4[3-6]\.\d+)")  # Georgia only
 POST_SERVICE_LINE = re.compile(r"#\w|^\s*[📍🏢✨🏠✅✖️👬🕐💰📲🚇🌟📱🗳🎥❗]|\]\(https?://|commission|deposit|sq\.?\s?m|\+995|apartments on map", re.I)
 
 
@@ -1176,7 +1176,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     """The post as a Telegram rich message (Bot API sendRichMessage) in the @tbilisi_rent style (Irakli's video
     2026-11-09): photo slideshow, «$price · beds · district» title, «building · m² · floor · ID» line, 📍 address (the
     map link) and Ⓜ metro, the description, collapsed «Parameters and amenities» (a table + one ✅ line) and «Tags», then
-    two buttons in a row: «On the map» (hge.ge/map, the agency's map) and «I like it» (our bot: a lead). No map block,
+    two buttons in a row: «On the map» (our /map page with the pin) and «I like it» (a bot button: a lead). No map block,
     no footer (the contacts sit in Tags); an old-base description is cut to its own words (prose()). media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
     f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
     sale = f.get("deal") == "Sale"
@@ -1225,9 +1225,20 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
                '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">FB</a> · '
                '<a href="https://youtube.com/@rentintbilisi">YouTube</a></p></details>')
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
-    bot = f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}"  # bot.on_start -> journey.on_post_start: a lead
-    # the agency's own map of all listings (the old posts' «APARTMENTS ON MAP»); the 📍 address above is the pin
-    out.append("<tg-button-row>" + btn("📍 On the map", HGE_MAP) + btn("❤️ I like it", bot, ' style="primary"') + "</tg-button-row>")
+    # «On the map»: our map Mini App page with the object's pin (as «📍 На карте» on the bot's cards; a channel can't
+    # open a web_app button, so it's a link), Google Maps without a point. «I like it»: a plain bot button (callback
+    # plike:<id>); the bot answers with t.me/<bot>?start=p<id> -> the same lead as before (bot.on_button)
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    pin, at = None, None
+    if listing is not None and listing.lat is not None and listing.lng is not None:
+        at, prec = (float(listing.lat), float(listing.lng)), listing.geo_precision or ""
+    elif m := MAPS_POINT.search(p.description or ""):  # an old-base post's Google Maps link: !3d<lat>!4d<lng> or @lat,lng
+        at, prec = (float(m[1] or m[3]), float(m[2] or m[4])), "точный"
+    if at:
+        pin = f"{env.PUBLIC_URL.rstrip('/')}/map?" + urlencode({"pin": f"{at[0]:.6f},{at[1]:.6f}", "prec": prec,
+                                                                "title": head, "lang": "en"})
+    like = f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button>'
+    out.append("<tg-button-row>" + (btn("📍 On the map", pin or url) if pin or url else "") + like + "</tg-button-row>")
     return "".join(out)
 
 
