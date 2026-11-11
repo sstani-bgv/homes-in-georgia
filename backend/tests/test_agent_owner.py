@@ -142,3 +142,10 @@ def test_sale_post(db):
                  "✅ #Balcony ✅ #Elevator", "💰255.000$", "#Price240000to270000", "SALE IN TBILISI🇬🇪"):
         assert line in lines, line
     assert not any(x.startswith(("🐕", "👬", "✖️")) for x in lines)  # rent-only lines
+    # the old sale block: #6Bedplus, #NewApartment, only its 12 amenities in its order (WiFi from a rent prefill dropped)
+    p.bedrooms, p.post_fields = 7, {**p.post_fields, "design": "New", "amenities": ["WiFi", "Elevator", "Oven", "Balcony", "Bath"]}
+    lines = properties.post_text(db, p).split("\n")
+    for line in ("🏢 #6Bedplus #Apartment for #Sale", "✨ #NewBuilding | #NewApartment | #WhiteFrame",
+                 "✅ #Balcony ✅ #Oven ✅ #Bath", "✅ #Elevator"):
+        assert line in lines, line
+    assert "#WiFi" not in "\n".join(lines)

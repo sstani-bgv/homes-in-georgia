@@ -944,6 +944,9 @@ POST_MANY = {
                   "Microwave", "WashingMachine", "VacuumCleaner", "Fireplace") + FIXED_AMENITIES,
     "periods": ("1Day", "1Month", "2Month", "3Month", "4Month", "5Month", "6Month", "9Month", "12Month"),
 }
+# the old generator's sale block offers only these amenities, in this order (s-amenity); others stay out of a sale post
+SALE_AMENITIES = ("Balcony", "Terrace", "Courtyard", "ParkingPlace", "Conditioner", "Dishwasher", "Oven", "Stove", "Bath",
+                  "Shower", "Elevator", "Fireplace")
 POST_NUM = ("tenants", "deposit", "sale_price")  # tenants max (1-N); deposit $ (default = price, 0 = none); sale price $
 
 
@@ -1093,8 +1096,11 @@ def post_text(db: Session, p: Property) -> str:
     if f.get("discount"):
         lines += ["❗️#Discount", ""]
     beds = "#Studio " if p.bedrooms == 0 else (f"#{p.bedrooms}Bed " if p.bedrooms else "")
+    if sale and p.bedrooms and p.bedrooms >= 6:
+        beds = "#6Bedplus "  # the old sale block: #5Bed, then #6Bedplus
     lines.append(f"🏢 {beds}{tag('prop_type') or '#Apartment'} for {'#Sale' if sale else '#Rent'}")
-    style = [x for x in (tag("building"), tag("design"), sale and tag("condition")) if x]
+    design = "#NewApartment" if sale and f.get("design") == "New" else tag("design")  # the old sale block's tag
+    style = [x for x in (tag("building"), design, sale and tag("condition")) if x]
     if style:
         lines.append("✨ " + " | ".join(style))
     spec = []
@@ -1108,6 +1114,7 @@ def post_text(db: Session, p: Property) -> str:
     lines.append("")
     am = f.get("amenities") or []
     if sale:
+        am = [a for a in SALE_AMENITIES if a in am]
         lines += [" ".join(f"✅ #{a}" for a in am[i:i + 3]) for i in range(0, len(am), 3)]
     else:
         has = [a for a in am if a not in FIXED_AMENITIES] + [a for a in FIXED_AMENITIES if a in am]
