@@ -1,8 +1,8 @@
 """Contract drafts in the deal: the wizard autosaves a partly filled contract (no html / PDF yet, kind / lang may be
 unset), regeneration keeps the previous PDFs (versions), generated_at tells «PDF устарел» after a later edit
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0013
+Revises: 0012
 """
 from typing import Sequence, Union
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = '0012'
-down_revision: Union[str, Sequence[str], None] = '0011'
+revision: str = '0013'
+down_revision: Union[str, Sequence[str], None] = '0012'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
