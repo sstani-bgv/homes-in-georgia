@@ -6,6 +6,7 @@ import { BackLink } from '../layout/back';
 import { Heart, Plus, Search, ThumbsDown } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import type { ClientEvent, ClientEventType, ClientRefusal, Owner } from '../api/types';
 import { LeadStatusBadge, PropertyStatusBadge } from '../components/domain';
 import { errText, useToast } from '../components/toast';
@@ -192,6 +193,7 @@ function OwnerForm({ owner, onDone }: { owner?: Owner; onDone: () => void }) {
 }
 
 export function OwnersPage() {
+  const { isStaff } = useAuth();
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'base' | 'unlinked' | 'agents'>('base');
   const [open, setOpen] = useState<Owner | 'new' | null>(null);
@@ -216,7 +218,7 @@ export function OwnersPage() {
               {items.map((o) => (
                 <tr key={o.id} className="clickable" onClick={() => setOpen(o)}>
                   <td><b>{o.name || '—'}</b></td>
-                  <td className="num">{o.phone || <span className="muted">скрыт</span>}</td>
+                  <td className="num">{o.phone || <span className="muted">{isStaff ? 'не указан' : 'скрыт'}</span>}</td>
                   <td className="hide-mobile">{o.address || '—'}</td>
                   <td>{o.is_agent ? <Badge tone="warn">агент</Badge> : <Badge tone="ok">собственник</Badge>}</td>
                   <td className="muted hide-mobile">{fmtDate(o.created_at)}</td>

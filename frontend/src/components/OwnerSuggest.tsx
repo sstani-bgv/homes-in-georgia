@@ -5,8 +5,10 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Owner } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 
 export function OwnerSuggest({ query, onPick }: { query: string; onPick: (o: Owner) => void }) {
+  const { isStaff } = useAuth();
   const [q, setQ] = useState('');
   const [hidden, setHidden] = useState(false);
   useEffect(() => {
@@ -22,7 +24,7 @@ export function OwnerSuggest({ query, onPick }: { query: string; onPick: (o: Own
       {items.map((o) => (
         <button key={o.id} type="button" className="list-row" style={{ textAlign: 'left', background: 'none', border: 0, cursor: 'pointer', padding: '6px 8px' }}
           onClick={() => { onPick(o); setHidden(true); }}>
-          <span className="grow"><b>{o.name || '—'}</b> <span className="muted num">{o.phone || 'телефон скрыт'}</span>
+          <span className="grow"><b>{o.name || '—'}</b> <span className="muted num">{o.phone || (isStaff ? 'без телефона' : 'телефон скрыт')}</span>
             {o.address && <div className="faint" style={{ fontSize: 12 }}>{o.address}</div>}</span>
         </button>
       ))}

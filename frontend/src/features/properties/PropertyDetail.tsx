@@ -73,8 +73,10 @@ function useProp(id: number) {
 }
 
 function OwnerPhone({ p }: { p: Property }) {
+  const { user, isStaff } = useAuth();
   const phone = p.owner?.phone || p.owner_phone;
-  if (!phone) return <span className="muted">скрыт</span>;
+  // the backend hides it only from agents on someone else's object (can_see_owner); otherwise there is no number
+  if (!phone) return <span className="muted">{!isStaff && p.agent?.id !== user?.id ? 'скрыт' : 'не указан'}</span>;
   return <span className="row gap-sm" style={{ display: 'inline-flex' }}><a href={`tel:${phone.replace(/[^+\d]/g, '')}`} style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatPhone(phone)}</a><CopyPhone phone={phone} /></span>;
 }
 
