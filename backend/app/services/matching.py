@@ -188,7 +188,7 @@ def process(db: Session, ids: list[str]) -> dict:
         return counts
     objs = _objects(db)
     linked = set(db.scalars(select(PropertyListing.listing_id).where(PropertyListing.listing_id.in_(ids))))
-    alerts = []
+    alerts, fresh = [], []
     for l in db.scalars(select(Listing).where(Listing.id.in_(ids)).order_by(Listing.id)):
         if l.id in linked:
             continue
@@ -210,6 +210,9 @@ def process(db: Session, ids: list[str]) -> dict:
             counts[SIMILAR] += 1
         else:
             counts[NONE] += 1
+        if not (found and found[0]["verdict"] == SAME):
+            fresh.append(l)
+    P.store_similar(db, fresh)  # «В архиве по этому адресу: N» on the ad's card
     db.commit()
     _send(alerts)
     return counts

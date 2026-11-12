@@ -129,7 +129,7 @@ class ListingMatch(Base):
     property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
     score = Column(Float, nullable=False, server_default=text("0"))
     reasons = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
-    status = Column(Text, nullable=False, server_default="pending")  # pending | confirmed | rejected
+    status = Column(Text, nullable=False, server_default="pending")  # pending | confirmed | rejected | address (a hint, 0014)
     decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     decided_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
