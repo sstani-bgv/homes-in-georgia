@@ -141,7 +141,7 @@ export function DealsList({ onOpen, agentId }: { onOpen: (id: number) => void; a
       </div>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Сделок нет" /> : (
         <div className="card table-wrap">
-          <table className="table">
+          <table className="table table-stack">
             <thead><tr><th>#</th><th>Дата</th><th>Агент</th><th>Адрес</th><th>Цена</th><th className="hide-mobile">Комиссия</th><th className="hide-mobile">Агенту</th><th>Статус</th></tr></thead>
             <tbody>
               {items.map((d) => (
