@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { http } from '../api/client';
+import { insideTelegram, tgWebApp } from '../auth/AuthContext';
 import { Button, Loading } from './ui';
 
 export interface RegTexts { listTitle: string; listHint: string; open: string; picked: string; more: string; none: string; down: string }
@@ -42,7 +43,8 @@ export function RegistryApps({ base, personalId, picked, onPick, t }: { base: st
       {items.map((a) => {
         const on = picked?.app_id === a.app_id;
         return (
-          <a key={a.app_id} href={a.url} target="_blank" rel="noreferrer" onClick={() => onPick?.(a)} className="card card-pad col"
+          <a key={a.app_id} href={a.url} target="_blank" rel="noopener noreferrer"
+            onClick={(e) => { onPick?.(a); if (insideTelegram()) { e.preventDefault(); tgWebApp()?.openLink?.(a.url); } }} className="card card-pad col"
             style={{ gap: 2, textDecoration: 'none', color: 'inherit', border: `1.5px solid ${on ? 'var(--ok, #1a7f4b)' : 'var(--line, #e3e8f0)'}`, padding: 12 }}>
             <span className="row row-between gap-sm">
               <b>{day(a.date)} · №{a.reg_number}</b>
