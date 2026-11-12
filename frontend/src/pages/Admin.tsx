@@ -153,7 +153,7 @@ function Invites() {
     <>
       <h3 style={{ margin: '22px 0 10px' }}>Приглашения</h3>
       <div className="card table-wrap">
-        <table className="table">
+        <table className="table table-stack">
           <thead><tr><th>Кому</th><th>Роль</th><th>Статус</th><th className="hide-mobile">Создал</th><th className="hide-mobile">До</th><th /></tr></thead>
           <tbody>{items.map((i) => (
             <tr key={i.id}>
@@ -216,7 +216,7 @@ function Users() {
       </div>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
         <div className="card table-wrap">
-          <table className="table">
+          <table className="table table-stack">
             <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th>Хэштег</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
             <tbody>
               {active.map(row)}

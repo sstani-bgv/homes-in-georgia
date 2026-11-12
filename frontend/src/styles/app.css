@@ -44,7 +44,9 @@ html, body, #root { height: 100%; }
 /* Telegram Mini App (AuthContext adds .tg): the document itself never scrolls — on clients without
    disableVerticalSwipes a pull-down at the page top collapses the app — #root is the scroll container instead */
 html.tg, html.tg body { height: var(--tg-viewport-stable-height, 100vh); overflow: hidden; overscroll-behavior: none; }
-html.tg #root { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* overflow-x must be explicit: with overflow-y: auto a «visible» x computes to auto, and any long address or link
+   made the whole Mini App pan sideways (html's overflow-x: clip below doesn't reach inside #root) */
+html.tg #root { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 body {
   margin: 0;
   font-family: var(--font);
@@ -102,7 +104,11 @@ a.brand, a.brand:hover { color: inherit; text-decoration: none; }
   padding: 12px var(--gutter); background: #F3F5F9;
   border-bottom: 1px solid var(--line);
 }
+/* long unbroken data (addresses, ss.ge links, cadastral codes, e-mails) wraps instead of pushing cards past the screen
+   edge; tables keep whole words — they scroll inside .table-wrap */
 .content { padding: 20px var(--gutter) 40px; max-width: 1440px; width: 100%; margin: 0 auto; }
+.content, .drawer-body, .modal { overflow-wrap: anywhere; }
+:is(.content, .drawer-body, .modal) .table { overflow-wrap: normal; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .page-head .label { margin-bottom: 4px; display: block; }
 
@@ -201,9 +207,9 @@ a.brand, a.brand:hover { color: inherit; text-decoration: none; }
 .badge {
   display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px;
   font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; background: var(--brand-soft); color: var(--brand);
-  white-space: nowrap;
+  white-space: nowrap; max-width: 100%; overflow: hidden;
 }
-.badge-red { background: var(--accent); color: #fff; }
+.badge-red{ background: var(--accent); color: #fff; }
 .badge-redsoft { background: var(--accent-soft); color: var(--accent); }
 .badge-ok { background: var(--ok-soft); color: var(--ok); }
 .badge-warn { background: var(--warn-soft); color: var(--warn); }
@@ -592,7 +598,8 @@ details > summary::-webkit-details-marker { display: none; }
    16px fields on phones, and the page itself never scrolls horizontally (clip keeps position: sticky working). */
 html, body { overflow-x: clip; }
 @media (max-width: 768px) {
-  input, select, textarea, .input, .select, .textarea { font-size: 16px; }
+  /* !important: class rules (.dp-sel 13px, inline styles) used to win over the element selector and the zoom came back */
+  input, select, textarea, .input, .select, .textarea { font-size: 16px !important; }
 }
 /* per-photo room: the badge shows the room, an invisible 16px select on top opens the native picker */
 .photo-strip .ph .room-pick { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); }
@@ -658,3 +665,44 @@ html, body { overflow-x: clip; }
 .photo-strip .ph.drop-slot > * { visibility: hidden; }
 .drag-ghost { position: fixed; z-index: 1000; pointer-events: none; border-radius: var(--r-sm); overflow: hidden; transform: scale(1.06); box-shadow: 0 12px 28px rgba(0,0,0,.3); opacity: .92; }
 .drag-ghost img, .drag-ghost video { width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------- phone ergonomics (2026-11-12) ---------- */
+/* wide tables on a phone: each row becomes a wrapped line of its cells (opt-in: rows whose cells read on their own) */
+@media (max-width: 600px) {
+  .table-stack thead { display: none; }
+  .table-stack, .table-stack tbody { display: block; }
+  .table-stack tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .table-stack tr:last-child { border-bottom: 0; }
+  .table-stack td { padding: 0; border: 0; overflow-wrap: anywhere; }
+  .table-stack td:empty { display: none; }
+  .table-stack tbody tr.clickable:hover td { background: none; }
+}
+/* touch: small controls keep their look, but the finger target grows to 44px (Apple HIG) via an invisible halo */
+@media (pointer: coarse) {
+  :is(.btn-sm, .icon-btn, .tabs button, .seg button, .chip, .dp-nav, a.label, .topbar .brand-mark, .modal-head .btn, .drawer-head .btn) { position: relative; }
+  :is(.btn-sm, .icon-btn, .tabs button, .seg button, .chip, .dp-nav, a.label, .topbar .brand-mark, .modal-head .btn, .drawer-head .btn)::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
+  }
+  .btn:not(.btn-sm) { min-height: 44px; }
+}
+/* the on-screen keyboard is up: the bottom nav would ride on top of it and cover the field being typed in */
+@media (max-width: 767px) {
+  body:has(:is(input:not([type=checkbox], [type=radio], [type=range], [type=file]), textarea, select, [contenteditable="true"]):focus) .bottom-nav { display: none; }
+}
+/* modals and drawers: the real visible height (iOS toolbars, Telegram viewport), a fixed head, the home indicator */
+.modal { max-height: calc(100vh - 40px); max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); display: flex; flex-direction: column; overflow: hidden; }
+html.tg .modal { max-height: calc(var(--tg-viewport-height, 100dvh) - 24px); }
+.modal-body { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.modal-head, .drawer-head { gap: 12px; }
+.modal-head h2, .drawer-head h2 { min-width: 0; }
+.drawer { height: 100%; height: 100dvh; }
+html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
+.drawer-head { padding-top: max(16px, env(safe-area-inset-top)); }
+.drawer-body { padding-bottom: calc(32px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
+.topbar { padding-top: max(12px, env(safe-area-inset-top)); }
+@media (max-width: 767px) { .toasts { bottom: calc(96px + env(safe-area-inset-bottom)); } }
+/* contract wizard stepper: all five steps on a phone instead of a hidden sideways scroll */
+@media (max-width: 600px) {
+  .step { min-width: 0; }
+  .step .step-label { font-size: 9px; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+}
