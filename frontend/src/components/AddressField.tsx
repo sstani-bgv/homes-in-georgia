@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseLayer } from '../lib/mapTiles';
 import { MapPin } from 'lucide-react';
 import { api } from '../api';
 import type { GeoHit } from '../api/types';
@@ -30,7 +31,7 @@ function PointMap({ point, onPoint, disabled }: { point: Point | null; onPoint: 
   useEffect(() => {
     if (!box.current) return;
     const m = L.map(box.current).setView(point ? [point.lat, point.lng] : TBILISI, point ? 17 : 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+    addBaseLayer(m);
     if (!disabled) m.on('click', (e: L.LeafletMouseEvent) => cb.current({ lat: e.latlng.lat, lng: e.latlng.lng }));
     const ro = new ResizeObserver(() => m.invalidateSize());
     ro.observe(box.current);

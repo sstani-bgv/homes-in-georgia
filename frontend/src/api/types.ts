@@ -621,7 +621,7 @@ export interface Cabinet {
 
 export type Settings = Record<string, unknown>;
 
-export interface AppConfig { bot_username?: string; public_url?: string; mock?: boolean }
+export interface AppConfig { bot_username?: string; public_url?: string; maptiler_key?: string; mock?: boolean }
 
 export interface WeeklyListings { total: number; week_start: string; by_agent: Record<string, number>; top_agents: { name: string; count: number }[] }
 /** GET /api/analytics/listings */

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     PUBLIC_URL: str = "http://localhost:8000"
     BOT_TOKEN: str = ""
     BOT_USERNAME: str = "HomesinGeorgia_bot"
+    MAPTILER_KEY: str = ""  # browser map tiles (lock to our domains in MapTiler); empty = free OSM tiles
     LOGIN_BOT_TOKEN: str = ""  # CRM sign-in bot token; empty = BOT_TOKEN
     PASSWORD_LOGIN: bool = True  # False = CRM sign-in only via Telegram
     LOGIN_BOT_USERNAME: str = ""  # CRM sign-in bot. Made with Claude (Anthropic), Homes in Georgia, Irakli Kvirkvelia

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseLayer } from '../../lib/mapTiles';
 import { LocateFixed } from 'lucide-react';
 import type { Listing } from '../../api/types';
 import { Button, Modal } from '../../components/ui';
@@ -26,7 +27,7 @@ export function ListingsMap({ items, card }: { items: Listing[]; card: (l: Listi
   useEffect(() => {
     if (!box.current || map.current) return;
     map.current = L.map(box.current, { zoomControl: true }).setView(TBILISI, 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayer(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     // the Telegram webview / a rotated phone resizes the box: Leaflet must know, or part of the map stays grey
     map.current.on('dragstart zoomstart', (e) => { if ((e as L.LeafletEvent & { originalEvent?: Event }).originalEvent) moved.current = true; });
