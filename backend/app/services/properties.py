@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app import districts, storage
 from app.config import settings as env
 from app.models import (ARCHIVE_REASONS, PUBLICATION_CHANNELS, ChannelPost, Deal, Event, Listing, ListingMatch, Owner,
-                        Property, PropertyListing, PropertyMedia, PropertyPublication, User, at_least, is_field)
+                        Property, PropertyListing, PropertyMedia, PropertyPublication, Source, User, at_least, is_field)
 from app.services import jobs
 from app.services import users as users_svc
 from app.services import settings as settings_svc
@@ -177,22 +177,25 @@ def _untaken():
     return (Listing.status.in_(("published", "pending_review")), Listing.source.not_in(("agency", "object")), Listing.id.not_in(taken))
 
 
-def new_listings(db: Session, q: str | None = None, source: str | None = None, flag: str | None = None,
-                 limit: int = 50, offset: int = 0, district: str | None = None, metro: str | None = None,
+def new_listings(db: Session, q: str | None = None, source: str | list[str] | None = None, flag: str | None = None,
+                 limit: int = 50, offset: int = 0, district: str | list[str] | None = None, metro: str | None = None,
                  price_min: int | None = None, price_max: int | None = None, bedrooms: str | None = None,
                  known: bool = False) -> dict:
-    """Listings not yet taken into work, newest first. `source` is a type (ss, facebook…) or an exact source (fb:group).
+    """Listings not yet taken into work, newest first. `source` is a type (ss, facebook…) or an exact source (fb:group);
+    `source` and `district` take one value or a list (any of them).
     Ads the matcher already linked to an object («уже известные») are hidden unless known=True; known_total counts them."""
     stmt = select(Listing).where(*_untaken())
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Listing.address.ilike(like), Listing.district.ilike(like), Listing.text.ilike(like),
                               Listing.id.ilike(like)))
-    if source:
-        pref = SOURCE_PREFIX.get(source)
-        stmt = stmt.where(Listing.id.ilike(f"{pref}%") if pref else Listing.source == source)
-    if district:
-        stmt = stmt.where(Listing.district == district)
+    sources = [x for x in ([source] if isinstance(source, str) else source or []) if x]
+    if sources:
+        stmt = stmt.where(or_(*(Listing.id.ilike(f"{SOURCE_PREFIX[x]}%") if x in SOURCE_PREFIX else Listing.source == x
+                                for x in sources)))
+    districts = [x for x in ([district] if isinstance(district, str) else district or []) if x]
+    if districts:
+        stmt = stmt.where(Listing.district.in_(districts))
     if metro:
         stmt = stmt.where(_metro() == metro)
     if price_min is not None:
@@ -307,7 +310,13 @@ def new_listing_facets(db: Session) -> dict:
         return [{"value": v, "count": n} for v, n in rows]
     # Threads is one search over every author (th:<author> per ad): one option, filtered by its type
     source = case((Listing.source.like("th:%"), "threads"), else_=Listing.source)
-    return {"sources": facet(source), "districts": facet(Listing.district), "metros": facet(_metro())}
+    sources = facet(source)
+    # Facebook groups are keyed by a group id/slug: show the name the admin gave it in «Источники»
+    names = dict(db.execute(select("fb:" + Source.key, Source.name).where(Source.kind == "fb_group", Source.name.isnot(None))).all())
+    for x in sources:
+        if names.get(x["value"]):
+            x["label"] = names[x["value"]]
+    return {"sources": sources, "districts": facet(Listing.district), "metros": facet(_metro())}
 
 
 # ---------------------------------------------------------------- take (C1 → C2)

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 
 from app import worker
-from app.models import Job, Listing, Owner, Property, Report
+from app.models import Job, Listing, Owner, Property, Report, Source
 from app.services import jobs, properties
 from app.services.dedup import address_match, norm_phone
 from tests.conftest import auth, fill_required, make_client_listing, make_listing, make_user
@@ -154,6 +154,16 @@ def test_new_listing_filters(db, client):
     f = client.get("/api/listings/new/facets", headers=auth(georgiy)).json()
     assert {"value": "threads", "count": 2} in f["sources"] and not any(x["value"].startswith("th:") for x in f["sources"])
     assert ids("source=threads") == ["th4", "th5"]
+    # multi-select: any of several sources / districts; the single param keeps working
+    assert ids("source=ss&source=threads") == ["ss1", "th4", "th5"]
+    assert ids("source=fb:Tbilisi rent&source=ss") == ["fb2", "ss1"]
+    make_listing(db, "ss6", source="ss.ge", district="Чугурети")
+    assert ids("district=Чугурети&district=Сабуртало") == ["fb2", "fb3", "ss6"]
+    assert ids("source=ss&district=Чугурети&district=Сабуртало") == ["ss6"]
+    db.add(Source(kind="fb_group", key="Tbilisi rent", name="Аренда Тбилиси"))
+    db.commit()
+    f = client.get("/api/listings/new/facets", headers=auth(georgiy)).json()
+    assert {"value": "fb:Tbilisi rent", "count": 1, "label": "Аренда Тбилиси"} in f["sources"]
 
 
 def test_feed_similar_dismiss_and_agent(db, client):

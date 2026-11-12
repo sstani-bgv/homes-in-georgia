@@ -1,8 +1,8 @@
 // Small brand component kit built on CSS variables (styles/app.css).
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, ChevronLeft, ChevronRight, Inbox, X } from 'lucide-react';
-import { DISTRICT_LIST, DISTRICTS, districtLabel, initials, phoneBlur, phoneFocus } from '../lib/format';
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Inbox, X } from 'lucide-react';
+import { DISTRICT_LIST, DISTRICTS, districtLabel, initials, phoneBlur, phoneFocus, pluralForm } from '../lib/format';
 import { mediaUrl } from '../api/client';
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ok';
@@ -65,20 +65,15 @@ const WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
-/** The brand date picker behind every <Input type="date">: same value (YYYY-MM-DD) and onChange(e.target.value)
- * contract as the native input, whose browser calendar can't be styled. Month + year selects for birth dates. */
-function DateInput({ value, onChange, min, max, disabled, placeholder = 'Выберите дату', name, style, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  const v = typeof value === 'string' && /^\d{4}-\d\d-\d\d$/.test(value) ? value : '';
-  const lo = typeof min === 'string' ? min : '', hi = typeof max === 'string' ? max : '';
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState('');  // YYYY-MM shown
+/** A dropdown under (or above) a trigger: a portal at fixed coordinates, so cards / drawers around the field can't clip
+ * it or paint over it; closes on an outside tap or Escape. Shared by the date picker and MultiSelect. */
+function usePopover(open: boolean, setOpen: (v: boolean) => void, height = 380) {
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number }>({ left: 0 });
   const box = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    // a portal at fixed coordinates: cards / drawers around the field can't clip it or paint over it
     const place = () => {
-      const r = box.current!.getBoundingClientRect(), below = innerHeight - r.bottom > 380 || r.top < 380;
+      const r = box.current!.getBoundingClientRect(), below = innerHeight - r.bottom > height || r.top < height;
       setPos({ left: Math.max(8, Math.min(r.left, innerWidth - 304)), ...(below ? { top: r.bottom + 6 } : { bottom: innerHeight - r.top + 6 }) });
     };
     place();
@@ -93,6 +88,17 @@ function DateInput({ value, onChange, min, max, disabled, placeholder = 'Выб�
       removeEventListener('scroll', place, true); removeEventListener('resize', place);
     };
   }, [open]);
+  return { pos, box, pop };
+}
+
+/** The brand date picker behind every <Input type="date">: same value (YYYY-MM-DD) and onChange(e.target.value)
+ * contract as the native input, whose browser calendar can't be styled. Month + year selects for birth dates. */
+function DateInput({ value, onChange, min, max, disabled, placeholder = 'Выберите дату', name, style, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+  const v = typeof value === 'string' && /^\d{4}-\d\d-\d\d$/.test(value) ? value : '';
+  const lo = typeof min === 'string' ? min : '', hi = typeof max === 'string' ? max : '';
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState('');  // YYYY-MM shown
+  const { pos, box, pop } = usePopover(open, setOpen);
   const emit = (s: string) => {
     onChange?.({ target: { value: s, name }, currentTarget: { value: s, name } } as unknown as ChangeEvent<HTMLInputElement>);
     setOpen(false);
@@ -156,6 +162,50 @@ export function Select({ options, placeholder, ...p }: SelectHTMLAttributes<HTML
       {placeholder !== undefined && <option value="">{placeholder}</option>}
       {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
+  );
+}
+/** Several values from a list with counts (David 11-12: «4 источника и 4 района сразу»). Closed: «ss.ge, myhome.ge +2»,
+ * or «3 района» when `many` gives the noun's forms (1 / 2-4 / 5+). A filter box appears on long lists. */
+export function MultiSelect({ value, onChange, options, placeholder, many, label: aria, style }: {
+  value: string[]; onChange: (v: string[]) => void; options: { value: string; label: string; count?: number }[];
+  placeholder: string; many?: [string, string, string]; label?: string; style?: CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const { pos, box, pop } = usePopover(open, setOpen, 420);
+  const picked = new Set(value);
+  const name = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const text = !value.length ? placeholder : value.length === 1 ? name(value[0])
+    : many ? `${value.length} ${many[pluralForm(value.length)]}`
+    : `${value.slice(0, 2).map(name).join(', ')}${value.length > 2 ? ` +${value.length - 2}` : ''}`;
+  const toggle = (v: string) => onChange(picked.has(v) ? value.filter((x) => x !== v) : [...value, v]);
+  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options;
+  return (
+    <div className="dp" style={style}>
+      <button type="button" ref={box} className={`input dp-trigger ms-trigger ${value.length ? '' : 'dp-empty'}`} onClick={() => setOpen(!open)}
+        aria-label={aria} aria-haspopup="listbox" aria-expanded={open}>
+        <span>{text}</span><ChevronDown size={16} />
+      </button>
+      {open && createPortal(
+        <div className="dp-pop ms-pop" ref={pop} style={pos}>
+          {options.length > 10 && <input className="input ms-q" placeholder="Найти" value={q} onChange={(e) => setQ(e.target.value)} />}
+          <div className="ms-list" role="listbox" aria-multiselectable="true" aria-label={aria}>
+            {shown.map((o) => (
+              <label key={o.value} className={`ms-opt${picked.has(o.value) ? ' sel' : ''}`}>
+                <input type="checkbox" checked={picked.has(o.value)} onChange={() => toggle(o.value)} />
+                <span className="ms-name">{o.label}</span>
+                {o.count !== undefined && <span className="ms-count">{o.count}</span>}
+              </label>
+            ))}
+            {!shown.length && <div className="faint" style={{ fontSize: 13, padding: 8 }}>Ничего не найдено</div>}
+          </div>
+          <div className="dp-foot">
+            {!!value.length && <button type="button" className="dp-link dp-clear" style={{ marginLeft: 0 }} onClick={() => onChange([])}>Сбросить</button>}
+            <button type="button" className="dp-link" style={{ marginLeft: 'auto' }} onClick={() => setOpen(false)}>Готово</button>
+          </div>
+        </div>, document.body,
+      )}
+    </div>
   );
 }
 /** The channel's districts in groups (native select: the phone's own picker, type-to-find on desktop). An old value that

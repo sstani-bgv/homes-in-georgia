@@ -54,13 +54,14 @@ function telegramReauth(): Promise<boolean> {
   return reauth;
 }
 
-type Query = Record<string, string | number | boolean | null | undefined>;
+type Query = Record<string, string | number | boolean | null | undefined | string[]>;
 
 function qs(q?: Query): string {
   if (!q) return '';
   const p = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
+    if (Array.isArray(v)) v.forEach((x) => p.append(k, x));  // ?source=ss&source=myhome
+    else if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
   });
   const s = p.toString();
   return s ? `?${s}` : '';

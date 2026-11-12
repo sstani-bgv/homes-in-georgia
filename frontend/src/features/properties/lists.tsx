@@ -11,13 +11,18 @@ import { dragBoardProps } from '../leads/LeadBoard';
 import { pageScroller, useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
+import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, MultiSelect, Select, Seg } from '../../components/ui';
 import { ListingsMap } from './ListingsMap';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
 const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', th: 'Threads', tg: 'Telegram' };
-const sourceName = (s: string) => { const [k, ...rest] = s.split(':'); return PREFIX_LABEL[k] && rest.length ? `${PREFIX_LABEL[k]} · ${rest.join(':')}` : SOURCE_LABEL[s] || s; };
+/** a Facebook group is keyed by its numeric id: its name from «Источники» (facet label), else «группа …1234» */
+const sourceName = (s: string, label?: string) => {
+  const [k, ...rest] = s.split(':'), key = rest.join(':');
+  if (!PREFIX_LABEL[k] || !rest.length) return SOURCE_LABEL[s] || s;
+  return `${PREFIX_LABEL[k]} · ${label || (/^\d{8,}$/.test(key) ? `группа …${key.slice(-4)}` : key)}`;
+};
 const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
 
 const PAGE = 50;
@@ -39,7 +44,7 @@ export function NewListings({ base = '' }: { base?: string }) {
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, view === 'map' ? MAP_LIMIT : limit], queryFn: () => api.listings.new(f, view === 'map' ? MAP_LIMIT : limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
   const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
-  const filtered = Object.entries(f).some(([k, v]) => v && k !== 'q' && k !== 'known');
+  const filtered = Object.entries(f).some(([k, v]) => (Array.isArray(v) ? v.length : v) && k !== 'q' && k !== 'known');
   const take = useMutation({
     mutationFn: (id: string) => api.properties.take(id),
     onSuccess: (p) => {
@@ -126,8 +131,10 @@ export function NewListings({ base = '' }: { base?: string }) {
         ]} />
       </div>
       <div className="row row-wrap gap-sm" style={{ marginBottom: 14 }}>
-        <Select aria-label="Источник" value={f.source || ''} onChange={(e) => set('source')(e.target.value)} placeholder="Все источники" options={opts(facets?.sources, sourceName)} style={{ maxWidth: 260 }} />
-        <Select aria-label="Район" value={f.district || ''} onChange={(e) => set('district')(e.target.value)} placeholder="Все районы" options={opts(facets?.districts)} style={{ maxWidth: 200 }} />
+        <MultiSelect label="Источник" value={f.source || []} onChange={(v) => setF((o) => ({ ...o, source: v }))} placeholder="Все источники"
+          options={(facets?.sources || []).map((x) => ({ value: x.value, label: sourceName(x.value, x.label), count: x.count }))} style={{ width: 240, maxWidth: '100%' }} />
+        <MultiSelect label="Район" value={f.district || []} onChange={(v) => setF((o) => ({ ...o, district: v }))} placeholder="Все районы" many={['район', 'района', 'районов']}
+          options={(facets?.districts || []).map((x) => ({ value: x.value, label: x.value, count: x.count }))} style={{ width: 200, maxWidth: '100%' }} />
         <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое метро" options={opts(facets?.metros)} style={{ maxWidth: 200 }} />
         <input className="input" type="number" inputMode="numeric" min={0} placeholder="Цена от $" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} style={{ width: 110 }} />
         <input className="input" type="number" inputMode="numeric" min={0} placeholder="до $" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} style={{ width: 90 }} />

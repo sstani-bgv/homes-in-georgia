@@ -23,8 +23,8 @@ router = APIRouter(tags=["objects"])
 # ---------------------------------------------------------------- listings
 
 @router.get("/listings/new")
-def listings_new(q: str | None = None, source: str | None = None, flag: str | None = None,
-                 district: str | None = None, metro: str | None = None, bedrooms: str | None = None,
+def listings_new(q: str | None = None, source: list[str] | None = Query(None), flag: str | None = None,
+                 district: list[str] | None = Query(None), metro: str | None = None, bedrooms: str | None = None,
                  price_min: int | None = Query(None, ge=0), price_max: int | None = Query(None, ge=0),
                  limit: int = Query(50, ge=0, le=500), offset: int = Query(0, ge=0), known: int = 0,
                  db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
