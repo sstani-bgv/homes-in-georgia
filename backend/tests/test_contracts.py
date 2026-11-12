@@ -24,8 +24,8 @@ def fake_chrome(monkeypatch):
 
 
 def _lead(db, agent):
-    c = make_client(db)
-    lead = Lead(client_id=c.id, listing_id=make_listing(db).id, agent_id=agent.id, status="agent_assigned",
+    c = make_client(db, external_id=900000 + agent.id)  # one lead per agent in a test
+    lead = Lead(client_id=c.id, listing_id=make_listing(db, f"cx{agent.id}").id, agent_id=agent.id, status="agent_assigned",
                 created_at=now_text(), updated_at=now_text())
     db.add(lead)
     db.commit()
@@ -43,7 +43,7 @@ def test_create_list_pdf_and_lead_summary(db, client):
     ag, other = make_user(db, "agent"), make_user(db, "agent")
     lead = _lead(db, ag)
     c = _new(client, ag, lead_id=lead.id)
-    assert c["status"] == "draft" and c["status_label"] == "Черновик" and c["lead_id"] == lead.id
+    assert c["status"] == "draft" and c["status_label"] == "Сгенерирован" and c["lead_id"] == lead.id
     r = client.get(f"/api/contracts/{c['id']}/pdf", headers=auth(ag))
     assert r.content == PDF and r.headers["content-type"] == "application/pdf" and r.headers["content-disposition"].startswith("inline")
     assert client.get(f"/api/contracts/{c['id']}/pdf?download=1", headers=auth(ag)).headers["content-disposition"].startswith("attachment")
@@ -55,9 +55,9 @@ def test_create_list_pdf_and_lead_summary(db, client):
     assert client.get(f"/api/leads/{lead.id}", headers=auth(ag)).json()["contract"]["status"] == "draft"
     assert client.get(f"/api/leads/{lead.id}/contract", headers=auth(ag)).json()["contract"]["id"] == c["id"]
     # draft is editable, a signed one is not
-    assert client.put(f"/api/contracts/{c['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE}, headers=auth(ag)).json()["lang"] == "RU"
+    assert client.put(f"/api/contracts/{c['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE, "lead_id": lead.id}, headers=auth(ag)).json()["lang"] == "RU"
     client.post(f"/api/contracts/{c['id']}/sign", headers=auth(ag))
-    assert client.put(f"/api/contracts/{c['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE}, headers=auth(ag)).status_code == 409
+    assert client.put(f"/api/contracts/{c['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE, "lead_id": lead.id}, headers=auth(ag)).status_code == 409
 
 
 def test_status_transitions_sign_deal(db, client):
@@ -82,7 +82,7 @@ def test_status_transitions_sign_deal(db, client):
 
 def test_close_without_deal_needs_reason(db, client):
     ag, op = make_user(db, "agent", name="Гиорги"), make_user(db, "operator")
-    c = _new(client, ag)
+    c = _new(client, ag, lead_id=_lead(db, ag).id)
     assert client.post(f"/api/contracts/{c['id']}/close", json={"reason": ""}, headers=auth(ag)).status_code == 400
     assert client.post(f"/api/contracts/{c['id']}/close", json={"reason": "other"}, headers=auth(ag)).status_code == 400
     r = client.post(f"/api/contracts/{c['id']}/close", json={"reason": "other", "comment": "уехал"}, headers=auth(ag)).json()
@@ -100,7 +100,7 @@ def test_close_without_deal_needs_reason(db, client):
 
 def test_share_link_expires(db, client):
     ag = make_user(db, "agent")
-    c = _new(client, ag)
+    c = _new(client, ag, lead_id=_lead(db, ag).id)
     s = client.post(f"/api/contracts/{c['id']}/share", headers=auth(ag)).json()["share"]
     assert s["path"].startswith("/api/public/contracts/") and len(s["path"].split("/")[4]) >= 30
     r = client.get(s["path"])  # no login
@@ -118,7 +118,7 @@ def test_drive_upload_queued_and_skipped(db, client, monkeypatch, tmp_path, capl
     from app import worker
     from app.config import settings
     ag = make_user(db, "agent")
-    c = _new(client, ag)
+    c = _new(client, ag, lead_id=_lead(db, ag).id)
     client.post(f"/api/contracts/{c['id']}/sign", headers=auth(ag))
     job = db.query(Job).filter_by(kind="contract_drive", ref=str(c["id"])).one()
     assert job.done_at is None
@@ -173,7 +173,63 @@ def test_bad_inputs(db):
     ag = make_user(db, "agent")
     with pytest.raises(DomainError):
         C.create(db, {"kind": "x", "lang": "GEO", "html": PAGE}, ag)
+    with pytest.raises(DomainError) as e:  # a contract belongs to a deal (lead / deal), always
+        C.create(db, {"kind": "rent", "lang": "GEO", "html": PAGE}, ag)
+    assert e.value.code == "no_deal"
     other_lead = _lead(db, make_user(db, "agent"))
     with pytest.raises(DomainError) as e:
         C.create(db, {"kind": "rent", "lang": "GEO", "html": PAGE, "lead_id": other_lead.id}, ag)
     assert e.value.code == "not_found"
+
+
+def test_autosave_draft_generate_regenerate_keeps_versions(db, client, fake_chrome):
+    """The wizard autosaves a partly filled form into the deal's draft, reopens it, generates it, and after an edit in
+    the same form regenerates it: the old PDF stays as a version, «PDF устарел» blocks signing until then."""
+    ag = make_user(db, "agent")
+    lead = _lead(db, ag)
+    h = auth(ag)
+    assert client.post("/api/contracts/draft", json={"data": {"owner_full_name": "Нино"}}, headers=h).status_code == 400
+    d = client.post("/api/contracts/draft", json={"lead_id": lead.id, "kind": "rent", "data": {"owner_full_name": "Нино", "_step": 3}},
+                    headers=h).json()
+    assert (d["status"], d["status_label"], d["has_pdf"], d["lang"], d["owner_name"]) == ("draft", "Черновик", False, None, "Нино")
+    # the same deal's form again (no id: a reopened tab) continues the same draft, it isn't a second one
+    d2 = client.post("/api/contracts/draft", json={"lead_id": lead.id, "kind": "rent", "lang": "RU",
+                                                   "data": {"owner_full_name": "Нино", "client_full_name": "Анна", "_step": 3}}, headers=h).json()
+    assert d2["id"] == d["id"] and d2["data"]["client_full_name"] == "Анна" and d2["data"]["_step"] == 3
+    rows = client.get(f"/api/contracts?lead_id={lead.id}", headers=h).json()["items"]
+    assert [(x["id"], x["status_label"]) for x in rows] == [(d["id"], "Черновик")]
+    # not generated: no PDF, no signing, no share; the lead summary shows the draft
+    assert client.post(f"/api/contracts/{d['id']}/sign", headers=h).status_code == 409
+    assert client.post(f"/api/contracts/{d['id']}/share", headers=h).status_code == 409
+    assert client.get(f"/api/leads/{lead.id}", headers=h).json()["contract"]["status_label"] == "Черновик"
+    # generate
+    body = {"kind": "rent", "lang": "RU", "html": PAGE, "lead_id": lead.id, "cadastral": "01.14.12.003.045",
+            "data": {"owner_full_name": "Нино", "price_usd": "800"}}
+    g = client.put(f"/api/contracts/{d['id']}", json=body, headers=h).json()
+    assert (g["status_label"], g["has_pdf"], g["pdf_stale"], g["versions"]) == ("Сгенерирован", True, False, [])
+    # a reopened generated contract: unchanged data saves nothing, an edit marks the PDF stale
+    same = client.post("/api/contracts/draft", json={"id": d["id"], "kind": "rent", "lang": "RU", "data": body["data"]}, headers=h).json()
+    assert same["pdf_stale"] is False
+    step_only = client.post("/api/contracts/draft", json={"id": d["id"], "kind": "rent", "lang": "RU", "data": {**body["data"], "_step": 4}}, headers=h).json()
+    assert step_only["pdf_stale"] is False and step_only["data"]["_step"] == 4  # the wizard's step isn't an edit
+    edit = {**body["data"], "price_usd": "850"}
+    assert client.post("/api/contracts/draft", json={"id": d["id"], "kind": "rent", "lang": "RU", "data": edit}, headers=h).json()["pdf_stale"]
+    assert client.post(f"/api/contracts/{d['id']}/sign", headers=h).json()["code"] == "pdf_stale"
+    # regenerate: the new PDF, the old one kept as version 1
+    fake_chrome.clear()
+    r = client.put(f"/api/contracts/{d['id']}", json={**body, "data": edit, "html": PAGE.replace("ხელშეკრულება", "v2")}, headers=h).json()
+    assert r["pdf_stale"] is False and len(r["versions"]) == 1 and r["versions"][0]["by"]["id"] == ag.id
+    assert client.get(f"/api/contracts/{d['id']}/pdf?version=0", headers=h).content == PDF
+    assert client.get(f"/api/contracts/{d['id']}/pdf?version=5", headers=h).status_code == 404
+    assert "v2" in fake_chrome[0]
+    assert client.post(f"/api/contracts/{d['id']}/sign", headers=h).json()["status"] == "signed"
+    # signed: the form can't change it any more; a new autosave for the deal starts a fresh draft, the signed one
+    # stays the lead's contract (the deal guard reads it)
+    assert client.post("/api/contracts/draft", json={"id": d["id"], "data": edit}, headers=h).status_code == 409
+    n = client.post("/api/contracts/draft", json={"lead_id": lead.id, "data": {"x": "1"}}, headers=h).json()
+    assert n["id"] != d["id"]
+    assert client.get(f"/api/leads/{lead.id}", headers=h).json()["contract"]["id"] == d["id"]
+    # the agent's cabinet list: staff filter by agent
+    op = make_user(db, "operator")
+    assert client.get(f"/api/contracts?agent_id={ag.id}&status=all", headers=auth(op)).json()["total"] == 2
+    assert client.get(f"/api/contracts?agent_id={op.id}&status=all", headers=auth(op)).json()["total"] == 0

@@ -39,6 +39,16 @@ def contract_send(body: ContractFileIn, user: User = Depends(current_user)):
 
 # ---- stored contracts (services/contracts.py): list, PDF, lifecycle, share link
 
+class DraftIn(BaseModel):
+    """The wizard's autosave: whatever is filled so far."""
+    id: int | None = None
+    kind: str | None = None
+    lang: str | None = None
+    lead_id: int | None = None
+    deal_id: int | None = None
+    data: dict | None = None
+
+
 class ContractIn(BaseModel):
     kind: str
     lang: str
@@ -67,10 +77,16 @@ def _pdf(data: bytes, name: str, download: bool) -> Response:
 
 
 @router.get("/contracts")
-def contracts_list(status: str | None = None, lead_id: int | None = None, q: str | None = None, limit: int = 50,
-                   offset: int = 0, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def contracts_list(status: str | None = None, lead_id: int | None = None, deal_id: int | None = None,
+                   agent_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0,
+                   db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """status: active (default: draft + signed) | draft | signed | deal | closed_no_deal | all."""
-    return paginate(db, C.query(db, user, status, lead_id, q), lambda c: C.out(db, c), limit, offset)
+    return paginate(db, C.query(db, user, status, lead_id, q, deal_id, agent_id), lambda c: C.out(db, c), limit, offset)
+
+
+@router.post("/contracts/draft")
+def contracts_autosave(body: DraftIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return C.out(db, C.autosave(db, body.model_dump(), user), full=True)
 
 
 @router.post("/contracts")
@@ -89,10 +105,12 @@ def contracts_update(cid: int, body: ContractIn, db: Session = Depends(get_db, s
 
 
 @router.get("/contracts/{cid}/pdf")
-def contracts_pdf(cid: int, signed: bool = False, download: bool = False, db: Session = Depends(get_db, scope="function"),
-                  user: User = Depends(current_user)):
+def contracts_pdf(cid: int, signed: bool = False, download: bool = False, version: int | None = None,
+                  db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """version: an earlier generated PDF (the contract's `versions`, 0 = the first)."""
     c = C.get(db, cid, user)
-    return _pdf(C.pdf_bytes(c, signed), C.filename(c, signed and bool(c.signed_pdf_path)), download)
+    name = C.filename(c, signed and bool(c.signed_pdf_path))
+    return _pdf(C.pdf_bytes(c, signed, version), name if version is None else name.replace(".pdf", f" v{version + 1}.pdf"), download)
 
 
 @router.post("/contracts/{cid}/sign")
@@ -120,7 +138,7 @@ def contracts_send_pdf(cid: int, db: Session = Depends(get_db, scope="function")
         raise DomainError("no_telegram", "Telegram не привязан к аккаунту: откройте CRM из бота", 409)
     signed = bool(c.signed_pdf_path)
     if tg.call("sendDocument", files={"document": (C.filename(c, signed), C.pdf_bytes(c, signed), "application/pdf")},
-               chat_id=user.tg_id, caption=f"Договор #{c.id}: {C.STATUS_LABEL[c.status]}") is None:
+               chat_id=user.tg_id, caption=f"Договор #{c.id}: {C.label(c)}") is None:
         raise DomainError("send_failed", "Telegram не принял файл, попробуйте ещё раз", 502)
     return {"ok": True}
 

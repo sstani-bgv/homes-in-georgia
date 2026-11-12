@@ -343,6 +343,8 @@ export interface ContractSummary {
   id: number;
   status: ContractStatus;
   status_label: string;
+  /** false: a draft being filled (autosaved, no PDF yet) — «Черновик»; true + draft — «Сгенерирован» */
+  has_pdf?: boolean;
   signed_at?: string | null;
   has_signed_pdf?: boolean;
   close_reason?: ContractCloseReason | null;
@@ -351,8 +353,18 @@ export interface ContractSummary {
 }
 /** A stored contract (backend services/contracts.py). */
 export interface Contract extends ContractSummary {
-  kind: 'rent' | 'comm' | 'sale';
-  lang: 'GEO' | 'RU' | 'EN';
+  kind: 'rent' | 'comm' | 'sale' | null;
+  lang: 'GEO' | 'RU' | 'EN' | null;
+  generated_at?: string | null;
+  /** the form data changed after the last PDF: regenerate before signing */
+  pdf_stale?: boolean;
+  versions_count?: number;
+  /** earlier PDFs kept on regeneration (GET /contracts/{id}/pdf?version=n) */
+  versions?: { n: number; at: string | null; by: UserRef | null }[];
+  updated_at?: string | null;
+  lead_status?: string | null;
+  /** the wizard's CxData + _step/_dep/_end (full payloads) */
+  data?: Record<string, string | number | boolean> | null;
   title?: string | null;
   cadastral?: string | null;
   address?: string | null;
@@ -371,8 +383,12 @@ export interface Contract extends ContractSummary {
   share?: { path: string; url: string; expires_at: string } | null;
   html?: string;
 }
+export interface ContractDraftIn {
+  id?: number | null; kind?: Contract['kind'] | ''; lang?: Contract['lang'] | ''; lead_id?: number | null; deal_id?: number | null;
+  data: Record<string, string | number | boolean>;
+}
 export interface ContractIn {
-  kind: Contract['kind']; lang: Contract['lang']; html: string; title?: string; cadastral?: string; address?: string;
+  kind: NonNullable<Contract['kind']>; lang: NonNullable<Contract['lang']>; html: string; title?: string; cadastral?: string; address?: string;
   client_name?: string; owner_name?: string; lead_id?: number | null; deal_id?: number | null; property_id?: number | null;
   /** the wizard's CxData: the deal page prefills from the signed contract */
   data?: object;

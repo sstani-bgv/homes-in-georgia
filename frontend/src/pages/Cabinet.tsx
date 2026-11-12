@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthContext';
 import { PropertyStatusBadge } from '../components/domain';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Progress, Seg, Stat, Tabs } from '../components/ui';
+import { ContractList } from '../features/contracts/ContractCard';
 import { MyLeadsList } from '../features/leads/LeadBoard';
 import { PropertyList } from '../features/properties/lists';
 import { PROPERTY_STATUS, ROLE_LABEL, fmtDate, fmtSlot, money, monthLabel, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
@@ -174,13 +175,14 @@ export function CabinetView({ base = '', userId, tabbed }: { base?: string; user
           ))}
         </Card>
       </div>}
+      {!tabbed && !userId && <ContractList base={`${base}/contracts`} label="По сделкам" title="Мои договоры" />}
     </div>
   );
 }
 
-type Tab = 'overview' | 'objects' | 'deals' | 'leads' | 'calendar' | 'stats';
+type Tab = 'overview' | 'objects' | 'deals' | 'contracts' | 'leads' | 'calendar' | 'stats';
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'overview', label: 'Обзор' }, { value: 'objects', label: 'Объекты' }, { value: 'deals', label: 'Сделки' },
+  { value: 'overview', label: 'Обзор' }, { value: 'objects', label: 'Объекты' }, { value: 'deals', label: 'Сделки' }, { value: 'contracts', label: 'Договоры' },
   { value: 'leads', label: 'Заявки' }, { value: 'calendar', label: 'Календарь' }, { value: 'stats', label: 'Статистика' },
 ];
 const DONE: PropertyStatus[] = ['published', 'rented', 'archived'];
@@ -274,6 +276,7 @@ export function CabinetPage() {
       {tab === 'overview' ? <CabinetView userId={picked} tabbed />
         : tab === 'objects' ? <CabinetObjects key={uid} agentId={uid} />
         : tab === 'deals' ? <CabinetDeals key={uid} agentId={uid} />
+        : tab === 'contracts' ? <ContractList key={uid} base="/contracts" agentId={picked} label="По сделкам" title="Мои договоры" />
         : tab === 'leads' ? <MyLeadsList agentId={uid} />
         : tab === 'calendar' ? <CalendarView agentId={uid} />
         : <CabinetStats userId={picked} />}
