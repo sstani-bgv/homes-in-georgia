@@ -494,7 +494,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               <div className="form-grid">
                 <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.13.015.029.01.150' })}</div>
                 <div className="span2">
-                  {ownerPid ? <RegistryApps base="/registry/applications" personalId={ownerPid} t={REG_RU} />
+                  {ownerPid ? <RegistryApps base="/registry/applications" personalId={ownerPid} t={REG_RU}
+                    onCode={(c) => { if (c !== d.cadastral_code) { set('cadastral_code', c); toast(`Из реестра: ${c}`); } }} />
                     : <span className="faint" style={{ fontSize: 12 }}>Введите личный номер собственника на вкладке «Стороны» — здесь появятся его заявки в Публичном реестре с кадастровым кодом.</span>}
                 </div>
                 <div className="span2">{F({ k: 'street_house', label: 'Адрес', placeholder: 'Улица, номер дома' })}</div>

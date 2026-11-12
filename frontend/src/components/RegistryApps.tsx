@@ -1,7 +1,7 @@
 // NAPR (Public Registry) applications by the owner's personal ID: the owner's sign page and the CRM contract generator.
 // The list comes from our backend (services/registry.py; NAPR's search has no CORS); a tap opens the application on NAPR
 // itself, where the person ticks its reCAPTCHA and downloads the extract / copies the cadastral code.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { http } from '../api/client';
@@ -26,7 +26,43 @@ export const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateStri
 export interface RegApp { app_id: string; reg_number: string; date: string | null; type: string; address: string; status: string; done: boolean; applicants: string[]; url: string }
 interface RegPage { total: number; page: number; lastpage: number; items: RegApp[] }
 
-export function RegistryApps({ base, personalId, picked, onPick, t }: { base: string; personalId: string; picked?: RegApp | null; onPick?: (a: RegApp) => void; t: RegTexts }) {
+// «01.14.01.001.122.01.01.059», optionally a Georgian letter and «/2» (backend services/registry.py _CODE); the longest
+// one wins: an extract or a copied page also names the land plot's shorter code
+const CODE_RE = /(?<![\d.])\d{1,3}(?:\.\d{1,6}){3,8}\p{L}?(?:\/\d{1,4}\p{L}?)?(?!\d)/gu;
+export const findCadastral = (text: string) => (text.match(CODE_RE) || []).sort((a, b) => b.length - a.length)[0] || '';
+
+/** onCode: after the agent opened an application on NAPR and comes back to this tab, the clipboard is read and a
+ * cadastral code in it is handed over by itself. Where the browser wants a tap first (iOS Safari, Telegram), one big
+ * button does the same. The CAPTCHA on NAPR stays the person's own job. */
+function useClipboardCode(onCode?: (code: string) => void) {
+  const [armed, setArmed] = useState(false);  // an application was opened, nothing pasted yet
+  const [note, setNote] = useState('');
+  const busy = useRef(false);  // focus and visibilitychange come together on return
+  const read = async (byTap: boolean) => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const code = findCadastral(await navigator.clipboard.readText());
+      if (code) { onCode?.(code); setArmed(false); setNote(''); return; }
+      if (byTap) setNote('В буфере нет кадастрового кода: скопируйте его на странице реестра.');
+    } catch {
+      if (byTap) setNote('Браузер не дал прочитать буфер: вставьте код в поле вручную.');
+    } finally {
+      busy.current = false;
+    }
+  };
+  useEffect(() => {
+    if (!armed || !onCode) return;
+    const back = () => { if (document.visibilityState === 'visible') void read(false); };
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('focus', back);
+    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back); };
+  }, [armed, onCode]);  // eslint-disable-line react-hooks/exhaustive-deps
+  return { armed: armed && !!onCode, arm: () => { setArmed(true); setNote(''); }, read, note };
+}
+
+export function RegistryApps({ base, personalId, picked, onPick, onCode, t }: { base: string; personalId: string; picked?: RegApp | null; onPick?: (a: RegApp) => void; onCode?: (code: string) => void; t: RegTexts }) {
+  const clip = useClipboardCode(onCode);
   const q = useInfiniteQuery({
     queryKey: ['napr', base, personalId], enabled: !!personalId, retry: false, staleTime: 3600_000, initialPageParam: 1,
     queryFn: ({ pageParam }) => http.get<RegPage>(`${base}?personal_id=${personalId}&page=${pageParam}`),
@@ -40,11 +76,17 @@ export function RegistryApps({ base, personalId, picked, onPick, t }: { base: st
     <div className="col gap-sm">
       <span className="label">{t.listTitle}</span>
       <span className="faint" style={{ fontSize: 12 }}>{t.listHint}</span>
+      {clip.armed && (
+        <div className="col gap-sm">
+          <Button onClick={() => void clip.read(true)}>Вставить кадастровый код из реестра</Button>
+          <span className="faint" style={{ fontSize: 12 }}>{clip.note || 'Скопируйте код на странице реестра и вернитесь сюда — он подставится сам.'}</span>
+        </div>
+      )}
       {items.map((a) => {
         const on = picked?.app_id === a.app_id;
         return (
           <a key={a.app_id} href={a.url} target="_blank" rel="noopener noreferrer"
-            onClick={(e) => { onPick?.(a); if (insideTelegram()) { e.preventDefault(); tgWebApp()?.openLink?.(a.url); } }} className="card card-pad col"
+            onClick={(e) => { onPick?.(a); clip.arm(); if (insideTelegram()) { e.preventDefault(); tgWebApp()?.openLink?.(a.url); } }} className="card card-pad col"
             style={{ gap: 2, textDecoration: 'none', color: 'inherit', border: `1.5px solid ${on ? 'var(--ok, #1a7f4b)' : 'var(--line, #e3e8f0)'}`, padding: 12 }}>
             <span className="row row-between gap-sm">
               <b>{day(a.date)} · №{a.reg_number}</b>
