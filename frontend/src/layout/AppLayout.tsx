@@ -6,7 +6,7 @@ import {
   Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ADMIN_ROLES, STAFF_ROLES } from '../api/types';
+import { ADMIN_ROLES, STAFF_ROLES, atLeast } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
@@ -16,11 +16,12 @@ import { ROLE_LABEL } from '../lib/format';
 
 interface NavItem { to: string; label: string; icon: LucideIcon; roles?: Role[] }
 const STAFF = STAFF_ROLES;
+const AGENT_UP: Role[] = [...STAFF_ROLES, 'agent'];  // recruits: no contracts or deals (Irakli 11-12)
 export const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/objects', label: 'Объекты', icon: Building2 },
   { to: '/leads', label: 'Заявки', icon: Inbox },
-  { to: '/contracts', label: 'Договоры', icon: FileText },
+  { to: '/contracts', label: 'Договоры', icon: FileText, roles: AGENT_UP },
   { to: '/calendar', label: 'Календарь', icon: CalendarDays },
   { to: '/clients', label: 'Клиенты', icon: UsersRound, roles: STAFF },
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
@@ -32,20 +33,21 @@ export const NAV: NavItem[] = [
 
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
 /** `m` = the same action inside the Telegram Mini App (/m layout). */
-const QUICK: { to: string; m: string; title: string; sub: string; icon: LucideIcon }[] = [
+const QUICK: { to: string; m: string; title: string; sub: string; icon: LucideIcon; agent?: boolean }[] = [
   { to: '/objects?new=1', m: '/m/properties?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
-  { to: '/deals/new', m: '/m/deal', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake },  // Irakli 2026-11-11: back in «Добавить»
-  { to: '/contracts?new=1', m: '/m/contracts?new=1', title: 'Договор', sub: 'Создать договор', icon: FileText },
+  { to: '/deals/new', m: '/m/deal', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake, agent: true },  // Irakli 2026-11-11: back in «Добавить»
+  { to: '/contracts?new=1', m: '/m/contracts?new=1', title: 'Договор', sub: 'Создать договор', icon: FileText, agent: true },
   { to: '/reports?kind=general', m: '/m/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
   { to: '/reports?kind=showing', m: '/m/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
   { to: '/reports?tab=check', m: '/m/reports?tab=check', title: 'Проверку', sub: 'Найти дубликат', icon: Search },
 ];
 export function QuickAdd({ open, onClose, mobile }: { open: boolean; onClose: () => void; mobile?: boolean }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   return (
     <Modal open={open} onClose={onClose} title="Добавить">
       <div className="add-grid">
-        {QUICK.map((q) => (
+        {QUICK.filter((q) => !q.agent || atLeast(user, 'agent')).map((q) => (
           <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(mobile ? q.m : q.to); }}>
             <q.icon size={20} /><span><b>{q.title}</b><small>{q.sub}</small></span>
           </button>

@@ -9,7 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import districts
-from app.models import STAFF, Client, ClientView, Deal, Lead, Listing, Property, Reaction, User
+from app.models import Client, ClientView, Deal, Lead, Listing, Property, Reaction, User, at_least
 from app.services.common import get_or_404, jload, log_event, now
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify, texts
@@ -115,7 +115,7 @@ def for_property(db: Session, p: Property, user: User) -> dict:
     clients = matched(active_clients(db), property_facts(p, l))
     sent = set(db.scalars(select(ClientView.client_id).where(ClientView.listing_id == p.listing_id,
                                                              ClientView.source == "push"))) if l else set()
-    staff = user.role in STAFF
+    staff = at_least(user, "operator")
     return {"count": len(clients), "active_days": ACTIVE_DAYS, "fast_track_at": p.fast_track_at, "pushed": len(sent),
             "can_fast_track": _fast_track_error(p, l) is None and (staff or p.agent_id == user.id),
             "clients": [{**_person(c, staff), "sent": c.id in sent} for c in clients]}
@@ -139,7 +139,7 @@ def fast_track(db: Session, pid: int, actor: User) -> tuple[Property, list[Clien
     """«Собственник согласен показать клиентам» (after the call): the object becomes client-eligible with the ad's photos
     and goes to the clients it fits now. Explicit, so it is sent even with auto_push_variants=0."""
     p = get_or_404(db, Property, int(pid), "property", lock=True)
-    if actor.role not in STAFF and p.agent_id != actor.id:
+    if not at_least(actor, "operator") and p.agent_id != actor.id:
         raise forbidden("object is taken by another agent")
     l = db.get(Listing, p.listing_id) if p.listing_id else None
     if err := _fast_track_error(p, l):

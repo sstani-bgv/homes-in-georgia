@@ -4,7 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import FIELD, STAFF, ChannelPost, Deal, Event, Lead, Listing, Property, PropertyListing, User
+from app.models import (FIELD_SQL, STAFF, ChannelPost, Deal, Event, Lead, Listing, Property, PropertyListing, User,
+                        at_least)
 from app.services.common import TZ, now
 from app.services.reports import month_bounds
 
@@ -173,7 +174,7 @@ def _count(db: Session, model, *where) -> int:
 def stats(db: Session, user: User, mine: bool = False) -> dict:
     """«Статистика» on «Главная» (Stanislav 11-11): where the objects / leads / deals are. Staff: the agency; an agent:
     his own (same scoping as the lists the numbers link to). The parsed-ads feed is shared, so it is never scoped."""
-    staff = user.role in STAFF and not mine  # mine: a superagent's own numbers next to the agency's
+    staff = at_least(user, "operator") and not mine  # mine: a staff member's own numbers (works_as_agent) next to the agency's
     t = now().astimezone(TZ)
     day = t.replace(hour=0, minute=0, second=0, microsecond=0)
     utc = lambda d: d.astimezone(timezone.utc).isoformat(timespec="seconds")  # listings/leads keep UTC ISO text
@@ -225,7 +226,7 @@ def dashboard(db: Session, month: str | None = None) -> dict:
     open_leads = db.scalar(select(func.count()).select_from(Lead).where(Lead.status.not_in(("rented", "refused")))) or 0
     overdue = db.scalar(select(func.count()).select_from(Lead).where(Lead.sla_due_at < now())) or 0
     last = db.scalars(select(Deal).where(Deal.status.in_(LIVE)).order_by(Deal.created_at.desc()).limit(10))
-    names = dict(db.execute(select(User.id, User.name).where(User.role.in_(FIELD + STAFF))).all())
+    names = dict(db.execute(select(User.id, User.name).where(FIELD_SQL | User.role.in_(STAFF))).all())
     return {
         "month": mo, "deals_month": deals_summary(db, mo), "deals_all": deals_summary(db),
         "active_objects": active_objects, "channel_active_listings": channel_active, "open_leads": open_leads,
@@ -249,7 +250,7 @@ def agents(db: Session, month: str | None = None) -> list[dict]:
                             .group_by(Property.agent_id)).all())
     out = []
     # «Команда» shows only working agents (Irakli 2026-11-09): a deactivated one stays in the history, not on the board
-    for u in db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True)).order_by(User.name)):
+    for u in db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)).order_by(User.name)):
         out.append({"id": u.id, "name": u.name, "username": u.username, "role": u.role, "is_active": u.is_active,
                     "mentor_id": u.mentor_id, **users.level_info(u), "deals_month": board.get(u.id, {}).get("deals", 0),
                     "agent_amount_month": board.get(u.id, {}).get("agent_amount", 0), "open_leads": lead_load.get(u.id, 0),

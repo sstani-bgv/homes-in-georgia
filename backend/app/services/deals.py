@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.config import settings as env
-from app.models import FIELD, STAFF, Client, Deal, Evaluation, Lead, Owner, Property, User
+from app.models import Client, Deal, Evaluation, Lead, Owner, Property, User, at_least, is_field
 from app.services import evaluations, jobs, leads, users
 from app.services.common import TZ, clean_cadastral, get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
@@ -181,6 +181,8 @@ def _month(d: date | None) -> str:
 
 def create(db: Session, data: dict, actor: User | None, commit: bool = True, notify_lead: bool = True) -> Deal:
     """C9b deal form → deals.status=pending. Optional T0 (`t0_h2o_client`.. or `t0: {...}`) stored as evaluation."""
+    if actor is not None and not at_least(actor, "agent"):
+        raise forbidden("recruits do not create deals")
     data = dict(data or {})
     if oid := data.pop("owner_id", None):  # picked from the owners list (autocomplete): the base's contact, not a retype
         o = get_or_404(db, Owner, int(oid), "owner")
@@ -188,22 +190,22 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
     agent = None
     if data.get("agent_id"):
         agent = get_or_404(db, User, int(data["agent_id"]), "agent")
-    elif actor is not None and actor.role in FIELD:
+    elif actor is not None and is_field(actor):
         agent = actor
-    if actor is not None and actor.role not in STAFF and agent is not None and agent.id != actor.id:
+    if actor is not None and not at_least(actor, "operator") and agent is not None and agent.id != actor.id:
         raise forbidden("agents create only their own deals")
     picked = int(data["property_id"]) if data.get("property_id") else None
     lead = None
     if data.get("lead_id"):
         lead = get_or_404(db, Lead, int(data["lead_id"]), "lead", lock=True)
-        if actor is not None and actor.role not in STAFF and lead.agent_id != actor.id:
+        if actor is not None and not at_least(actor, "operator") and lead.agent_id != actor.id:
             raise forbidden("not your lead")
         live = live_deal_for_lead(db, lead)
         if live is not None:  # double submit of the deal form: one live deal per lead
             return live
         agent = agent or (db.get(User, lead.agent_id) if lead.agent_id else None)
         data.setdefault("property_id", lead.property_id)
-        staff = actor is None or actor.role in STAFF
+        staff = actor is None or at_least(actor, "operator")
         # «Договор» → «Сделка» (Stanislav 11-11): the deal form opens once the lead's contract is signed
         signed = leads.signed_contract(db, lead) is not None
         if actor is not None and lead.status == "contract" and not signed:
@@ -236,7 +238,7 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
             if not p.cadastral_code and (data.get("cadastral") or "").strip():
                 p.cadastral_code = data["cadastral"].strip()
             data.update(properties.deal_fields(db, p, actor, data.get("deal_type") or "rent"))
-    if actor is not None and actor.role not in STAFF:  # payout inputs an agent must not set for themselves
+    if actor is not None and not at_least(actor, "operator"):  # payout inputs an agent must not set for themselves
         data.pop("split", None)
         data.pop("agent_level", None)
         data.pop("platform_amount", None)
@@ -358,7 +360,7 @@ def live_deal_for_lead(db: Session, lead: Lead | None) -> Deal | None:
 
 def confirm(db: Session, deal_id: int, actor: User) -> Deal:
     """B6/C9c: operator confirms → exclusive counter/level, lead rented, T14 + contract jobs."""
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators confirm deals")
     deal = get_or_404(db, Deal, int(deal_id), "deal", lock=True)
     if deal.status == "confirmed":
@@ -417,9 +419,17 @@ def schedule_reminders(db: Session, deal: Deal, past_t14: bool = True) -> None:
 
 
 def cancel(db: Session, deal_id: int, actor: User, reason: str | None = None) -> Deal:
-    if actor.role not in STAFF:
-        raise forbidden("only operators cancel deals")
+    """Operator+: any deal. An agent (Irakli 11-12): his own deal while it is not confirmed yet, with a reason."""
+    if not at_least(actor, "agent"):
+        raise forbidden("recruits do not manage deals")
     deal = get_or_404(db, Deal, int(deal_id), "deal", lock=True)
+    if not at_least(actor, "operator"):
+        if deal.agent_id != actor.id:
+            raise forbidden("not your deal")
+        if deal.status == "confirmed":
+            raise forbidden("a confirmed deal is cancelled by an operator")
+        if not (reason or "").strip():
+            raise DomainError("reason_required", "Укажите причину отмены")
     if deal.status == "cancelled":
         return deal
     was_confirmed = deal.status == "confirmed"
@@ -515,7 +525,7 @@ def out(deal: Deal, user: User | None = None) -> dict:
         elif isinstance(v, (date, datetime)):
             v = v.isoformat()
         d[c] = v
-    if user is not None and user.role not in STAFF and deal.agent_id != user.id and deal.recruit_id != user.id:
+    if user is not None and not at_least(user, "operator") and deal.agent_id != user.id and deal.recruit_id != user.id:
         for k in ("client_phone", "client_tg", "owner_phone", "client_birth", "owner_birth"):
             d[k] = None
     return d
@@ -523,7 +533,7 @@ def out(deal: Deal, user: User | None = None) -> dict:
 
 def query(db: Session, user: User, month: str | None = None, agent_id: int | None = None, status: str | None = None):
     stmt = select(Deal)
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         stmt = stmt.where((Deal.agent_id == user.id) | (Deal.recruit_id == user.id))
     elif agent_id:
         stmt = stmt.where(Deal.agent_id == agent_id)

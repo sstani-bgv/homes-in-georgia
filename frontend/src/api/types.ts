@@ -1,13 +1,14 @@
 // Types mirror docs/ARCHITECTURE.md §4 / §7. Optional fields are tolerant to backend variations.
 
-export type Role = 'superadmin' | 'superagent' | 'admin' | 'operator' | 'agent' | 'recruit';
-/** superagent = superadmin permissions + a working agent (backend models/people.py: SUPER/ADMINS/STAFF and FIELD). */
-export const SUPER_ROLES: Role[] = ['superadmin', 'superagent'];
+export type Role = 'superadmin' | 'admin' | 'operator' | 'agent' | 'recruit';
+/** Hierarchical RBAC (backend models/people.py LEVELS): every role inherits all rights of the lower ones. */
+export const ROLE_LEVEL: Record<Role, number> = { recruit: 1, agent: 2, operator: 3, admin: 4, superadmin: 5 };
+export const atLeast = (u: { role: Role } | null | undefined, role: Role) => !!u && (ROLE_LEVEL[u.role] ?? 0) >= ROLE_LEVEL[role];
+export const SUPER_ROLES: Role[] = ['superadmin'];
 export const ADMIN_ROLES: Role[] = [...SUPER_ROLES, 'admin'];
 export const STAFF_ROLES: Role[] = [...ADMIN_ROLES, 'operator'];
-export const FIELD_ROLES: Role[] = ['agent', 'recruit', 'superagent'];
-/** users.list role filter for agent pickers (deal form, reassignment, leaderboard filters). */
-export const FIELD_FILTER = FIELD_ROLES.join(',');
+/** users.list role filter for agent pickers: agents, recruits and staff with «Работает как агент» (works_as_agent). */
+export const FIELD_FILTER = 'field';
 
 export interface Page<T> { items: T[]; total: number }
 
@@ -33,6 +34,10 @@ export interface User {
   plans?: Plans;
   /** the agent's post hashtag without '#' (Zaza, ArturB), unique */
   agent_tag?: string | null;
+  /** staff «+ как агент»: also works as an agent (pickers, leads, own objects, leaderboard) */
+  works_as_agent?: boolean;
+  /** works as an agent: agent / recruit, or staff with works_as_agent */
+  field?: boolean;
   next_level_at?: number | null;
   created_at?: string;
   last_login_at?: string | null;

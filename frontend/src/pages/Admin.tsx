@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Role, Settings, User } from '../api/types';
-import { ADMIN_ROLES, SUPER_ROLES } from '../api/types';
+import { ADMIN_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
@@ -12,19 +12,19 @@ import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneInput } from '../lib/form
 import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
 
-const ROLES: Role[] = ['superadmin', 'superagent', 'admin', 'operator', 'agent', 'recruit'];
+const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit'];
 
 function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: only a superadmin/superagent grants admin roles
+  const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: only a superadmin grants admin roles
   const [f, setF] = useState<Partial<User> & { password?: string }>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
   const set = <K extends keyof User>(k: K, v: User[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = useMutation({
     mutationFn: () => {
       const body = { name: f.name, role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
         tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans,
-        agent_tag: f.agent_tag || '', ...(f.password ? { password: f.password } : {}) };
+        agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent, ...(f.password ? { password: f.password } : {}) };
       return user ? api.users.update(user.id, body) : api.users.create(body);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Сохранено'); onDone(); },
@@ -50,7 +50,7 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
           </div>
         </Field>
         {f.role === 'recruit' ? (
-          <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.role === 'superagent').map((u) => ({ value: u.id, label: u.name }))} /></Field>
+          <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.works_as_agent).map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
         <Field label="Логин для входа"><Input value={f.login || ''} onChange={(e) => set('login', e.target.value)} autoComplete="off" /></Field>
         <Field label={user ? 'Новый пароль' : 'Пароль'}><Input type="password" value={f.password || ''} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></Field>
@@ -70,6 +70,9 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
             ))}
           </div>
         </div>
+      )}
+      {f.role && atLeast({ role: f.role }, 'operator') && (
+        <Switch checked={!!f.works_as_agent} onChange={(v) => set('works_as_agent', v)} label="Работает как агент: заявки, свои объекты, рейтинг агентов" />
       )}
       <Switch checked={!!f.is_active} onChange={(v) => set('is_active', v)} label="Активен" />
       <div className="row row-wrap">

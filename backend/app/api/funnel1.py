@@ -6,9 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
+from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
-from app.models import PUBLICATION_CHANNELS, STAFF, Lead, Listing, Owner, Property, User
+from app.models import PUBLICATION_CHANNELS, Lead, Listing, Owner, Property, User, at_least
 from app.services.errors import DomainError, forbidden
 from app.services import change_requests as CR
 from app.services import demand, geo, matching
@@ -43,7 +43,7 @@ def listing_get(listing_id: str, db: Session = Depends(get_db, scope="function")
     # The assigned viewing agent also needs the source contact to arrange the viewing.
     assigned = db.scalar(select(Lead.id).where(Lead.listing_id == listing_id, Lead.agent_id == user.id,
                                               Lead.status.in_(ACTIVE)).limit(1))
-    full = user.role in STAFF or assigned is not None or (prop is not None and prop.agent_id == user.id and prop.status != "archived")
+    full = at_least(user, "operator") or assigned is not None or (prop is not None and prop.agent_id == user.id and prop.status != "archived")
     d = P.listing_out(listing, full=full)
     d["contacts_visible"] = full
     if full and prop and prop.owner_id:
@@ -79,7 +79,7 @@ class MatchDecisionIn(BaseModel):
 
 @router.post("/listings/{listing_id}/matches/{pid}")
 def listing_match_decide(listing_id: str, pid: int, body: MatchDecisionIn, db: Session = Depends(get_db, scope="function"),
-                         user: User = Depends(require_roles(*STAFF_ROLES))):
+                         user: User = Depends(require_level("operator"))):
     """«Тот же объект» (same=true: the ad is linked to the object) / «Другой» on a «Похож на объект #N» card."""
     m = matching.decide(db, listing_id, pid, user, body.same)
     return {"ok": True, "status": m.status}
@@ -175,14 +175,14 @@ def properties_deal_search(q: str | None = None, pid: int | None = None, deal_ty
                            db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """Stage 7: the deal form's object picker (agents see another agent's object as blocked, without its data)."""
     lead = db.get(Lead, lead_id) if lead_id else None
-    allow = lead.property_id if lead is not None and (user.role in STAFF or lead.agent_id == user.id) else None
+    allow = lead.property_id if lead is not None and (at_least(user, "operator") or lead.agent_id == user.id) else None
     return {"items": P.deal_search(db, user, q, pid, deal_type, allow)}
 
 
 @router.post("/properties/check-duplicate")
 def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     res = P.check_duplicate(db, body.phone, body.address, body.url, body.cadastral)
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
         for r in res.get("results", []):
             if r.get("source") == "owners" and r.get("owner_id") not in mine:
@@ -398,12 +398,12 @@ def properties_submit(pid: int, db: Session = Depends(get_db, scope="function"),
 
 @router.post("/properties/{pid}/review")
 def properties_review(pid: int, body: ReviewIn, db: Session = Depends(get_db, scope="function"),
-                      user: User = Depends(require_roles(*STAFF_ROLES))):
+                      user: User = Depends(require_level("operator"))):
     return P.out(db, P.review(db, pid, user, body.approve, body.comment), user, full=True)
 
 
 @router.post("/properties/{pid}/verify")
-def properties_verify(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def properties_verify(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return P.out(db, P.verify(db, pid, user), user, full=True)
 
 
@@ -412,7 +412,7 @@ def properties_post(pid: int, db: Session = Depends(get_db, scope="function"), u
     """The card's post generator: the channel caption built from the object, its hashtags, the channels to post to.
     Staff, and the object's agent (he fills the generator and sees the post before sending it to moderation)."""
     p = get_or_404(db, Property, pid, "property")
-    if user.role not in STAFF and p.agent_id != user.id:
+    if not at_least(user, "operator") and p.agent_id != user.id:
         raise forbidden("only the object's agent or staff")
     text = P.post_text(db, p)
     return {"text": text, "hashtags": P.hashtags(text), "channels": list(PUBLICATION_CHANNELS)}
@@ -427,7 +427,7 @@ class PublishIn(BaseModel):
 
 @router.post("/properties/{pid}/publish")
 def properties_publish(pid: int, body: PublishIn | None = None, db: Session = Depends(get_db, scope="function"),
-                       user: User = Depends(require_roles(*STAFF_ROLES))):
+                       user: User = Depends(require_level("operator"))):
     b = body or PublishIn()
     return P.out(db, P.publish(db, pid, user, b.text, b.media_ids, b.channel, b.comment), user, full=True)
 
@@ -442,7 +442,7 @@ def properties_elsewhere(pid: int, db: Session = Depends(get_db, scope="function
 
 @router.post("/properties/{pid}/listings/{listing_id}/removed")
 def properties_ad_removed(pid: int, listing_id: str, db: Session = Depends(get_db, scope="function"),
-                          user: User = Depends(require_roles(*STAFF_ROLES))):
+                          user: User = Depends(require_level("operator"))):
     return P.out(db, P.ad_removed(db, pid, listing_id, user), user, full=True)
 
 
@@ -468,7 +468,7 @@ class DecideIn(BaseModel):
 
 @router.get("/change-requests")
 def change_requests_list(status: str | None = "pending", limit: int = 100, offset: int = 0,
-                         db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+                         db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     stmt = CR.query(db, user, status)
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = list(db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset))))
@@ -477,7 +477,7 @@ def change_requests_list(status: str | None = "pending", limit: int = 100, offse
 
 @router.post("/change-requests/{rid}/decide")
 def change_requests_decide(rid: int, body: DecideIn, db: Session = Depends(get_db, scope="function"),
-                           user: User = Depends(require_roles(*STAFF_ROLES))):
+                           user: User = Depends(require_level("operator"))):
     return CR.outs(db, [CR.decide(db, rid, user, body.approve, body.comment)])[0]
 
 
@@ -522,12 +522,12 @@ def owners_list(q: str | None = None, scope: str = "all", limit: int = 50, offse
         like = f"%{q.strip()}%"
         pn = norm_phone(q)
         conds = [Owner.name.ilike(like), Owner.address.ilike(like)]
-        if user.role in STAFF and len(pn) > 3:
+        if at_least(user, "operator") and len(pn) > 3:
             conds.append(Owner.phone_norm.ilike(f"%{pn}%"))
         elif len(pn) >= 9:  # agents: full number only, no digit-by-digit search of hidden phones
             conds.append(Owner.phone_norm == pn)
         stmt = stmt.where(or_(*conds))
-    if user.role in STAFF:
+    if at_least(user, "operator"):
         return paginate(db, stmt.order_by(Owner.id.desc()), owner_out, limit, offset)
     mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
     return paginate(db, stmt.order_by(Owner.id.desc()), lambda o: owner_out(o, o.id in mine or o.agent_id == user.id),
@@ -544,7 +544,7 @@ def owners_create(body: OwnerIn, db: Session = Depends(get_db, scope="function")
 
 
 @router.patch("/owners/{oid}")
-def owners_patch(oid: int, body: OwnerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def owners_patch(oid: int, body: OwnerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     o = get_or_404(db, Owner, oid, "owner")
     data = body.model_dump(exclude_unset=True)
     for k, v in data.items():
@@ -565,7 +565,7 @@ class TransferIn(BaseModel):
 
 @router.post("/owners/{oid}/transfer")
 def owners_transfer(oid: int, body: TransferIn, db: Session = Depends(get_db, scope="function"),
-                    user: User = Depends(require_roles(*STAFF_ROLES))):
+                    user: User = Depends(require_level("operator"))):
     """«Передать собственника агенту…» (stage 6.5): the owner and his live objects move to another agent."""
     return owner_out(P.transfer_owner(db, oid, body.agent_id, user, body.reason))
 

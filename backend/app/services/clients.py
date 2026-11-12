@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import FIELD, Client, ClientView, Deal, Event, Lead, Listing, Reaction, Search, User
+from app.models import Client, ClientView, Deal, Event, Lead, Listing, Reaction, Search, User, is_field
 from app.services.common import aware, jload
 from app.telegram import texts
 
@@ -97,7 +97,7 @@ def card(db: Session, c: Client) -> dict:
 
     def actor(e: Event) -> str:
         u = users.get(e.actor_id)
-        return (u and (agent_label(u) if u.role in FIELD else u.name)) or LABEL.get(e.actor_label, e.actor_label)
+        return (u and (agent_label(u) if is_field(u) else u.name)) or LABEL.get(e.actor_label, e.actor_label)
 
     items = [_item(c.created_at, "profile", "Первый контакт с ботом", "Клиент", "first_contact")]
     for s in db.scalars(select(Search).where(Search.client_id == c.id)):
@@ -146,7 +146,7 @@ def refusals(leads: list[Lead], ev: list[Event], users: dict, listings: dict) ->
                 reason = d.get("reason") or d.get("note") or (lead.refusal_reason if lead.status == "refused" else None)
                 out.append({"lead_id": lead.id, "listing_id": lead.listing_id, "property_id": lead.property_id,
                             "object": obj_label(listings.get(lead.listing_id)), "at": _at(e.at), "by": by,
-                            "by_name": (u and (agent_label(u) if u.role in FIELD else u.name))
+                            "by_name": (u and (agent_label(u) if is_field(u) else u.name))
                             or (agent_label(users.get(lead.agent_id)) if by == "agent" else LABEL[by]),
                             "reason": REASON.get(reason, reason), "note": lead.client_note if reason == "other" else None,
                             "stage": prev})

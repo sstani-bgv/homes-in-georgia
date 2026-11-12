@@ -7,7 +7,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import FIELD, STAFF, ChangeRequest, Owner, Property, User
+from app.models import ChangeRequest, Owner, Property, User, at_least, is_field
 from app.services import properties as P
 from app.services.common import get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
@@ -42,13 +42,13 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     o = db.get(Owner, p.owner_id) if p.owner_id else None
     if o is None or o.is_agent:
         raise DomainError("no_owner", "У объекта нет собственника")
-    if actor.role in STAFF:
+    if at_least(actor, "operator"):
         P.transfer_owner(db, o.id, to_agent_id, actor, reason)
         return None
     if actor.id not in (p.agent_id, o.agent_id):
         raise forbidden("object is taken by another agent")
     to = get_or_404(db, User, int(to_agent_id), "user")
-    if to.role not in FIELD or not to.is_active:
+    if not is_field(to) or not to.is_active:
         raise DomainError("bad_agent", "Передать можно только активному агенту")
     if o.agent_id == to.id:
         raise DomainError("bad_status", "Собственник уже закреплён за этим агентом")
@@ -62,7 +62,7 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
 
 
 def decide(db: Session, rid: int, operator: User, approve: bool, comment: str | None = None) -> ChangeRequest:
-    if operator.role not in STAFF:
+    if not at_least(operator, "operator"):
         raise forbidden("only operators decide requests")
     cr = get_or_404(db, ChangeRequest, int(rid), "request", lock=True)
     if cr.status != "pending":

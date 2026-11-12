@@ -5,7 +5,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import STAFF, Deal, Evaluation, User
+from app.models import Deal, Evaluation, User, at_least
 from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
@@ -35,7 +35,7 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True) -> 
     if kind not in ("t0", "t14"):
         raise DomainError("bad_kind", "kind must be t0 or t14")
     deal = get_or_404(db, Deal, int(data["deal_id"]), "deal") if data.get("deal_id") else None
-    if actor is not None and actor.role not in STAFF and deal and actor.id not in (deal.agent_id, deal.recruit_id):
+    if actor is not None and not at_least(actor, "operator") and deal and actor.id not in (deal.agent_id, deal.recruit_id):
         raise forbidden("not your deal")
     complaints = data.get("complaints")
     complaints = complaints in (True, "yes", "true", "1", 1)

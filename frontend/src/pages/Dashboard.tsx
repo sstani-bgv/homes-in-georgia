@@ -95,7 +95,7 @@ function TaskRow({ to, title, meta, right }: { to: string; title: string; meta?:
   );
 }
 
-/** agent: a superagent's own agent tasks (his leads / objects) next to the staff queue. */
+/** agent: a staff member's own agent tasks (works_as_agent) (his leads / objects) next to the staff queue. */
 function MyTasks({ agent = false }: { agent?: boolean }) {
   const { user, isStaff: staff } = useAuth();
   const isStaff = staff && !agent;
@@ -169,7 +169,7 @@ export function DashboardPage() {
           <div className="split section">
             <div className="col gap-lg">
               <MyTasks />
-              {user?.role === 'superagent' && <MyTasks agent />}
+              {isStaff && user?.works_as_agent && <MyTasks agent />}
               {show('funnel') && (
                 <div className="grid g2">
                   <Card title="Объекты">

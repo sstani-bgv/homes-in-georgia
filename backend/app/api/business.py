@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import STAFF_ROLES, current_user, paginate, require_roles
+from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
-from app.models import STAFF, Deal, Evaluation, Property, User
+from app.models import Deal, Evaluation, Property, User, at_least, is_field
 from app.services import analytics, deals, evaluations, reports, users
 from app.services import properties as P
 from app.services.common import get_or_404
@@ -73,9 +73,9 @@ class EvaluationIn(BaseModel):
 
 
 @router.post("/deals/calc")
-def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
     data = body.model_dump()
-    if user.role not in STAFF:  # the same fixed commission deals.create applies to an agent's deal
+    if not at_least(user, "operator"):  # the same fixed commission deals.create applies to an agent's deal
         data["commission_total"] = None
         data["split"] = None
         data["commission_pct"] = deals.default_commission_pct(data.get("deal_type"), data.get("sub_type"))
@@ -99,7 +99,7 @@ def deals_expiring(days: int = 30, db: Session = Depends(get_db, scope="function
 @router.get("/deals/find")
 def deals_find(cadastral: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     rows = deals.find(db, cadastral)
-    if user.role in STAFF:
+    if at_least(user, "operator"):
         return [deals.out(d, user) for d in rows]
     # agents only learn that the object was rented and when; no amounts, names or contacts
     return [{"id": d.id, "cadastral": d.cadastral, "address": d.address, "status": d.status,
@@ -108,7 +108,7 @@ def deals_find(cadastral: str, db: Session = Depends(get_db, scope="function"), 
 
 
 @router.post("/deals")
-def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
     d = deals.create(db, body.model_dump(exclude_none=True), user)
     return deals.out(d, user)
 
@@ -116,7 +116,7 @@ def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), 
 @router.get("/deals/{deal_id}")
 def deals_get(deal_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     d = get_or_404(db, Deal, deal_id, "deal")
-    if user.role not in STAFF and user.id not in (d.agent_id, d.recruit_id):
+    if not at_least(user, "operator") and user.id not in (d.agent_id, d.recruit_id):
         raise forbidden("not your deal")
     out = deals.out(d, user)
     out["evaluations"] = [evaluations.out(e) for e in db.scalars(evaluations.query(db, deal_id))]
@@ -127,13 +127,13 @@ def deals_get(deal_id: int, db: Session = Depends(get_db, scope="function"), use
 
 
 @router.post("/deals/{deal_id}/confirm")
-def deals_confirm(deal_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def deals_confirm(deal_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return deals.out(deals.confirm(db, deal_id, user), user)
 
 
 @router.post("/deals/{deal_id}/cancel")
 def deals_cancel(deal_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
-                 user: User = Depends(require_roles(*STAFF_ROLES))):
+                 user: User = Depends(require_level("agent"))):
     return deals.out(deals.cancel(db, deal_id, user, body.reason), user)
 
 
@@ -146,7 +146,7 @@ def evaluations_create(body: EvaluationIn, db: Session = Depends(get_db, scope="
 def evaluations_list(deal_id: int | None = None, kind: str | None = None, limit: int = 50, offset: int = 0,
                      db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     stmt = evaluations.query(db, deal_id, kind)
-    if user.role not in STAFF_ROLES:
+    if not at_least(user, "operator"):
         stmt = stmt.where(Evaluation.deal_id.in_(
             select(Deal.id).where(or_(Deal.agent_id == user.id, Deal.recruit_id == user.id))))
     return paginate(db, stmt, evaluations.out, limit, offset)
@@ -170,13 +170,13 @@ def counters(month: str | None = None, db: Session = Depends(get_db, scope="func
 
 @router.get("/analytics/dashboard")
 def analytics_dashboard(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    mine = {"stats_mine": analytics.stats(db, user, mine=True)} if user.role == "superagent" else {}
+    mine = {"stats_mine": analytics.stats(db, user, mine=True)} if is_field(user) and at_least(user, "operator") else {}
     return {**analytics.dashboard(db, month), "stats": analytics.stats(db, user), **mine}
 
 
 @router.get("/analytics/funnel")
 def analytics_funnel(date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"), db: Session = Depends(get_db, scope="function"),
-                     user: User = Depends(require_roles(*STAFF_ROLES))):
+                     user: User = Depends(require_level("operator"))):
     return analytics.funnel(db, date_from, date_to)
 
 

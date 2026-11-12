@@ -7,14 +7,14 @@ from fastapi import APIRouter, Depends, File, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, paginate
+from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
 from app.models import User
 from app.services import contracts as C
 from app.services.errors import DomainError
 from app.telegram import client as tg
 
-router = APIRouter(tags=["contracts"])
+router = APIRouter(tags=["contracts"], dependencies=[Depends(require_level("agent"))])  # recruits: no contracts (Irakli 11-12)
 public = APIRouter(tags=["contracts"])
 
 

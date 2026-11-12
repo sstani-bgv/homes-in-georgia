@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app import districts, storage
 from app.config import settings as env
-from app.models import (ARCHIVE_REASONS, FIELD, PUBLICATION_CHANNELS, STAFF, ChannelPost, Deal, Event, Listing, ListingMatch, Owner, Property,
-                        PropertyListing, PropertyMedia, PropertyPublication, User)
+from app.models import (ARCHIVE_REASONS, PUBLICATION_CHANNELS, ChannelPost, Deal, Event, Listing, ListingMatch, Owner,
+                        Property, PropertyListing, PropertyMedia, PropertyPublication, User, at_least, is_field)
 from app.services import jobs
 from app.services import users as users_svc
 from app.services import settings as settings_svc
@@ -82,14 +82,14 @@ def _prop(db: Session, pid: int, lock: bool = False) -> Property:
 
 
 def _require_owner(p: Property, actor: User):
-    if actor.role in STAFF or p.agent_id == actor.id:
+    if at_least(actor, "operator") or p.agent_id == actor.id:
         return
     raise forbidden("object is taken by another agent")
 
 
 def _require_media_editable(p: Property, actor: User):
     _require_owner(p, actor)
-    if actor.role not in STAFF and p.status not in AGENT_MEDIA_STATUSES:
+    if not at_least(actor, "operator") and p.status not in AGENT_MEDIA_STATUSES:
         raise DomainError("submitted", "the object is with the operator: media and checklist are read-only", 409)
 
 
@@ -414,7 +414,7 @@ def schedule_lease_reminders(db: Session, p: Property) -> None:
 
 def is_locked_for(p: Property, user: User) -> bool:
     """The agent's key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY)."""
-    return user.role not in STAFF and p.verified_at is not None
+    return not at_least(user, "operator") and p.verified_at is not None
 
 
 def _current(db: Session, p: Property, k: str):
@@ -722,7 +722,7 @@ def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
     if o.agent_id is None:
         o.agent_id = p.agent_id
         log_event(db, "owner", o.id, "agent_bound", actor, agent_id=p.agent_id, property_id=p.id)
-    elif actor.role not in STAFF:
+    elif not at_least(actor, "operator"):
         raise DomainError("owner_taken", f"Собственник закреплён за {users_svc.tag_of(db.get(User, o.agent_id))}", 409)
     else:
         log_event(db, "property", p.id, "owner_agent_override", actor, owner_id=o.id, owner_agent_id=o.agent_id)
@@ -733,11 +733,11 @@ def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, 
     """«Передать собственника агенту…»: staff only (stage 6's agent «Запрос оператору» is approved through here, e.g. the
     agent left). The owner and his live objects of the previous agent move to the new one; every object of the owner
     and the owner himself get a history event."""
-    if by_user.role not in STAFF:
+    if not at_least(by_user, "operator"):
         raise forbidden("only operators transfer owners")
     o = get_or_404(db, Owner, int(owner_id), "owner", lock=True)
     to = get_or_404(db, User, int(to_agent_id), "user")
-    if to.role not in FIELD or not to.is_active:
+    if not is_field(to) or not to.is_active:
         raise DomainError("bad_agent", "Передать можно только активному агенту")
     if o.agent_id == to.id:
         raise DomainError("bad_status", "Собственник уже закреплён за этим агентом")
@@ -1129,7 +1129,7 @@ def submit_for_review(db: Session, pid: int, agent: User) -> Property:
 
 def review(db: Session, pid: int, operator: User, approve: bool, comment: str | None = None) -> Property:
     """B7a: approve → publish; return → back to the agent with a comment."""
-    if operator.role not in STAFF:
+    if not at_least(operator, "operator"):
         raise forbidden("only operators review objects")
     p = _prop(db, pid, lock=True)
     _require_status(p, "review")
@@ -1535,7 +1535,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
     the picked order (default all), to a channel of PUBLICATION_CHANNELS. Publishing an object in review approves it.
     Without BOT_TOKEN in dev the post is a dry run (recorded without a link); a Telegram failure leaves it unpublished."""
     p = _prop(db, pid, lock=True)
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators publish")
     if channel not in PUBLICATION_CHANNELS:
         raise DomainError("bad_channel", f"unknown channel {channel}")
@@ -1627,7 +1627,7 @@ def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
     """«Проверено: снято»: the operator opened the outside ad and saw it is taken down; it stops blocking the exclusive.
     A manual check on purpose: ss.ge / myhome block server requests (Cloudflare), an HTTP probe can't tell "removed"
     from "blocked". The ingest marking the ad gone clears it too."""
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators confirm a removed ad")
     p = _prop(db, pid, lock=True)
     link = db.scalar(select(PropertyListing).where(PropertyListing.property_id == p.id,
@@ -1683,7 +1683,7 @@ def check_duplicate(db: Session, phone: str | None = None, address: str | None =
 # ---------------------------------------------------------------- reading
 
 def can_see_owner(p: Property, user: User) -> bool:
-    return user.role in STAFF or p.agent_id == user.id
+    return at_least(user, "operator") or p.agent_id == user.id
 
 
 def prefetch(db: Session, rows: list[Property], cache: dict) -> None:
@@ -1761,7 +1761,7 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     d["rent_from"], d["rent_to"] = (p.rent_from.isoformat() if p.rent_from else None), (p.rent_to.isoformat() if p.rent_to else None)
     ref = lambda u: {"id": u.id, "name": u.name, "username": u.username, "agent_tag": u.agent_tag} if u else None  # noqa: E731
     d["agent"] = ref(agent)
-    d["locked"] = bool(p.agent_id) and p.agent_id != user.id and user.role not in STAFF
+    d["locked"] = bool(p.agent_id) and p.agent_id != user.id and not at_least(user, "operator")
     d["locked_fields"] = list(LOCKED_AFTER_VERIFY) if is_locked_for(p, user) else []
     d["needs_check"] = needs_check(p)
     owner = get(Owner, p.owner_id)
@@ -1853,7 +1853,7 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
         stmt = stmt.where(Property.status.in_(BASE_STATUSES), Property.published_at.isnot(None))
     # agents see only their own objects in every list, «База объектов» too (Stanislav 11-11); staff see all.
     # everyone: the deal form's picker only (deal_search), where another agent's object comes blocked, without data
-    if mine or (user.role not in STAFF and not everyone):
+    if mine or (not at_least(user, "operator") and not everyone):
         stmt = stmt.where(Property.agent_id == user.id)
     elif agent_id:
         stmt = stmt.where(Property.agent_id == agent_id)
@@ -1892,7 +1892,7 @@ def needs_check(p: Property) -> bool:
 def deal_block(db: Session, p: Property, user: User) -> str | None:
     """Why this agent can't file a deal on the object: it is another agent's (the owner's agent, stage 6.5, else the
     object's). Staff are never blocked."""
-    if user.role in STAFF:
+    if at_least(user, "operator"):
         return None
     o = db.get(Owner, p.owner_id) if p.owner_id else None
     bound = o.agent_id if o is not None and o.agent_id and not o.is_agent else p.agent_id
@@ -1936,7 +1936,7 @@ def deal_search(db: Session, user: User, q: str | None = None, pid: int | None =
 
 def verify(db: Session, pid: int, actor: User) -> Property:
     """The operator checked the object (stage 7: a new object from a deal; its deal can be confirmed then)."""
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators verify objects")
     p = _prop(db, pid, lock=True)
     if p.verified_at is None:
@@ -1950,7 +1950,7 @@ def board(db: Session, user: User, per_column: int = 100) -> dict[str, list[dict
     columns = {}
     for st in BOARD:
         stmt = select(Property).where(Property.status == st, Property.board_hidden_at.is_(None))
-        if user.role not in STAFF:
+        if not at_least(user, "operator"):
             stmt = stmt.where(Property.agent_id == user.id)
         columns[st] = list(db.scalars(stmt.order_by(Property.updated_at.desc()).limit(per_column)))
     cache: dict = {}
@@ -1967,7 +1967,7 @@ def board_hide(db: Session, user: User, status: str) -> int:
     if status not in BOARD_HIDEABLE:
         raise DomainError("bad_status", "only published / rented cards can leave the board")
     stmt = select(Property).where(Property.status == status, Property.board_hidden_at.is_(None))
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         stmt = stmt.where(Property.agent_id == user.id)
     rows = list(db.scalars(stmt))
     for p in rows:

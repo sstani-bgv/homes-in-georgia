@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import ADMINS, STAFF, User
+from app.models import LEVELS, User, at_least
 from app.services.errors import DomainError
 
 ALG = "HS256"
@@ -42,17 +42,15 @@ def current_user(db: Session = Depends(get_db, scope="function"), authorization:
     return user
 
 
-def require_roles(*roles: str):
+def require_level(role: str):
+    """The user's role is `role` or higher (hierarchical RBAC: a higher role inherits every lower one's rights)."""
+    assert role in LEVELS, role
+
     def dep(user: User = Depends(current_user)) -> User:
-        if user.role not in roles:
-            raise DomainError("forbidden", f"requires role {', '.join(roles)}")
+        if not at_least(user, role):
+            raise DomainError("forbidden", f"requires role {role} or higher")
         return user
     return dep
-
-
-STAFF_ROLES = STAFF
-ADMIN_ROLES = ADMINS
-AGENT_PLUS = STAFF + ("agent",)
 
 
 def paginate(db: Session, stmt, mapper, limit: int = 50, offset: int = 0) -> dict:

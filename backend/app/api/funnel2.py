@@ -6,9 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import STAFF_ROLES, current_user, require_roles
+from app.api.deps import current_user, require_level
 from app.db import get_db
-from app.models import Client, Deal, Lead, Listing, Property, User
+from app.models import Client, Deal, Lead, Listing, Property, User, at_least
 from app.services import catalog, contracts
 from app.services import deals as deals_svc
 from app.services import leads as L
@@ -56,7 +56,7 @@ def leads_list(status: str | None = None, agent_id: int | None = None, operator_
 @router.get("/leads/board")
 def leads_board(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     board = L.board(db, user)
-    if user.role not in STAFF_ROLES:
+    if not at_least(user, "operator"):
         for st in OPERATOR_STAGES:
             board.pop(st, None)
     return board
@@ -65,7 +65,7 @@ def leads_board(db: Session = Depends(get_db, scope="function"), user: User = De
 @router.get("/leads/counts")
 def leads_counts(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     c = L.counts(db, user)
-    return c if user.role in STAFF_ROLES else {k: v for k, v in c.items() if k not in OPERATOR_STAGES}
+    return c if at_least(user, "operator") else {k: v for k, v in c.items() if k not in OPERATOR_STAGES}
 
 
 def _num(v) -> str:
@@ -73,7 +73,7 @@ def _num(v) -> str:
 
 
 @router.get("/leads/{lead_id}/contract")
-def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
     """Contract generator prefill (frontend ContractWizard CxData keys) from the lead, its object, owner and deal.
     Contacts follow the lead card rules (client after contacts are shared, owner while the lead is active)."""
     lead = _visible(db, lead_id, user)
@@ -122,7 +122,7 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
 
 
 @router.get("/leads/{lead_id}/deal-prefill")
-def leads_deal_prefill(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_deal_prefill(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
     """Deal page («Оформить сделку»): the fields of the lead's signed contract; the form's own lead/object prefill
     covers the rest (contacts, agent, object)."""
     lead = _visible(db, lead_id, user)
@@ -147,18 +147,18 @@ def leads_get(lead_id: int, db: Session = Depends(get_db, scope="function"), use
 
 
 @router.post("/leads/{lead_id}/take")
-def leads_take(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def leads_take(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return L.detail(db, L.operator_take(db, lead_id, user), user)
 
 
 @router.get("/leads/{lead_id}/recommend-agents")
-def leads_recommend(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def leads_recommend(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return L.recommend_agents(db, lead_id)
 
 
 @router.post("/leads/{lead_id}/assign")
 def leads_assign(lead_id: int, body: AssignIn, db: Session = Depends(get_db, scope="function"),
-                 user: User = Depends(require_roles(*STAFF_ROLES))):
+                 user: User = Depends(require_level("operator"))):
     lead = get_or_404(db, Lead, lead_id, "lead")
     if lead.status in ("new", "operator_taken", "agent_assigned"):
         lead = L.assign_agent(db, lead_id, body.agent_id, user)
@@ -177,7 +177,7 @@ def leads_slots(lead_id: int, body: SlotsIn, db: Session = Depends(get_db, scope
 @router.post("/leads/{lead_id}/reschedule")
 def leads_reschedule(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     _visible(db, lead_id, user)
-    return L.detail(db, L.request_reschedule(db, lead_id, "agent" if user.role not in STAFF_ROLES else "operator", user),
+    return L.detail(db, L.request_reschedule(db, lead_id, "agent" if not at_least(user, "operator") else "operator", user),
                     user)
 
 
@@ -188,7 +188,7 @@ def leads_outcome(lead_id: int, body: OutcomeIn, db: Session = Depends(get_db, s
 
 
 @router.post("/leads/{lead_id}/start-contract")
-def leads_start_contract(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+def leads_start_contract(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
     _visible(db, lead_id, user)
     return L.detail(db, L.start_contract(db, lead_id, user), user)
 
@@ -205,5 +205,5 @@ def leads_archive(lead_id: int, body: ArchiveIn, db: Session = Depends(get_db, s
 
 @router.post("/leads/{lead_id}/cancel")
 def leads_cancel(lead_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
-                 user: User = Depends(require_roles(*STAFF_ROLES))):
+                 user: User = Depends(require_level("operator"))):
     return L.detail(db, L.cancel(db, lead_id, user, body.reason), user)

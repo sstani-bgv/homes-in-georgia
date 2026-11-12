@@ -6,12 +6,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import ADMINS, FIELD, ROLES, STAFF, SUPER, User
+from app.models import FIELD_SQL, ROLES, SUPER, User, at_least
 from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
 EDITABLE = ("name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
-            "birth_date", "plans", "tg_id", "exclusive_deals", "agent_tag")
+            "birth_date", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent")
 TAG_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{1,31}")
 _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюяაბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ",
                "a b v g d e e zh z i y k l m n o p r s t u f kh ts ch sh shch _ y _ e yu ya "
@@ -82,7 +82,7 @@ def suggest_agent_tag(db: Session, name: str, exclude_id: int | None = None) -> 
     if not words:
         return ""
     first = words[0]
-    namesakes = [u for u in db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True)))
+    namesakes = [u for u in db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)))
                  if u.id != exclude_id and (u.name or "").split() and _latin(u.name.split()[0]).lower() == first.lower()]
     tries = ([] if namesakes else [first]) + ([first + words[1][0]] if len(words) > 1 else [])
     tries += [f"{tries[-1] if tries else first}{n}" for n in range(2, 100)]
@@ -115,12 +115,30 @@ def _check(data: dict):
         raise DomainError("bad_level", "level must be 50, 70 or 90")
 
 
+def _guard(db: Session, actor: User | None, u: User | None, data: dict):
+    """Irakli's hierarchy: an admin manages operators / agents / recruits (and his own profile) and grants roles up to
+    operator; only a superadmin touches admins and superadmins. Never leaves the platform without an active superadmin."""
+    role = data.get("role")
+    if actor is not None and not at_least(actor, "superadmin"):
+        if not at_least(actor, "admin"):
+            raise DomainError("forbidden", "only an admin manages users")
+        if u is not None and at_least(u, "admin") and u.id != actor.id:
+            raise DomainError("forbidden", "only a superadmin can change admins and superadmins")
+        if role and at_least(role, "admin") and (u is None or role != u.role):
+            raise DomainError("forbidden", "only a superadmin can grant admin roles")
+    if u is not None and u.role == "superadmin" and u.is_active and (
+            role not in (None, "superadmin") or data.get("is_active") is False):
+        others = db.scalar(select(func.count()).select_from(User).where(
+            User.role == "superadmin", User.is_active.is_(True), User.id != u.id))
+        if not others:
+            raise DomainError("last_superadmin", "Это последний активный суперадмин: сначала назначьте другого", 409)
+
+
 def create(db: Session, data: dict, actor: User | None = None) -> User:
     data = dict(data)
     pw = data.pop("password", None)
     _check(data)
-    if actor is not None and actor.role not in SUPER and data.get("role") in ADMINS:
-        raise DomainError("forbidden", "only a superadmin can create admins")
+    _guard(db, actor, None, data)
     if not data.get("name"):
         raise DomainError("name_required", "name is required")
     if data.get("tg_id") and by_tg(db, data["tg_id"]):
@@ -146,12 +164,7 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None) -> User
     data = dict(data)
     pw = data.pop("password", None)
     _check(data)
-    if actor is not None and actor.role not in STAFF and "level" in data and data["level"] != u.level:
-        raise DomainError("forbidden", "only an admin or operator changes an agent's level")
-    if actor is not None and actor.role not in SUPER and (
-            u.role in ADMINS and u.id != actor.id
-            or data.get("role") in ADMINS and data.get("role") != u.role):
-        raise DomainError("forbidden", "only a superadmin can change admins")
+    _guard(db, actor, u, data)
     if data.get("tg_id"):
         other = by_tg(db, data["tg_id"])
         if other is not None and other.id != u.id:
@@ -188,21 +201,22 @@ def promote(db: Session, uid: int, level: int = 50, actor: User | None = None) -
 
 def list_users(db: Session, role: str | None = None, active: bool | None = None) -> list[User]:
     q = select(User)
-    if role:
-        q = q.where(User.role.in_(role.split(",")))
+    if role:  # comma-separated roles; "field" = everyone who works as an agent (agents, recruits, works_as_agent staff)
+        roles = role.split(",")
+        q = q.where(User.role.in_(roles) | (FIELD_SQL if "field" in roles else False))
     if active is not None:
         q = q.where(User.is_active.is_(active))
     return list(db.scalars(q.order_by(User.name)))
 
 
 def field_users(db: Session) -> list[User]:
-    return list(db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True)).order_by(User.name)))
+    return list(db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)).order_by(User.name)))
 
 
 def ensure_bootstrap(db: Session) -> list[User]:
     """Create the bootstrap superadmin(s) from env if the platform has none."""
     created = []
-    if db.scalar(select(func.count()).select_from(User).where(User.role.in_(SUPER))):  # a superagent counts: never re-promote the owner
+    if db.scalar(select(func.count()).select_from(User).where(User.role.in_(SUPER))):
         return created
     tg_ids = settings.superadmin_tg_ids
     if settings.ADMIN_BOOTSTRAP_LOGIN and settings.ADMIN_BOOTSTRAP_PASSWORD:

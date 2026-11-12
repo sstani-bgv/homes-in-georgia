@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import { ApiError, getToken, setToken } from '../api/client';
 import type { AuthOut, Role, User } from '../api/types';
-import { ADMIN_ROLES, STAFF_ROLES } from '../api/types';
+import { atLeast } from '../api/types';
 
 interface AuthState {
   user: User | null;
@@ -85,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const hasRole = (...roles: Role[]) => !!user && roles.includes(user.role);
     return {
       user, loading, error, signIn, signOut, hasRole,
-      isStaff: hasRole(...STAFF_ROLES),
-      isAdmin: hasRole(...ADMIN_ROLES),
+      isStaff: atLeast(user, 'operator'),
+      isAdmin: atLeast(user, 'admin'),
     };
   }, [user, loading, error, signIn, signOut]);
 

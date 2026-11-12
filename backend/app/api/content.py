@@ -11,10 +11,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import storage
-from app.api.deps import ADMIN_ROLES, STAFF_ROLES, current_user, paginate, require_roles
+from app.api.deps import current_user, paginate, require_level
 from app.config import REPO_ROOT, settings as env
 from app.db import get_db
-from app.models import Address, ChannelPost, Lead, Listing, News, Property, Source, TickerMessage, User
+from app.models import Address, ChannelPost, Lead, Listing, News, Property, Source, TickerMessage, User, at_least
 from app.services import ics, settings
 from app.services import properties as P
 from app.services.common import get_or_404, jload, log_event, now_text
@@ -44,7 +44,7 @@ def ticker_list(all: int = 0, db: Session = Depends(get_db, scope="function"), u
 
 
 @router.post("/ticker")
-def ticker_add(body: TickerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def ticker_add(body: TickerIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     t = TickerMessage(text=body.text.strip(), status="active")
     db.add(t)
     db.commit()
@@ -52,7 +52,7 @@ def ticker_add(body: TickerIn, db: Session = Depends(get_db, scope="function"), 
 
 
 @router.delete("/ticker/{tid}")
-def ticker_delete(tid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def ticker_delete(tid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     t = get_or_404(db, TickerMessage, tid, "ticker message")
     t.status = "deleted"
     db.commit()
@@ -122,13 +122,15 @@ def addresses_list(active: int = 1, db: Session = Depends(get_db, scope="functio
 # ---------------------------------------------------------------- settings / sources
 
 @router.get("/settings")
-def settings_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def settings_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return settings.all(db)
 
 
 @router.put("/settings")
-def settings_put(body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def settings_put(body: dict, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     settings.validate(body)
+    if not at_least(user, "superadmin") and any(k in settings.PROTECTED and str(v) != settings.get(db, k) for k, v in body.items()):
+        raise DomainError("forbidden", "Эти настройки (интеграция с Telegram) меняет только суперадмин")
     for k, v in body.items():
         if k in settings.HIDDEN:  # written by the parser / its own page, never by this form
             continue
@@ -155,7 +157,7 @@ def source_out(s: Source) -> dict:
 
 
 @router.get("/sources")
-def sources_list(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def sources_list(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return [source_out(s) for s in db.scalars(select(Source).order_by(Source.position, Source.id))]
 
 
@@ -169,7 +171,7 @@ def _apply_source(s: Source, data: dict):
 
 
 @router.post("/sources")
-def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     data = body.model_dump(exclude_none=True)
     if data.get("kind") not in ("tg_agency", "tg_competitor", "fb_group", "ig_account") or not data.get("key"):
         raise DomainError("bad_source", "kind (tg_agency|tg_competitor|fb_group|ig_account) and key are required")
@@ -183,7 +185,7 @@ def sources_create(body: SourceIn, db: Session = Depends(get_db, scope="function
 
 
 @router.patch("/sources/{sid}")
-def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def sources_patch(sid: int, body: SourceIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     s = get_or_404(db, Source, sid, "source")
     _apply_source(s, body.model_dump(exclude_unset=True))
     db.commit()
@@ -223,12 +225,12 @@ def _schedule(db: Session) -> list[dict]:
 
 
 @router.get("/sources/schedule")
-def schedule_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def schedule_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     return _schedule(db)
 
 
 @router.put("/sources/schedule")
-def schedule_put(body: dict[str, int], db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def schedule_put(body: dict[str, int], db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     if any(k not in SCHEDULE_DEFAULTS or not isinstance(v, int) or not 15 <= v <= 7 * 1440 for k, v in body.items()):
         raise DomainError("bad_setting", "every_min: a known source and 15..10080 minutes")
     every = {**jload(settings.get(db, "source_every_min"), {}), **body}
@@ -262,7 +264,7 @@ def _userbot(method: str, path: str, body: dict | None = None) -> dict:
 
 
 @router.get("/userbot")
-def userbot_status(user: User = Depends(require_roles(*ADMIN_ROLES))):
+def userbot_status(user: User = Depends(require_level("admin"))):
     return _userbot("GET", "/status")
 
 
@@ -271,17 +273,17 @@ class UserbotPassword(BaseModel):
 
 
 @router.post("/userbot/login")
-def userbot_login(user: User = Depends(require_roles(*ADMIN_ROLES))):
+def userbot_login(user: User = Depends(require_level("superadmin"))):
     return _userbot("POST", "/login", {})
 
 
 @router.post("/userbot/password")
-def userbot_password(body: UserbotPassword, user: User = Depends(require_roles(*ADMIN_ROLES))):
+def userbot_password(body: UserbotPassword, user: User = Depends(require_level("superadmin"))):
     return _userbot("POST", "/password", {"password": body.password})
 
 
 @router.post("/userbot/logout")
-def userbot_logout(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def userbot_logout(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("superadmin"))):
     out = _userbot("POST", "/logout", {})
     log_event(db, "settings", "-", "userbot_logout", user)
     db.commit()
@@ -296,14 +298,14 @@ class ModerationIn(BaseModel):
 
 @router.get("/moderation")
 def moderation_list(limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
-                    user: User = Depends(require_roles(*STAFF_ROLES))):
+                    user: User = Depends(require_level("operator"))):
     stmt = select(Listing).where(Listing.status == "pending_review").order_by(Listing.first_seen.desc())
     return paginate(db, stmt, lambda x: listing_out(x, full=True), limit, offset)
 
 
 @router.post("/moderation/{listing_id}")
 def moderation_decide(listing_id: str, body: ModerationIn, db: Session = Depends(get_db, scope="function"),
-                      user: User = Depends(require_roles(*STAFF_ROLES))):
+                      user: User = Depends(require_level("operator"))):
     x = get_or_404(db, Listing, listing_id, "listing")
     x.decision = "approved" if body.approve else "rejected"
     x.status = "published" if body.approve else "rejected"

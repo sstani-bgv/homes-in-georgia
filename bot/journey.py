@@ -18,14 +18,13 @@ from telegram.error import BadRequest, TelegramError
 
 import core
 import db
+from app.models import at_least
 from app.telegram import client as tgc
 from app.telegram import links, notify, store, texts, userbot
 from app.telegram.client import cb, kb
 
 log = logging.getLogger(__name__)
 e = html.escape
-STAFF = ("operator", "admin", "superadmin", "superagent")
-FIELD = ("agent", "recruit", "superagent")
 
 
 # ---------- services (sync, in a thread: one session per call) ----------
@@ -572,7 +571,7 @@ async def on_group(update: Update, ctx):
     tg_id = update.effective_user.id
     await bind(update.effective_user)
     me = await user_of(tg_id)
-    if not me or me.role not in STAFF:
+    if not me or not at_least(me, "operator"):
         await answer(query, "Только для операторов: попросите администратора добавить вас в CRM", show_alert=True)
         return
     if act == "take":
@@ -753,7 +752,7 @@ async def on_agent_slots(update: Update, ctx, parts):
     await bind(update.effective_user)
     me = await user_of(update.effective_user.id)
     ld = await th(lead_row, lead_id)
-    if not me or not ld or (ld["agent_id"] != me.id and me.role not in STAFF):
+    if not me or not ld or (ld["agent_id"] != me.id and not at_least(me, "operator")):
         await answer(query, "Это не ваша заявка", show_alert=True)
         return
     if act == "quick":

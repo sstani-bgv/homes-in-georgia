@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import REPO_ROOT
-from app.models import STAFF, Listing, ListingMatch, Owner, Property, PropertyListing, User
+from app.models import Listing, ListingMatch, Owner, Property, PropertyListing, User, at_least
 from app.services import properties as P
 from app.services.common import get_or_404, jdump, jload, log_event, now
 from app.services.dedup import address_match, extract_phones, phone_match
@@ -217,7 +217,7 @@ def process(db: Session, ids: list[str]) -> dict:
 
 def decide(db: Session, listing_id: str, pid: int, actor: User, same: bool) -> ListingMatch:
     """Operator's answer on a «похож» card: same → the ad is linked (other candidates rejected), different → rejected."""
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators decide on similar objects")
     m = db.scalar(select(ListingMatch).where(ListingMatch.listing_id == listing_id, ListingMatch.property_id == pid)
                   .with_for_update())

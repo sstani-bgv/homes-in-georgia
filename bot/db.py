@@ -27,8 +27,8 @@ for _p in (str(ROOT / "backend"), str(ROOT)):  # the bot uses the backend's serv
         sys.path.append(_p)
 DATA_DIR = os.environ.get("DATA_DIR", "data")  # local files of the bot (vectors.npz, client photos), relative to bot/
 URL = None  # tests point this at TEST_DATABASE_URL
-STAFF_ROLES = ("operator", "agent", "admin", "superadmin", "superagent")
-STAFF_SQL = "role IN ('operator', 'agent', 'admin', 'superadmin', 'superagent') AND is_active"
+STAFF_ROLES = ("operator", "agent", "admin", "superadmin")
+STAFF_SQL = "role IN ('operator', 'agent', 'admin', 'superadmin') AND is_active"
 
 DEFAULT_SETTINGS = {
     "moderate_all": "0",        # 1: every competitor tg:/fb: listing waits for an agent's approval

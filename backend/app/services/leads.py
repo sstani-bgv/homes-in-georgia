@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings as env
 from app import districts as districts_
-from app.models import (ADMINS, FIELD, STAFF, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User)
+from app.models import (FIELD_SQL, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property, Reaction, User,
+                        at_least, is_field)
 from app.services import catalog, jobs, settings
 from app.services.common import aware, get_or_404, jload, log_event, now, now_text
 from app.services.dedup import extract_phones
@@ -72,7 +73,7 @@ def _lead(db: Session, lead_id: int, lock: bool = False) -> Lead:
 
 
 def _require_agent_or_staff(lead: Lead, actor: User | None):
-    if actor is not None and (actor.role in STAFF or lead.agent_id == actor.id):
+    if actor is not None and (at_least(actor, "operator") or lead.agent_id == actor.id):
         return
     raise forbidden("not your lead")
 
@@ -310,7 +311,7 @@ def operator_take(db: Session, lead_id: int, operator: User) -> Lead:
         raise DomainError("already_taken", "lead already taken by another operator")
     if lead.operator_id == operator.id:
         return lead
-    if operator.role not in STAFF:
+    if not at_least(operator, "operator"):
         raise forbidden("only operators take leads")
     lead.operator_id = operator.id
     if lead.status == "new":
@@ -326,12 +327,12 @@ def assign_agent(db: Session, lead_id: int, agent_id: int, actor: User | None) -
     actor None: the system auto-assign of a new lead to the object's agent (no operator is set, he can reassign)."""
     lead = _lead(db, lead_id, lock=True)
     _require_status(lead, "new", "operator_taken", "agent_assigned")
-    if actor is not None and actor.role not in STAFF:
+    if actor is not None and not at_least(actor, "operator"):
         raise forbidden("only operators assign agents")
-    if actor is not None and lead.operator_id and lead.operator_id != actor.id and actor.role not in ADMINS:
+    if actor is not None and lead.operator_id and lead.operator_id != actor.id and not at_least(actor, "admin"):
         raise DomainError("already_taken", "lead is led by another operator")
     agent = get_or_404(db, User, int(agent_id), "agent")
-    if agent.role not in FIELD + ADMINS or not agent.is_active:
+    if not (is_field(agent) or at_least(agent, "admin")) or not agent.is_active:
         raise DomainError("bad_agent", "user is not an active agent")
     took = actor is not None and lead.operator_id is None
     if took:
@@ -373,7 +374,7 @@ def recommend_agents(db: Session, lead_id: int) -> list[dict]:
     load = dict(db.execute(select(Lead.agent_id, func.count()).where(Lead.status.in_(ACTIVE), Lead.agent_id.isnot(None))
                            .group_by(Lead.agent_id)).all())
     out = []
-    for a in db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True))):
+    for a in db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True))):
         score, reasons = 0, []
         if owner is not None and owner.agent_id == a.id:
             score += 200
@@ -399,7 +400,7 @@ def recommend_agents(db: Session, lead_id: int) -> list[dict]:
 
 def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) -> Lead:
     lead = _lead(db, lead_id, lock=True)
-    if actor.role not in STAFF:
+    if not at_least(actor, "operator"):
         raise forbidden("only operators cancel leads")
     _require_status(lead, *ACTIVE)
     lead.refusal_reason = reason or lead.refusal_reason or "cancelled"
@@ -418,7 +419,7 @@ ARCHIVABLE = ("rented", "refused", "thinking")
 def set_archived(db: Session, lead_id: int, actor: User, archived: bool) -> Lead:
     """Closed leads leave the board but stay searchable (filter «Архив»); restoring puts them back."""
     lead = _lead(db, lead_id, lock=True)
-    if actor.role not in STAFF and lead.agent_id != actor.id:
+    if not at_least(actor, "operator") and lead.agent_id != actor.id:
         raise forbidden("not your lead")
     if archived:
         _require_status(lead, *ARCHIVABLE)
@@ -600,7 +601,7 @@ def history(db: Session, lead_id: int) -> list[dict]:
 
 
 def contacts_visible(lead: Lead, user: User) -> bool:
-    if user.role in STAFF:
+    if at_least(user, "operator"):
         return True
     return lead.agent_id == user.id and lead.contacts_shared_at is not None
 
@@ -680,7 +681,7 @@ def card(db: Session, lead: Lead, user: User, cache: dict | None = None) -> dict
 
 def owner_contact(db: Session, lead: Lead, user: User, prop: Property | None) -> dict | None:
     """«Позвонить собственнику» in the lead: staff and the lead's agent while the lead is active (as listing_get)."""
-    if not (user.role in STAFF or (lead.agent_id == user.id and lead.status in ACTIVE)):
+    if not (at_least(user, "operator") or (lead.agent_id == user.id and lead.status in ACTIVE)):
         return None
     owner = db.get(Owner, prop.owner_id) if prop and prop.owner_id else None
     if owner and owner.phone:
@@ -705,13 +706,13 @@ def detail(db: Session, lead: Lead, user: User) -> dict:
 
 
 def can_view(lead: Lead, user: User) -> bool:
-    return user.role in STAFF or lead.agent_id == user.id
+    return at_least(user, "operator") or lead.agent_id == user.id
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None,
           operator_id: int | None = None, q: str | None = None, archived: bool = False):
     stmt = select(Lead).where(Lead.archived_at.isnot(None) if archived else Lead.archived_at.is_(None))
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         stmt = stmt.where(Lead.agent_id == user.id)
     elif agent_id:
         stmt = stmt.where(Lead.agent_id == agent_id)

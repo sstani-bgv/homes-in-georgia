@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import REPO_ROOT, settings as env
-from app.models import CONTRACT_CLOSE_REASONS, STAFF, Contract, Deal, Lead, User
+from app.models import CONTRACT_CLOSE_REASONS, Contract, Deal, Lead, User, at_least
 from app.services import jobs
 from app.services.common import get_or_404, log_event, now
 from app.services.errors import DomainError
@@ -138,7 +138,7 @@ def render_pdf(page: str) -> bytes:
 # ---------------------------------------------------------------- access, output
 
 def can_view(db: Session, c: Contract, user: User) -> bool:
-    if user.role in STAFF or c.created_by == user.id:
+    if at_least(user, "operator") or c.created_by == user.id:
         return True
     lead = db.get(Lead, c.lead_id) if c.lead_id else None
     return bool(lead and lead.agent_id == user.id)
@@ -195,7 +195,7 @@ def for_lead(db: Session, lead_id: int) -> Contract | None:
 def query(db: Session, user: User, status: str | None = None, lead_id: int | None = None, q: str | None = None):
     """status: active (draft + signed, the default lists) | draft | signed | deal | closed_no_deal | all."""
     stmt = select(Contract)
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         mine = select(Lead.id).where(Lead.agent_id == user.id)
         stmt = stmt.where((Contract.created_by == user.id) | Contract.lead_id.in_(mine))
     st = status or "active"
@@ -234,13 +234,13 @@ def _fields(db: Session, body: dict, user: User) -> dict:
     prop_id = body.get("property_id") or None
     if lead_id:
         lead = get_or_404(db, Lead, int(lead_id), "lead")
-        if user.role not in STAFF and lead.agent_id != user.id:
+        if not at_least(user, "operator") and lead.agent_id != user.id:
             raise DomainError("not_found", "lead not found")
         prop_id = prop_id or lead.property_id
         deal_id = deal_id or lead.deal_id
     if deal_id:
         deal = get_or_404(db, Deal, int(deal_id), "deal")
-        if user.role not in STAFF and deal.agent_id != user.id:
+        if not at_least(user, "operator") and deal.agent_id != user.id:
             raise DomainError("not_found", "deal not found")
         lead_id, prop_id = lead_id or deal.lead_id, prop_id or deal.property_id
     data = body.get("data")  # the wizard's CxData (scalars only), kept for the deal prefill; absent = left as is

@@ -178,7 +178,7 @@ class Importer:
                 continue
             if k == "tg_id" and db.scalar(select(User.id).where(User.tg_id == v, User.id != (u.id or 0))):
                 continue  # tg id already belongs to another user
-            if not created and k in ("role", "is_active") and (u.role in ("superadmin", "superagent") or (
+            if not created and k in ("role", "is_active") and (u.role == "superadmin" or (
                     f.get("role") == "recruit" and u.role != "recruit")):
                 continue  # a promoted recruit stays an agent (promoteRecruit keeps the old Recruits row inactive)
             setattr(u, k, v)

@@ -9,8 +9,7 @@ from datetime import date, datetime
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
-from app.models import User
-from app.models import FIELD, REPORT_KINDS, STAFF, Deal, Report
+from app.models import FIELD_SQL, REPORT_KINDS, Deal, Report, User, at_least, is_field
 from app.services.common import TZ, log_event, now
 from app.services.errors import DomainError
 from app.telegram import notify
@@ -133,7 +132,7 @@ def save(db: Session, kind: str, data: dict, author: User | None, post: bool = T
         raise DomainError("bad_kind", f"report kind must be one of {REPORT_KINDS}")
     d = {k: v for k, v in (data or {}).items() if k not in ("posts", "counter")}
     recruit = _find_user(db, d.get("recruit_id") or d.get("recruit"))
-    if recruit is None and author is not None and author.role in FIELD and kind in COUNTED:
+    if recruit is None and author is not None and is_field(author) and kind in COUNTED:
         recruit = author
     mentor = _find_user(db, d.get("mentor_id") or d.get("mentor"))
     if mentor is None and recruit is not None and recruit.mentor_id:
@@ -169,7 +168,7 @@ def out(r: Report) -> dict:
 
 def query(db: Session, user: User, kind: str | None = None, author_id: int | None = None, month: str | None = None):
     stmt = select(Report)
-    if user.role not in STAFF:
+    if not at_least(user, "operator"):
         stmt = stmt.where((Report.author_id == user.id) | (Report.recruit_id == user.id) | (Report.mentor_id == user.id))
     elif author_id:
         stmt = stmt.where((Report.author_id == author_id) | (Report.recruit_id == author_id))
@@ -184,8 +183,8 @@ def query(db: Session, user: User, kind: str | None = None, author_id: int | Non
 def counters(db: Session, month: str | None = None, user: User | None = None) -> list[dict]:
     """Per recruit/agent this month: photo/showing/stickers reports + rental deals vs plans (Counters sheet)."""
     y, m = month_bounds(month)
-    people = db.scalars(select(User).where(User.role.in_(FIELD), User.is_active.is_(True)).order_by(User.name)).all()
-    if user is not None and user.role not in STAFF:
+    people = db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)).order_by(User.name)).all()
+    if user is not None and not at_least(user, "operator"):
         people = [p for p in people if p.id == user.id or p.mentor_id == user.id]
     rep = {(k, rid): n for k, rid, n in db.execute(
         select(Report.kind, Report.recruit_id, func.count()).where(

@@ -1,7 +1,7 @@
 import type { LeadStatus, PropertyStatus, Role } from '../api/types';
 
 export const ROLE_LABEL: Record<Role, string> = {
-  superadmin: 'Суперадмин', superagent: 'Суперагент', admin: 'Админ', operator: 'Оператор', agent: 'Агент', recruit: 'Рекрут',
+  superadmin: 'Суперадмин', admin: 'Админ', operator: 'Оператор', agent: 'Агент', recruit: 'Рекрут',
 };
 
 export const PROPERTY_STATUS: Record<PropertyStatus, string> = {

@@ -4,13 +4,16 @@ from sqlalchemy.orm import relationship
 
 from app.db import Base
 
-ROLES = ("superadmin", "superagent", "admin", "operator", "agent", "recruit")
-# superagent = superadmin permissions + a working agent (owner who also sells): in SUPER/ADMINS/STAFF AND in FIELD.
-# Restrictions are always "role not in STAFF", so the agent side never limits a superagent.
-SUPER = ("superadmin", "superagent")
-STAFF = SUPER + ("admin", "operator")
+# Hierarchical RBAC (Irakli 2026-11-12, docs/ROLES-IRAKLI-2026-11-12.md): every role inherits all rights of the lower
+# ones, so access checks compare levels (at_least(u, "operator")), never role lists.
+LEVELS = {"recruit": 1, "agent": 2, "operator": 3, "admin": 4, "superadmin": 5}
+ROLES = ("superadmin", "admin", "operator", "agent", "recruit")
+SUPER = ("superadmin",)
 ADMINS = SUPER + ("admin",)
-FIELD = ("agent", "recruit", "superagent")
+STAFF = ADMINS + ("operator",)
+# «+ как агент»: agents/recruits always work in the field; a staff member only with users.works_as_agent (David, Irakli).
+# FIELD = the roles that are field by role alone; is_field(u) / FIELD_SQL add the flag.
+FIELD = ("agent", "recruit")
 DEFAULT_PLANS = {"photo": 15, "showing": 15, "stickers": 15, "rental": 15}
 
 
@@ -36,7 +39,8 @@ class User(Base):
     plans = Column(JSONB, nullable=False, server_default=text(
         """'{"photo": 15, "showing": 15, "stickers": 15, "rental": 15}'::jsonb"""))
     legacy_id = Column(Text)
-    agent_tag = Column(Text)  # post hashtag without '#' (Zaza, ArturB); unique lower(agent_tag) index (migration 0009)
+    works_as_agent = Column(Boolean, nullable=False, server_default=text("false"))  # staff «+ как агент» (migration 0009)
+    agent_tag = Column(Text)  # post hashtag without '#' (Zaza, ArturB); unique lower(agent_tag) index (migration 0001)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_login_at = Column(DateTime(timezone=True))
 
@@ -44,8 +48,25 @@ class User(Base):
 
     @property
     def is_staff(self):
-        return self.role in STAFF
+        return at_least(self, "operator")
 
     @property
     def is_admin(self):
-        return self.role in ADMINS
+        return at_least(self, "admin")
+
+
+def role_level(u) -> int:
+    """User or role name → 1 (recruit) .. 5 (superadmin); 0 for None / unknown."""
+    return LEVELS.get(getattr(u, "role", u), 0)
+
+
+def at_least(u, role: str) -> bool:
+    return u is not None and role_level(u) >= LEVELS[role]
+
+
+def is_field(u) -> bool:
+    """Works as an agent: own objects/leads, agent pickers, auto-assignment, leaderboard, level/tag."""
+    return u is not None and (u.role in FIELD or bool(getattr(u, "works_as_agent", False)))
+
+
+FIELD_SQL = User.role.in_(FIELD) | User.works_as_agent.is_(True)

@@ -7,9 +7,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.auth import user_out
-from app.api.deps import ADMIN_ROLES, STAFF_ROLES, current_user, paginate, require_roles
+from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
-from app.models import STAFF, ChannelPost, Client, Deal, Lead, Listing, Property, Reaction, Report, User
+from app.models import ChannelPost, Client, Deal, Lead, Listing, Property, Reaction, Report, User, at_least, is_field
 from app.services import clients as client_card
 from app.services import deals, leads, properties, reports, users
 from app.services.common import TZ, get_or_404, jload, now
@@ -34,6 +34,7 @@ class UserIn(BaseModel):
     birth_date: date | None = None
     plans: dict | None = None
     agent_tag: str | None = None
+    works_as_agent: bool = False
 
 
 class UserPatch(BaseModel):
@@ -53,6 +54,7 @@ class UserPatch(BaseModel):
     plans: dict | None = None
     exclusive_deals: int | None = None
     agent_tag: str | None = None
+    works_as_agent: bool | None = None
 
 
 class PromoteIn(BaseModel):
@@ -63,37 +65,37 @@ class PromoteIn(BaseModel):
 def list_users(role: str | None = None, active: bool | None = None, db: Session = Depends(get_db, scope="function"),
                user: User = Depends(current_user)):
     rows = users.list_users(db, role, active)
-    if user.role not in STAFF:  # agents see the team (names/levels), not logins
-        return {"items": [{"id": u.id, "name": u.name, "username": u.username, "role": u.role,
+    if not at_least(user, "operator"):  # agents see the team (names/levels), not logins
+        return {"items": [{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "field": is_field(u),
                            "level": users.effective_level(u)} for u in rows if u.is_active], "total": len(rows)}
     return {"items": [user_out(u) for u in rows], "total": len(rows)}
 
 
 @router.get("/users/agent-tag-suggestion")
 def agent_tag_suggestion(name: str, uid: int | None = None, db: Session = Depends(get_db, scope="function"),
-                         user: User = Depends(require_roles(*ADMIN_ROLES))):
+                         user: User = Depends(require_level("admin"))):
     return {"tag": users.suggest_agent_tag(db, name, uid)}
 
 
 @router.post("/users")
-def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     data = body.model_dump(exclude_none=True)
     return user_out(users.create(db, data, user))
 
 
 @router.patch("/users/{uid}")
-def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user))
 
 
 @router.post("/users/{uid}/promote")
-def promote(uid: int, body: PromoteIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*ADMIN_ROLES))):
+def promote(uid: int, body: PromoteIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     return user_out(users.promote(db, uid, body.level, user))
 
 
 @router.get("/users/{uid}/stats")
 def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    if user.role not in STAFF and user.id != uid:
+    if not at_least(user, "operator") and user.id != uid:
         raise forbidden()
     u = get_or_404(db, User, uid, "user")
     y, m = reports.month_bounds(month)
@@ -112,7 +114,7 @@ def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db,
 @router.get("/me/cabinet")
 def cabinet(user_id: int | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """The personal cabinet; staff open any agent's with ?user_id=, everyone else only their own."""
-    if user_id and user_id != user.id and user.role not in STAFF:
+    if user_id and user_id != user.id and not at_least(user, "operator"):
         raise forbidden()
     me = get_or_404(db, User, user_id, "user") if user_id else user
     y, m = reports.month_bounds(None)
@@ -196,7 +198,7 @@ def client_out(c: Client, full: bool = True) -> dict:
 
 @router.get("/clients")
 def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
-                 user: User = Depends(require_roles(*STAFF_ROLES))):
+                 user: User = Depends(require_level("operator"))):
     stmt = select(Client)
     if q:
         like = f"%{q.strip()}%"
@@ -210,7 +212,7 @@ def list_clients(q: str | None = None, limit: int = 50, offset: int = 0, db: Ses
 
 
 @router.get("/clients/{cid}")
-def get_client(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_roles(*STAFF_ROLES))):
+def get_client(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
     c = get_or_404(db, Client, cid, "client")
     d = {**client_out(c), **client_card.card(db, c)}  # stage 8: status, timeline, refusals
     d["leads"] = [leads.card(db, x, user) for x in db.scalars(select(Lead).where(Lead.client_id == cid)
