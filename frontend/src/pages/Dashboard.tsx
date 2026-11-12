@@ -37,7 +37,7 @@ type Stats = {
 
 function N({ to, n, label, sub }: { to: string; n: number; label: string; sub?: React.ReactNode }) {
   return (
-    <Link to={to} className="card" style={{ padding: '10px 12px', color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
+    <Link to={to} className="card" style={{ padding: '10px 12px', color: 'inherit', textDecoration: 'none', minWidth: 0, overflowWrap: 'anywhere' }}>
       <div className="num" style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1 }}>{num(n)}{sub}</div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25, marginTop: 2 }}>{label}</div>
     </Link>
@@ -50,7 +50,7 @@ function StatsBlock({ s, staff }: { s: Stats; staff: boolean }) {
   const row = (title: string, items: React.ReactNode) => (
     <div className="col gap-sm">
       <div className="label">{title}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>{items}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(124px, 1fr))', gap: 8 }}>{items}</div>
     </div>
   );
   return (
@@ -62,8 +62,8 @@ function StatsBlock({ s, staff }: { s: Stats; staff: boolean }) {
           <N to="/objects?tab=all&status=published" n={o.published} label="опубликовано" />
           <N to="/objects?tab=all&status=rented" n={o.rented} label="сдано" />
           <N to="/objects?tab=archive" n={o.archived} label="в архиве" />
-          <N to="/objects?tab=new" n={o.feed_today} label="новых объявл. сегодня" />
-          <N to="/objects?tab=new" n={o.feed_week} label="новых объявл. за 7 дней" />
+          <N to="/objects?tab=new" n={o.feed_today} label="новых сегодня" />
+          <N to="/objects?tab=new" n={o.feed_week} label="новых за 7 дней" />
         </>)}
         {row('Заявки', <>
           <N to="/leads" n={l.new} label="новые" />
