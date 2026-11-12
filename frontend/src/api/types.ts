@@ -101,7 +101,7 @@ export interface ExternalAd { listing_id: string; source?: string | null; url?: 
 export interface Elsewhere extends ExternalAd { verdict: 'linked' | 'same' | 'similar'; reasons: string[] }
 
 export interface SimilarFlat {
-  id: number; url?: string | null; address?: string | null; photo?: string | null; price_usd?: number | null; status?: string; archive_reason?: string | null;
+  id: number; url?: string | null; address?: string | null; photo?: string | null; photos?: string[]; price_usd?: number | null; status?: string; archive_reason?: string | null;
   bedrooms?: number | null; area?: number | null; floor?: number | null;
   /** why it is listed: «тот же дом», «соседний корпус 20A», «рядом по улице, дом 16», «в 40 м» */
   reasons?: string[];

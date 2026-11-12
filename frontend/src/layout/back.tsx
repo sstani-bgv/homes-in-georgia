@@ -1,5 +1,5 @@
 // «Назад» that returns where you were (David 2026-11-12: Archive → object → back lost the search and the scroll).
-import { useLayoutEffect, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { pageScroller } from '../auth/AuthContext';
@@ -18,7 +18,7 @@ export function BackLink({ to, children }: { to: string; children: ReactNode }) 
 }
 
 /** Scroll position per history entry (window, or #root inside Telegram): back / ‹ Telegram lands on the same spot,
- * a new page opens at the top. The list may render a moment later, so the restore retries for a second. */
+ * a new page opens at the top. The list may render later (after a source site the page reloads and refetches), so the restore retries for 5 s. */
 export function useScrollMemory() {
   const loc = useLocation();
   const type = useNavigationType();
@@ -31,7 +31,7 @@ export function useScrollMemory() {
     if (type === 'POP') {
       let want = 0;
       try { want = Number(sessionStorage.getItem(key)) || 0; } catch { /* private mode */ }
-      const until = performance.now() + 1000;
+      const until = performance.now() + 5000;
       const restore = () => {
         if (stop || !want) return;
         el.scrollTo(0, want);
@@ -51,4 +51,17 @@ export function useScrollMemory() {
       el.removeEventListener('touchstart', cancel);
     };
   }, [loc.key, type]);
+}
+
+/** useState that belongs to this history entry: «назад» from an object, or from a source site (the page reloads),
+ * finds the same filters / «Показать ещё» / list-or-map (David 11-12). Kept in sessionStorage under the entry's key;
+ * a `replace` navigation (a modal in the URL) gets a new key, so the value is re-written under it. */
+export function usePageState<T>(name: string, init: T): [T, (v: T | ((o: T) => T)) => void] {
+  const key = `ps:${useLocation().key}:${name}`;
+  const [v, setV] = useState<T>(() => {
+    try { const s = sessionStorage.getItem(key); if (s !== null) return JSON.parse(s) as T; } catch { /* private mode */ }
+    return init;
+  });
+  useEffect(() => { try { sessionStorage.setItem(key, JSON.stringify(v)); } catch { /* private mode / full */ } }, [key, v]);
+  return [v, setV];
 }

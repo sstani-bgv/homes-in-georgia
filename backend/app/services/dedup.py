@@ -80,6 +80,9 @@ _TR = {**dict(zip("абвгдезийклмнопрстуфыэ", "abvgdeziiklmn
 _SKELETON = [("dzh", "j"), ("dj", "j"), ("gh", "g"), ("kh", "h"), ("x", "h"), ("tz", "ts"), ("c", "ts"), ("tsh", "ch"),
              ("y", "i"), ("w", "v"), ("q", "k")]
 _OLD = {"old", "new", "dzveli", "staryi", "novyi", "akhali", "ahali"}  # «Old Tbilisi», «ძველი თბილისი»
+# «15 (Block 6)», «Vazha-Pshavela VII Block»: a block / corpus word or a roman numeral never names the street
+_BLOCK = {"block", "blok", "блок", "корпус", "корп", "korpus", "ბლოკი", "კორპუსი", "ii", "iii", "iv", "vi", "vii", "viii", "ix",
+          "xi", "xii"}
 
 
 def _skeleton(t: str) -> str:
@@ -92,7 +95,7 @@ def _skeleton(t: str) -> str:
     return t
 
 
-_STOP = {_skeleton(w) for w in CITY | DISTRICT_TOKENS | STREET_WORDS | _OLD}
+_STOP = {_skeleton(w) for w in CITY | DISTRICT_TOKENS | STREET_WORDS | _OLD | _BLOCK}
 _HOUSE = re.compile(r"^(\d{1,4})([a-zа-яა-ჰ]?)$")
 
 
@@ -107,8 +110,11 @@ def street_house(addr: str | None) -> tuple[frozenset, int | None, str]:
         house = next((m for m in map(_HOUSE.match, toks) if m), None)
         if not house:
             continue
-        words = [t for t in toks if not t[:1].isdigit()] or (parts[i - 1].split(" ") if i else [])
-        street = frozenset(s for s in map(_skeleton, words) if len(s) > 2 and s not in _STOP)
+        def street_of(words):
+            return frozenset(s for s in map(_skeleton, words) if len(s) > 2 and s not in _STOP)
+        street = street_of(t for t in toks if not t[:1].isdigit())
+        if not street and i:  # «Bezhan Kalandadze St, 15 (Block 6)»: the street is the part before the number
+            street = street_of(parts[i - 1].split(" "))
         if street:
             return street, int(house.group(1)), _skeleton(house.group(2))
     return frozenset(), None, ""

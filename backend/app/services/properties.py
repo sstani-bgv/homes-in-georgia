@@ -319,13 +319,13 @@ def similar_for(db: Session, listing_ids: list[str]) -> dict[str, list[dict]]:
                       .join(Property, Property.id == ListingMatch.property_id)
                       .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == BASE_HINT)
                       .order_by(ListingMatch.score.desc(), ListingMatch.id)).all()
-    cache: dict = {}
-    _covers(db, list({p.id: p for _, _, p in rows}.values()), cache)
+    photos = _photo_lists(db, list({p.id: p for _, _, p in rows}.values()))
     out: dict[str, list[dict]] = {}
     for lid, why, p in rows:
         out.setdefault(lid, []).append({
             "id": p.id, "url": f"/properties/{p.id}", "address": p.address, "status": p.status,
-            "archive_reason": p.archive_reason, "photo": cache.get(("cover", p.id)), "reasons": why or [],
+            "archive_reason": p.archive_reason, "photo": (photos.get(p.id) or [None])[0], "photos": photos.get(p.id, []),
+            "reasons": why or [],
             "price_usd": float(p.price) if p.price is not None else None, "bedrooms": p.bedrooms,
             "area": float(p.area) if p.area is not None else None, "floor": p.floor})
     return out
@@ -1781,6 +1781,20 @@ def _covers(db: Session, rows: list[Property], cache: dict) -> None:
     with_ad = {lid for lid, ph in db.execute(select(Listing.id, Listing.photos).where(Listing.id.in_(lids))) if jload(ph, [])} if lids else set()
     for p in rows:
         cache[("cover", p.id)] = own.get(p.id) or (f"/api/listing-photos/{p.listing_id}/0" if p.listing_id in with_ad else None)
+
+
+def _photo_lists(db: Session, rows: list[Property], limit: int = 20) -> dict[int, list[str]]:
+    """Object id → its photos to flip through (David 11-12: compare an ad with archive objects by photo): own ones,
+    else the origin ad's."""
+    own: dict[int, list[str]] = {}
+    for pid, path in db.execute(select(PropertyMedia.property_id, PropertyMedia.path)
+                                .where(PropertyMedia.property_id.in_([p.id for p in rows]), PropertyMedia.kind == "photo")
+                                .order_by(PropertyMedia.position, PropertyMedia.id)):
+        own.setdefault(pid, []).append(f"/api/media/{path}")
+    lids = {p.listing_id for p in rows if p.listing_id and p.id not in own}
+    n_ad = {lid: len(jload(ph, [])) for lid, ph in db.execute(select(Listing.id, Listing.photos).where(Listing.id.in_(lids)))} if lids else {}
+    return {p.id: (own.get(p.id) or [f"/api/listing-photos/{p.listing_id}/{i}" for i in range(n_ad.get(p.listing_id, 0))])[:limit]
+            for p in rows}
 
 
 def outs(db: Session, rows, user: User) -> list[dict]:

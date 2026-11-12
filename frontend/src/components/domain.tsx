@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Bot, Clock, Copy, ExternalLink, Lock, MapPin, User as UserIcon } from 'lucide-react';
 import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
@@ -238,7 +238,7 @@ function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: num
           <ListingSide l={listing} />
           <div className="col gap-sm" style={{ minWidth: 0 }}>
             {similar.map((s) => (
-              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''}${s.archive_reason ? ` (${ARCHIVE_REASON[s.archive_reason] || s.archive_reason})` : ''} ${s.reasons?.length ? ` · ${s.reasons.join(' · ')}` : ''}`} photos={[s.photo]} address={s.address}
+              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''}${s.archive_reason ? ` (${ARCHIVE_REASON[s.archive_reason] || s.archive_reason})` : ''} ${s.reasons?.length ? ` · ${s.reasons.join(' · ')}` : ''}`} photos={s.photos?.length ? s.photos : [s.photo]} address={s.address}
                 rows={[['Цена', money(s.price_usd ?? null, 'USD')], ['Спальни', bedroomsLabel(s.bedrooms) || '—'], ['Площадь', s.area ? `${s.area} м²` : '—'], ['Этаж', s.floor ?? '—']]}
                 link={{ href: s.url, text: 'Открыть объект' }} />
             ))}
@@ -252,8 +252,15 @@ function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: num
 /** chips: one wrapping row of badges under the price (matches, known object); flag reasons live in the badges' tooltips. */
 export function ListingCard({ listing, locked, footer, chips, onOpen }: { listing: Listing; locked?: ReactNode; footer?: ReactNode; chips?: ReactNode; onOpen?: () => void }) {
   const ph = listing.photos?.[0];
-  const [open, setOpen] = useState(false);
-  const [cmp, setCmp] = useState(false);
+  // the open ad / comparison lives in the URL: «Открыть объект» / a source site and back reopens it on the same spot (David 11-12)
+  const [params, setParams] = useSearchParams();
+  const modal = (k: 'ad' | 'cmp', on: boolean) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    if (on) n.set(k, listing.id); else n.delete(k);
+    return n;
+  }, { replace: true });
+  const open = params.get('ad') === listing.id, cmp = params.get('cmp') === listing.id;
+  const setOpen = (on: boolean) => modal('ad', on), setCmp = (on: boolean) => modal('cmp', on);
   const show = onOpen || (() => setOpen(true));
   const similar = !listing.ai_flags?.duplicate ? listing.similar || [] : [];
   return (

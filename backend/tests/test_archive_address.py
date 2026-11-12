@@ -20,6 +20,10 @@ def test_house_relation_across_spellings():
     assert house_relation("Chavchavadze 1", "Chavchavadze 10") is None
     assert house_relation("ул. Костава 5", "კოსტავას ქ. 5") == "тот же дом"
     assert house_relation("1st floor", "Bakradze 1") is None
+    # «Block» is not a street (David 11-12: Kalandadze 15 matched Vazha-Pshavela VI Block 15)
+    assert house_relation("Krtsanisi, Bezhan Kalandadze St, 15 (Block 6)", "15 Vazha-Pshavela VI Block") is None
+    assert house_relation("Krtsanisi, Bezhan Kalandadze St, 15 (Block 6)", "Бежан Каландадзе 15") == "тот же дом"
+    assert house_relation("Vazha-Pshavela VII Block, 16", "16 Vazha-Pshavela I Block") == "тот же дом"
 
 
 def test_new_ad_lists_archive_objects_at_its_address(db, client):

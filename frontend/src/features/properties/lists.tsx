@@ -13,6 +13,7 @@ import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, MultiSelect, Select, Seg } from '../../components/ui';
 import { ListingsMap } from './ListingsMap';
+import { usePageState } from '../../layout/back';
 import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
@@ -29,9 +30,9 @@ const PAGE = 50;
 const MAP_LIMIT = 500;  // ponytail: the map loads the first 500 filtered ads; a bbox query when the feed grows past it
 
 export function NewListings({ base = '' }: { base?: string }) {
-  const [f, setF0] = useState<ListingFilter>({ q: '', flag: '' });
-  const [limit, setLimit] = useState(PAGE);
-  const [view, setView] = useState<'list' | 'map'>('list');
+  const [f, setF0] = usePageState<ListingFilter>('feed-filter', { q: '', flag: '' });
+  const [limit, setLimit] = usePageState('feed-limit', PAGE);
+  const [view, setView] = usePageState<'list' | 'map'>('feed-view', 'list');
   const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
