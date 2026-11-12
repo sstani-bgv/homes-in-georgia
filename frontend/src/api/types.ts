@@ -27,6 +27,9 @@ export interface User {
   mentor_id?: number | null;
   districts: string[];
   is_active: boolean;
+  /** name = «first_name last_name» (migration 0012) */
+  first_name?: string | null;
+  last_name?: string | null;
   login?: string | null;
   photo_url?: string | null;
   /** full date: admins and the user himself only (else null) */

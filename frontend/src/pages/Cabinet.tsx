@@ -29,18 +29,19 @@ function ProfilePrompt({ u }: { u: User }) {
   const { setMe } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
-  const [f, setF] = useState({ name: u.name || '', birth_date: u.birth_date || '', phone: u.phone || '', email: u.email || '' });
+  const [f, setF] = useState({ first_name: u.first_name || '', last_name: u.last_name || '', birth_date: u.birth_date || '', phone: u.phone || '', email: u.email || '' });
   const save = useMutation({
-    mutationFn: () => api.auth.updateMe({ name: f.name.trim(), birth_date: f.birth_date || null, phone: f.phone || null, email: f.email.trim() || null }),
+    mutationFn: () => api.auth.updateMe({ first_name: f.first_name.trim(), last_name: f.last_name.trim(), birth_date: f.birth_date || null, phone: f.phone || null, email: f.email.trim() || null }),
     onSuccess: (me) => { setMe(me); qc.invalidateQueries({ queryKey: ['cabinet'] }); toast('Профиль сохранён'); },
     onError: (e) => toast(errText(e), true),
   });
-  const ok = f.name.trim().split(/\s+/).length >= 2 && !!f.birth_date && f.phone.replace(/\D/g, '').length >= 9 && EMAIL_RE.test(f.email.trim());
+  const ok = !!f.first_name.trim() && !!f.last_name.trim() && !!f.birth_date && f.phone.replace(/\D/g, '').length >= 9 && EMAIL_RE.test(f.email.trim());
   return (
     <Card label="Профиль" title="Заполните профиль">
       <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Нужно агентству: чтобы связаться с вами и не пропустить ваш день рождения. Email видят только администраторы.</div>
       <div className="form-grid">
-        <Field label="Имя и фамилия"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Заза Беридзе" /></Field>
+        <Field label="Имя"><Input value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} placeholder="Заза" autoComplete="given-name" /></Field>
+        <Field label="Фамилия"><Input value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} placeholder="Беридзе" autoComplete="family-name" /></Field>
         <Field label="Дата рождения"><Input type="date" value={f.birth_date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, birth_date: e.target.value })} /></Field>
         <Field label="Телефон"><Input type="tel" inputMode="tel" value={f.phone} onFocus={phoneFocus} onBlur={phoneBlur} onChange={(e) => { const v = phoneInput(e); setF((x) => ({ ...x, phone: v })); }} /></Field>
         <Field label="Email"><Input type="email" inputMode="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="name@mail.com" /></Field>

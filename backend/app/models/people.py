@@ -1,6 +1,6 @@
 from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from app.db import Base
 
@@ -24,7 +24,9 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     tg_id = Column(BigInteger, unique=True)
     username = Column(Text)
-    name = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)  # «first last», kept in sync by the users service (migration 0012)
+    first_name = Column(Text)
+    last_name = Column(Text)
     phone = Column(Text)
     role = Column(Text, nullable=False)
     level = Column(Integer)
@@ -46,6 +48,14 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True))
 
     mentor = relationship("User", remote_side=[id])
+
+    @validates("name")
+    def _split_name(self, _key, name):
+        """A name set without first/last (Telegram, imports, old API callers) fills them at the first space."""
+        if name and not (self.first_name or self.last_name):
+            self.first_name, _, last = name.strip().partition(" ")
+            self.last_name = last.strip() or None
+        return name
 
     @property
     def is_staff(self):

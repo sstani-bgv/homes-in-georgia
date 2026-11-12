@@ -78,6 +78,12 @@ class Sent(list):
 
 
 @pytest.fixture(autouse=True)
+def no_tg_birthdate(monkeypatch):
+    """Sign-ins ask Bot API getChat for the birth date: no network in tests."""
+    monkeypatch.setattr(users_svc, "tg_birth_date", lambda tg_id: None)
+
+
+@pytest.fixture(autouse=True)
 def sent(monkeypatch):
     """Record every notify.* call instead of talking to Telegram."""
     rec = Sent()

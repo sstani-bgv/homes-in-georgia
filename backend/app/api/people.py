@@ -19,7 +19,9 @@ router = APIRouter(tags=["users"])
 
 
 class UserIn(BaseModel):
-    name: str
+    name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     role: str = "agent"
     tg_id: int | None = None
     username: str | None = None
@@ -40,6 +42,8 @@ class UserIn(BaseModel):
 
 class UserPatch(BaseModel):
     name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     role: str | None = None
     tg_id: int | None = None
     username: str | None = None

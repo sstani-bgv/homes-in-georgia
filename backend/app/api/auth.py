@@ -60,7 +60,8 @@ def user_out(u: User, viewer: User | None = None) -> dict:
     own = viewer is None or viewer.id == u.id or at_least(viewer, "admin")
     bd = u.birth_date
     return {"email": u.email if own else None, "birthday": bd.strftime("%m-%d") if bd else None,
-            "profile_missing": users.missing(u), "id": u.id, "tg_id": u.tg_id, "username": u.username, "name": u.name, "phone": u.phone, "role": u.role,
+            "profile_missing": users.missing(u), "id": u.id, "tg_id": u.tg_id, "username": u.username, "name": u.name,
+            "first_name": u.first_name, "last_name": u.last_name, "phone": u.phone, "role": u.role,
             "level": users.effective_level(u) if is_field(u) else u.level, "mentor_id": u.mentor_id,
             "districts": u.districts, "is_active": u.is_active, "login": u.login, "photo_url": u.photo_url,
             "birth_date": bd.isoformat() if bd and own else None, "exclusive_deals": u.exclusive_deals,
@@ -84,6 +85,8 @@ def _tg_user(db: Session, tg: dict) -> User:
         u.photo_url = tg["photo_url"]
     if not u.name or u.name.startswith("Superadmin "):
         u.name = " ".join(x for x in (tg.get("first_name"), tg.get("last_name")) if x) or u.name
+    if not u.birth_date:
+        u.birth_date = users.tg_birth_date(u.tg_id)
     return u
 
 
@@ -170,6 +173,8 @@ def me(user: User = Depends(current_user)):
 
 class ProfileIn(BaseModel):
     name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     birth_date: date | None = None
     phone: str | None = None
     email: str | None = None
