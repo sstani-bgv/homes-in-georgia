@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Plus, Send, Trash2, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { Role, Settings, User } from '../api/types';
+import type { Invite, InviteStatus, Role, Settings, User } from '../api/types';
 import { ADMIN_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
-import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
+import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, Modal, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
 import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
 import { EMAIL_RE, birthdayLabel } from './Cabinet';
 import { parseMetrics } from '../lib/useUserNames';
@@ -92,9 +92,94 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   );
 }
 
+const INVITE_STATUS: Record<InviteStatus, [string, 'blue' | 'ok' | 'grey' | 'warn']> = {
+  pending: ['ждёт', 'blue'], accepted: ['принят', 'ok'], expired: ['истёк', 'grey'], revoked: ['отозван', 'warn'] };
+
+function InviteLinks({ inv }: { inv: Invite }) {
+  const toast = useToast();
+  const link = inv.bot_link || inv.web_link;
+  const copy = (u: string) => navigator.clipboard.writeText(u).then(() => toast('Ссылка скопирована'), () => toast('Не удалось скопировать', true));
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(`Приглашение в CRM Homes in Georgia (${ROLE_LABEL[inv.role]}). Откройте ссылку в Telegram`)}`;
+  return (
+    <div className="col gap-sm">
+      <span className="label">{inv.bot_link ? 'Ссылка в Telegram (откроется бот входа)' : 'Ссылка-приглашение'}</span>
+      <div className="row gap-sm"><Input readOnly value={link} onFocus={(e) => e.target.select()} /><Button variant="secondary" size="sm" onClick={() => copy(link)}><Copy size={15} />Копировать</Button></div>
+      {inv.bot_link && <div className="row gap-sm"><Input readOnly value={inv.web_link} onFocus={(e) => e.target.select()} /><Button variant="secondary" size="sm" onClick={() => copy(inv.web_link)}><Copy size={15} />Веб</Button></div>}
+      <div className="row row-wrap"><a className="btn" href={share} target="_blank" rel="noreferrer"><Send size={15} />Отправить в Telegram</a></div>
+      <div className="faint" style={{ fontSize: 12 }}>Одноразовая, действует до {fmtDateTime(inv.expires_at)}. Telegram, который её откроет, станет аккаунтом сотрудника.</div>
+    </div>
+  );
+}
+
+function InviteForm({ onDone }: { onDone: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: an admin invites up to operator
+  const [f, setF] = useState({ role: 'agent' as Role, level: 50 as number | null, agent_tag: '', districts: [] as string[], works_as_agent: false, note: '' });
+  const [made, setMade] = useState<Invite | null>(null);
+  const create = useMutation({
+    mutationFn: () => api.invites.create({ ...f, agent_tag: f.agent_tag || null, note: f.note.trim() || null }),
+    onSuccess: (inv) => { qc.invalidateQueries({ queryKey: ['invites'] }); setMade(inv); },
+    onError: (e) => toast(errText(e), true),
+  });
+  if (made) return <div className="col gap-lg"><InviteLinks inv={made} /><div><Button variant="secondary" onClick={onDone}>Готово</Button></div></div>;
+  const toggle = (d: string) => setF((x) => ({ ...x, districts: x.districts.includes(d) ? x.districts.filter((y) => y !== d) : [...x.districts, d] }));
+  return (
+    <div className="col gap-lg">
+      <div className="form-grid">
+        <Field label="Кого приглашаем" className="span2" hint="Для списка приглашений, необязательно"><Input value={f.note} placeholder="Нино, новый агент" onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
+        <Field label="Роль"><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r)).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => setF({ ...f, level: v || null })} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
+        <Field label="Хэштег агента" hint="Можно задать позже"><Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => setF({ ...f, agent_tag: e.target.value.replace(/^#+/, '') })} /></Field>
+      </div>
+      <div>
+        <span className="label">Районы</span>
+        <div className="row row-wrap gap-sm mt">{DISTRICTS.map((d) => <button key={d} type="button" className={`chip ${f.districts.includes(d) ? 'active' : ''}`} onClick={() => toggle(d)}>{d}</button>)}</div>
+      </div>
+      {atLeast({ role: f.role }, 'operator') && <Switch checked={f.works_as_agent} onChange={(v) => setF({ ...f, works_as_agent: v })} label="Работает как агент" />}
+      <div><Button loading={create.isPending} onClick={() => create.mutate()}><UserPlus size={16} />Создать приглашение</Button></div>
+    </div>
+  );
+}
+
+function Invites() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [shown, setShown] = useState<Invite | null>(null);
+  const { data } = useQuery({ queryKey: ['invites'], queryFn: () => api.invites.list() });
+  const revoke = useMutation({ mutationFn: (id: number) => api.invites.revoke(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['invites'] }); toast('Приглашение отозвано'); }, onError: (e) => toast(errText(e), true) });
+  const items = data?.items || [];
+  if (!items.length) return null;
+  return (
+    <>
+      <h3 style={{ margin: '22px 0 10px' }}>Приглашения</h3>
+      <div className="card table-wrap">
+        <table className="table">
+          <thead><tr><th>Кому</th><th>Роль</th><th>Статус</th><th className="hide-mobile">Создал</th><th className="hide-mobile">До</th><th /></tr></thead>
+          <tbody>{items.map((i) => (
+            <tr key={i.id}>
+              <td>{i.note || <span className="muted">—</span>}</td>
+              <td><Badge tone="blue">{ROLE_LABEL[i.role]}</Badge></td>
+              <td><Badge tone={INVITE_STATUS[i.status][1]}>{INVITE_STATUS[i.status][0]}</Badge>{i.used_by && <span className="muted"> {i.used_by.name}</span>}</td>
+              <td className="hide-mobile muted">{i.created_by || '—'} · {ago(i.created_at)}</td>
+              <td className="hide-mobile muted">{fmtDateTime(i.used_at || i.expires_at)}</td>
+              <td>{i.status === 'pending' && <div className="row gap-sm">
+                <Button variant="secondary" size="sm" onClick={() => setShown(i)}>Ссылка</Button>
+                <Button variant="ghost" size="sm" loading={revoke.isPending && revoke.variables === i.id} onClick={() => confirm('Отозвать приглашение? Ссылка перестанет работать') && revoke.mutate(i.id)}>Отозвать</Button>
+              </div>}</td>
+            </tr>))}
+          </tbody>
+        </table>
+      </div>
+      <Modal open={!!shown} onClose={() => setShown(null)} title="Приглашение">{shown && <InviteLinks inv={shown} />}</Modal>
+    </>
+  );
+}
+
 function Users() {
   const [role, setRole] = useState('');
   const [open, setOpen] = useState<User | 'new' | null>(null);
+  const [inviting, setInviting] = useState(false);
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['users', 'admin', role], queryFn: () => api.users.list({ role: role || undefined }) });
   const all = useQuery({ queryKey: ['users', 'admin', ''], queryFn: () => api.users.list({}) });
@@ -126,7 +211,8 @@ function Users() {
         <Seg value={role} onChange={setRole} options={[{ value: '', label: 'Все' }, ...ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))]} />
         <div className="row row-wrap">
           {incomplete > 0 && <button type="button" className={`chip ${gapsOnly ? 'active' : ''}`} onClick={() => setGapsOnly((v) => !v)}>Не заполнен профиль: {incomplete}</button>}
-          <Button onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
+          <Button onClick={() => setInviting(true)}><UserPlus size={16} />Пригласить</Button>
+          <Button variant="secondary" onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
         </div>
       </div>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
@@ -150,6 +236,10 @@ function Users() {
       <Drawer open={!!open} onClose={() => setOpen(null)} title={open === 'new' ? 'Новый пользователь' : (open as User | null)?.name || ''}>
         {open && <UserForm key={open === 'new' ? 'new' : open.id} user={open === 'new' ? undefined : open} all={itemsOf(all.data)} onDone={() => setOpen(null)} />}
       </Drawer>
+      <Drawer open={inviting} onClose={() => setInviting(false)} title="Пригласить сотрудника">
+        {inviting && <InviteForm onDone={() => setInviting(false)} />}
+      </Drawer>
+      <Invites />
     </>
   );
 }

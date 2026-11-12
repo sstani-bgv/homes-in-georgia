@@ -11,7 +11,7 @@ from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
 from app.models import ChannelPost, Client, Deal, Lead, Listing, Property, Reaction, Report, User, at_least, is_field
 from app.services import clients as client_card
-from app.services import birthdays, deals, leads, properties, reports, users
+from app.services import birthdays, deals, invites, leads, properties, reports, users
 from app.services.common import TZ, get_or_404, jload, now
 from app.services.errors import forbidden
 
@@ -97,6 +97,30 @@ def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), u
 @router.patch("/users/{uid}")
 def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user), user)
+
+
+class InviteIn(BaseModel):
+    role: str = "agent"
+    level: int | None = None
+    agent_tag: str | None = None
+    districts: list[str] = []
+    works_as_agent: bool = False
+    note: str | None = None
+
+
+@router.get("/invites")
+def list_invites(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
+    return {"items": [invites.out(i) for i in invites.list_all(db)]}
+
+
+@router.post("/invites")
+def create_invite(body: InviteIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
+    return invites.out(invites.create(db, body.model_dump(), user))
+
+
+@router.post("/invites/{iid}/revoke")
+def revoke_invite(iid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
+    return invites.out(invites.revoke(db, iid, user))
 
 
 @router.post("/users/{uid}/promote")

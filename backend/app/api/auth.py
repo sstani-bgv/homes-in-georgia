@@ -14,7 +14,7 @@ from app.db import get_db
 from datetime import date
 
 from app.models import User, at_least, is_field
-from app.services import users
+from app.services import invites, users
 from app.services.common import now
 from app.services.errors import DomainError
 
@@ -116,6 +116,25 @@ def telegram_webapp(body: WebAppIn, db: Session = Depends(get_db, scope="functio
 def telegram_login(body: LoginWidgetIn, db: Session = Depends(get_db, scope="function")):
     data = verify_login_widget(body.model_dump(), settings.LOGIN_BOT_TOKEN or settings.BOT_TOKEN)
     return _session(db, _tg_user(db, {**data, "id": int(data["id"])}))
+
+
+class InviteLoginIn(LoginWidgetIn):
+    token: str
+
+
+@router.get("/invite/{token}")
+def invite_info(token: str, db: Session = Depends(get_db, scope="function")):
+    """The web invite page (/invite/<token>): enough to say who invites and as whom; no ids, no links."""
+    inv = invites.by_token(db, token)
+    return {"status": invites.status(inv), "role": inv.role, "invited_by": inv.creator.name if inv.creator else None,
+            "expires_at": inv.expires_at.isoformat()}
+
+
+@router.post("/invite")
+def invite_login(body: InviteLoginIn, db: Session = Depends(get_db, scope="function")):
+    """«Войти через Telegram» on the web invite page: the Login Widget proves the account, the invite binds it."""
+    data = verify_login_widget(body.model_dump(exclude={"token"}), settings.LOGIN_BOT_TOKEN or settings.BOT_TOKEN)
+    return _session(db, invites.accept(db, body.token, {**data, "id": int(data["id"])}))
 
 
 _FAILS: dict[str, list[float]] = {}  # per-process brute-force throttle: key -> failure timestamps

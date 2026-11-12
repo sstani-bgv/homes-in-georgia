@@ -71,3 +71,28 @@ def is_field(u) -> bool:
 
 
 FIELD_SQL = User.role.in_(FIELD) | User.works_as_agent.is_(True)
+
+
+class Invite(Base):
+    """One-time staff invite (Stanislav 11-12): t.me/<login bot>?start=inv_<token> or <PUBLIC_URL>/invite/<token>
+    binds the Telegram account that opens it to a new user with these role settings (services/invites.py)."""
+    __tablename__ = "invites"
+    __table_args__ = (CheckConstraint(f"role IN {ROLES}", name="invites_role_check"),)
+
+    id = Column(Integer, primary_key=True)
+    token = Column(Text, unique=True, nullable=False)
+    role = Column(Text, nullable=False)
+    level = Column(Integer)
+    agent_tag = Column(Text)
+    districts = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    works_as_agent = Column(Boolean, nullable=False, server_default=text("false"))
+    note = Column(Text)  # who it is for, as the admin wrote it
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True))
+    used_at = Column(DateTime(timezone=True))
+    used_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+
+    creator = relationship("User", foreign_keys=[created_by])
+    user = relationship("User", foreign_keys=[used_by])

@@ -633,3 +633,11 @@ export interface ListingsStats {
 
 /** «Дни рождения» on «Главная»: active employees, today .. +7 days; age for admins only */
 export interface Birthday { id: number; name: string; photo_url?: string | null; day: number; month: number; days_left: number; age?: number | null }
+
+export type InviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
+export interface Invite {
+  id: number; role: Role; level: number | null; agent_tag: string | null; districts: string[]; works_as_agent: boolean;
+  note: string | null; status: InviteStatus; created_by: string | null; created_at: string; expires_at: string;
+  used_at: string | null; used_by: { id: number; name: string } | null; bot_link: string | null; web_link: string;
+}
+export interface InviteInfo { status: InviteStatus; role: Role; invited_by: string | null; expires_at: string }

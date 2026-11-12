@@ -204,6 +204,8 @@ def main():
         print(tick(limit=1000))
         return
     log.info("worker started, interval %ss, tz %s", args.interval, env.TZ)
+    from app.telegram import login_bot
+    login_bot.start_thread()  # staff invites: /start inv_<token> in the CRM sign-in bot
     while True:
         try:
             st = tick()

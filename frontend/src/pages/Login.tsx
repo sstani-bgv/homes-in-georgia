@@ -10,7 +10,7 @@ import { Button, Field, Input } from '../components/ui';
 type TgUser = Record<string, unknown>;
 type TgLogin = { auth: (o: { bot_id: string; request_access?: string }, cb: (u: TgUser | false) => void) => void };
 
-function loadTelegram(): Promise<TgLogin> {
+export function loadTelegram(): Promise<TgLogin> {
   const w = window as unknown as { Telegram?: { Login?: TgLogin } };
   if (w.Telegram?.Login) return Promise.resolve(w.Telegram.Login);
   return new Promise((ok, fail) => {
@@ -23,7 +23,7 @@ function loadTelegram(): Promise<TgLogin> {
   });
 }
 
-const TG_ICON = 'M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z';
+export const TG_ICON = 'M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z';
 
 export function LoginPage() {
   const { user, signIn, error: bootError } = useAuth();
@@ -41,6 +41,13 @@ export function LoginPage() {
     api.config().then((c) => setBotId(String((c as unknown as { bot_id?: string }).bot_id || ''))).catch(() => setBotId(''));
     loadTelegram().catch(() => undefined);
   }, []);
+  const tgHash = params.get('hash');
+  useEffect(() => {  // the sign-in bot's «Войти в CRM» (a Telegram LoginUrl) lands here with the signed fields
+    if (!tgHash || user) return;
+    const fields: Record<string, string> = {};
+    params.forEach((v, k) => { if (k !== 'next') fields[k] = v; });
+    done(api.auth.telegramLogin(fields));
+  }, [tgHash]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (user) return <Navigate to={next} replace />;
 
