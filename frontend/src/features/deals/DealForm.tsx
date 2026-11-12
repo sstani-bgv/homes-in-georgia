@@ -35,10 +35,10 @@ export function H2O({ label, value, onChange }: { label: string; value: number |
 function AmountInput({ value, onCommit, label }: { value: number | null | undefined; onCommit: (v: number) => void; label: string }) {
   const [s, setS] = useState('');
   const [focus, setFocus] = useState(false);
-  const shown = focus ? s : value == null ? '' : String(value);
+  const shown = focus ? s : value == null ? '' : money(value);
   const commit = () => { setFocus(false); const n = Number(s.replace(',', '.')); if (s.trim() !== '' && Number.isFinite(n) && n >= 0 && n !== value) onCommit(n); };
   return (
-    <input className="input input-sm num" aria-label={label} inputMode="decimal" value={shown}
+    <input className="deal-money-edit num" aria-label={label} title="Нажмите, чтобы изменить" inputMode="decimal" value={shown}
       onFocus={() => { setFocus(true); setS(value == null ? '' : String(value)); }} onChange={(e) => setS(e.target.value)}
       onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
   );
@@ -207,16 +207,14 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
       <div className="deal-money" role="region" aria-label="Деньги по сделке">
         <div className="deal-money-tile">
           <span className="label">Клиент платит</span>
-          <b className="num">{r ? money(r.commission_total) : '—'}</b>
+          {isStaff && r ? <AmountInput label="Клиент платит, $" value={r.commission_total} onCommit={(v) => upd('commission_total', v)} /> : <b className="num">{r ? money(r.commission_total) : '—'}</b>}
           <small>{Number(f.price) > 0 ? `${f.commission_pct}% от ${money(Number(f.price))}` : 'введите цену'}</small>
-          {isStaff && r && <AmountInput label="Клиент платит, $" value={r.commission_total} onCommit={(v) => upd('commission_total', v)} />}
         </div>
         {r?.distribution?.map((x, i) => (
           <div key={i} className="deal-money-tile">
             <span className="label">{x.role}</span>
-            <b className="num">{money(x.amount)}</b>
+            {isStaff ? <AmountInput label={`${x.role}, $`} value={x.amount} onCommit={(v) => setRowAmount(i, v)} /> : <b className="num">{money(x.amount)}</b>}
             <small>{r2(x.pct)}%</small>
-            {isStaff && <AmountInput label={`${x.role}, $`} value={x.amount} onCommit={(v) => setRowAmount(i, v)} />}
           </div>
         ))}
         <div className="deal-money-tile">
@@ -244,20 +242,12 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
             </div>
             <div className="form-grid">
               <Field label={f.deal_type === 'sale' ? 'Цена объекта, $' : 'Сумма сделки (цена аренды), $/мес'}><Input type="number" inputMode="decimal" value={f.price} onChange={(e) => upd('price', e.target.value)} disabled={ro('price')} required /></Field>
-              {/* the commission is fixed for agents (backend deals.default_commission_pct ignores theirs); staff may change it */}
-              <Field label="Комиссия агентства, % от цены" hint={isStaff ? `Сейчас: ${money(r?.commission_total)}` : `Фиксированная, меняет оператор · ${money(r?.commission_total)}`}><Input type="number" value={f.commission_pct} onChange={(e) => upd('commission_pct', e.target.value)} disabled={!isStaff} /></Field>
-              {isStaff && <Field label="Комиссия вручную, $" hint="если отличается от расчёта"><Input type="number" value={f.commission_total} onChange={(e) => upd('commission_total', e.target.value)} /></Field>}
-              {isStaff ? (
-                <Field label="Агент"><Select value={f.agent_id} onChange={(e) => upd('agent_id', e.target.value)} placeholder="Выбрать" options={agentList.map((a) => ({ value: a.id, label: `${a.name} (${a.level || 50}%)` }))} /></Field>
-              ) : (
-                <Field label="Агент"><Input value={user?.name || ''} disabled /></Field>
-              )}
+              {/* the commission is fixed for agents (backend deals.default_commission_pct ignores theirs): they see it in the top tiles only.
+                  Staff change the % here or the $ right in the tiles above. */}
+              {isStaff && <Field label="Комиссия, % от цены"><Input type="number" inputMode="decimal" value={f.commission_pct} onChange={(e) => { upd('commission_pct', e.target.value); upd('commission_total', ''); }} /></Field>}
+              {isStaff && <Field label="Агент"><Select value={f.agent_id} onChange={(e) => upd('agent_id', e.target.value)} placeholder="Выбрать" options={agentList.map((a) => ({ value: a.id, label: `${a.name} (${a.level || 50}%)` }))} /></Field>}
               {/* the level is set by admin/operator; the backend ignores agent_level sent by an agent */}
-              {isStaff ? (
-                <Field label="Уровень агента"><Seg value={Number(f.agent_level)} onChange={(v) => upd('agent_level', v)} options={[50, 70, 90].map((v) => ({ value: v, label: `${v}%` }))} /></Field>
-              ) : (
-                <Field label="Уровень агента" hint="Меняет администратор или оператор"><Input value={`${f.agent_level}%`} disabled /></Field>
-              )}
+              {isStaff && <Field label="Уровень агента"><Seg value={Number(f.agent_level)} onChange={(v) => upd('agent_level', v)} options={[50, 70, 90].map((v) => ({ value: v, label: `${v}%` }))} /></Field>}
               <Field label="Рекрут / второй участник" hint={sc ? PEOPLE_HINT[rule] : undefined}>
                 <Select value={f.recruit_id} onChange={(e) => upd('recruit_id', e.target.value)} placeholder="Без рекрута" options={(isStaff ? agentList.filter((u) => u.id !== Number(f.agent_id)) : itemsOf(recruits.data)).map((u) => ({ value: u.id, label: u.name }))} />
               </Field>
@@ -363,18 +353,6 @@ export function DealForm({ leadId, onDone }: { leadId?: number; onDone?: (d: Dea
         </Card>
       </div>
       <div className="col gap-lg deal-side">
-        {isStaff && r?.distribution && (
-          <Card label="Оператор" title="Ручная правка распределения">
-            <div className="col gap-sm">
-              <Switch checked={!!edit} onChange={(v) => setEdit(v ? r.distribution!.map(({ who, role, pct }) => ({ who, role, pct })) : null)} label="Править проценты" />
-              {edit?.map((x, i) => x.who === 'platform' ? null : (
-                <div key={i} className="row row-between"><span style={{ fontSize: 13 }}>{x.role}</span>
-                  <Input type="number" style={{ width: 80 }} value={x.pct} onChange={(e) => setEdit(edit.map((y, j) => (j === i ? { ...y, pct: Number(e.target.value) || 0 } : y)))} /></div>
-              ))}
-              {edit && <div className="muted" style={{ fontSize: 12 }}>Платформа забирает остаток: {100 - splitSum}%</div>}
-            </div>
-          </Card>
-        )}
         <Button size="lg" variant="ok" block disabled={!valid || calcBusy} loading={save.isPending} onClick={() => save.mutate()}><CheckCircle2 size={18} />Отправить на подтверждение</Button>
         {missing.length > 0 && <div className="alert alert-warn" style={{ fontSize: 13 }}>Чтобы отправить, заполните: {missing.join(', ')}</div>}
         <div className="muted" style={{ fontSize: 12 }}>После подтверждения оператором заявка станет «Сдано», бот поставит День 14 и напоминания о конце договора за 30, 7 и 1 день.</div>
