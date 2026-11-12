@@ -5,7 +5,7 @@ import { ArrowRightLeft, CalendarClock } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf } from '../../api/client';
 import type { Lead, LeadStatus } from '../../api/types';
-import { useAuth } from '../../auth/AuthContext';
+import { pageScroller, useAuth } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
 import { AssignModal } from './LeadDetail';
 import { LeadStatusBadge, SlaChip } from '../../components/domain';
@@ -53,8 +53,8 @@ export function dragEdgeScroll(e: DragEvent<HTMLElement>) {
     if (e.clientY > c.bottom - 40) col.scrollTop += STEP / 2;
     else if (e.clientY < c.top + 40) col.scrollTop -= STEP / 2;
   }
-  if (e.clientY > window.innerHeight - EDGE) window.scrollBy(0, STEP);
-  else if (e.clientY < EDGE) window.scrollBy(0, -STEP);
+  if (e.clientY > window.innerHeight - EDGE) pageScroller().scrollBy(0, STEP);
+  else if (e.clientY < EDGE) pageScroller().scrollBy(0, -STEP);
 }
 /** scroll-snap would pull programmatic scrolling back to a column: off while dragging */
 export const dragBoardProps = {

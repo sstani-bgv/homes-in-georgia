@@ -8,7 +8,7 @@ import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
 import { FIELD_FILTER } from '../../api/types';
 import { dragBoardProps } from '../leads/LeadBoard';
-import { useAuth } from '../../auth/AuthContext';
+import { pageScroller, useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, Select, Seg } from '../../components/ui';
@@ -496,11 +496,11 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
       )}
       {pages > 1 && (
         <div className="row gap-sm" style={{ justifyContent: 'center', marginTop: 16 }}>
-          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(0); window.scrollTo(0, 0); }}>« Первая</Button>
-          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(page - 1); window.scrollTo(0, 0); }}>‹ Назад</Button>
+          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(0); pageScroller().scrollTo(0, 0); }}>« Первая</Button>
+          <Button variant="secondary" disabled={page === 0} onClick={() => { setPage(page - 1); pageScroller().scrollTo(0, 0); }}>‹ Назад</Button>
           <span className="muted" style={{ alignSelf: 'center', padding: '0 8px' }}>Стр. {page + 1} из {pages}{isFetching ? ' …' : ''}</span>
-          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(page + 1); window.scrollTo(0, 0); }}>Вперёд ›</Button>
-          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(pages - 1); window.scrollTo(0, 0); }}>Последняя »</Button>
+          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(page + 1); pageScroller().scrollTo(0, 0); }}>Вперёд ›</Button>
+          <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => { setPage(pages - 1); pageScroller().scrollTo(0, 0); }}>Последняя »</Button>
         </div>
       )}
     </>

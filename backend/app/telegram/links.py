@@ -1,4 +1,4 @@
-"""Public URLs used in Telegram buttons: Mini App pages (/m/...), the listing map (/map), the viewing calendar file."""
+"""Public URLs used in Telegram buttons: Mini App pages (the main site itself), the listing map (/map), the viewing calendar file."""
 from urllib.parse import urlencode
 
 from app.telegram.client import conf
@@ -9,9 +9,9 @@ def public_url():
 
 
 def miniapp(path):
-    """PUBLIC_URL + /m/<path> ('' when PUBLIC_URL is not set)."""
+    """PUBLIC_URL + /<path> ('' when PUBLIC_URL is not set): the Mini App is the main site, logged in by initData."""
     base = public_url()
-    return base and f"{base}/m/{path.lstrip('/')}"
+    return base and f"{base}/{path.lstrip('/')}"
 
 
 def lead_app(lead_id):
@@ -19,7 +19,7 @@ def lead_app(lead_id):
 
 
 def property_app(pid):
-    return miniapp(f"properties/{pid}")
+    return miniapp(f"objects/{pid}")
 
 
 def deal_app(deal_id=None, lead_id=None):

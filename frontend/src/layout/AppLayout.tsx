@@ -10,7 +10,7 @@ import { ADMIN_ROLES, STAFF_ROLES, atLeast } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, useTgBackButton } from '../auth/AuthContext';
 import { Avatar, Badge, Drawer, Modal } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 
@@ -32,23 +32,22 @@ export const NAV: NavItem[] = [
 ];
 
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
-/** `m` = the same action inside the Telegram Mini App (/m layout). */
-const QUICK: { to: string; m: string; title: string; sub: string; icon: LucideIcon; agent?: boolean }[] = [
-  { to: '/objects?new=1', m: '/m/properties?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
-  { to: '/deals/new', m: '/m/deal', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake, agent: true },  // Irakli 2026-11-11: back in «Добавить»
-  { to: '/contracts?new=1', m: '/m/contracts?new=1', title: 'Договор', sub: 'Создать договор', icon: FileText, agent: true },
-  { to: '/reports?kind=general', m: '/m/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
-  { to: '/reports?kind=showing', m: '/m/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
-  { to: '/reports?tab=check', m: '/m/reports?tab=check', title: 'Проверку', sub: 'Найти дубликат', icon: Search },
+const QUICK: { to: string; title: string; sub: string; icon: LucideIcon; agent?: boolean }[] = [
+  { to: '/objects?new=1', title: 'Объект', sub: 'Завести вручную', icon: Plus },
+  { to: '/deals/new', title: 'Сделку', sub: 'Расчёт и День 0', icon: Handshake, agent: true },  // Irakli 2026-11-11: back in «Добавить»
+  { to: '/contracts?new=1', title: 'Договор', sub: 'Создать договор', icon: FileText, agent: true },
+  { to: '/reports?kind=general', title: 'Отчёт', sub: 'Общий отчёт', icon: ClipboardList },
+  { to: '/reports?kind=showing', title: 'Показ', sub: 'Отчёт о показе', icon: Eye },
+  { to: '/reports?tab=check', title: 'Проверку', sub: 'Найти дубликат', icon: Search },
 ];
-export function QuickAdd({ open, onClose, mobile }: { open: boolean; onClose: () => void; mobile?: boolean }) {
+export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   return (
     <Modal open={open} onClose={onClose} title="Добавить">
       <div className="add-grid">
         {QUICK.filter((q) => !q.agent || atLeast(user, 'agent')).map((q) => (
-          <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(mobile ? q.m : q.to); }}>
+          <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(q.to); }}>
             <q.icon size={20} /><span><b>{q.title}</b><small>{q.sub}</small></span>
           </button>
         ))}
@@ -82,6 +81,7 @@ function Ticker() {
 export function AppLayout() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  useTgBackButton();
   const [more, setMore] = useState(false);
   const [add, setAdd] = useState(false);
   const items = NAV.filter((n) => !n.roles || (user && n.roles.includes(user.role)));

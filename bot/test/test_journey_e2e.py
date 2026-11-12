@@ -381,7 +381,7 @@ class JourneyE2E(unittest.TestCase):
         self.assertIn("Отлично, поздравляем", ed["text"])
         m = self.press(AGENT, AGENT["id"], "Сдано ✅", since=survey)
         form = self.with_text(AGENT["id"], "Заполните сделку", m)
-        self.assertEqual(f.markup(form)[0][0]["web_app"]["url"], "https://crm.e2e.test/m/deals/new?lead=1")
+        self.assertEqual(f.markup(form)[0][0]["web_app"]["url"], "https://crm.e2e.test/deals/new?lead=1")
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT status, client_outcome, agent_outcome FROM leads WHERE id = 1").fetchone()[:],
                              ("deal_pending", "rented", "rented"))

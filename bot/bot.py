@@ -511,7 +511,7 @@ async def on_agent(update: Update, ctx):
 
 
 async def on_panel(update: Update, ctx):
-    """/panel: staff open the Mini App (PUBLIC_URL/m/)."""
+    """/panel: staff open the Mini App (PUBLIC_URL/, the main site)."""
     u = update.effective_user
     if not await asyncio.to_thread(core.agent, u.id, u.full_name, u.username):
         await update.message.reply_text("Панель только для сотрудников: /agent <код> или попросите администратора добавить вас в CRM.")

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ApiError, getToken, setToken } from '../api/client';
 import type { AuthOut, Role, User } from '../api/types';
@@ -23,12 +24,33 @@ const Ctx = createContext<AuthState | null>(null);
 interface TgWebApp {
   initData?: string; ready?: () => void; expand?: () => void; colorScheme?: string; setHeaderColor?: (c: string) => void;
   openLink?: (url: string) => void; openTelegramLink?: (url: string) => void;
+  disableVerticalSwipes?: () => void; isVersionAtLeast?: (v: string) => boolean;
+  BackButton?: { show: () => void; hide: () => void; onClick: (f: () => void) => void; offClick: (f: () => void) => void };
 }
 export function tgWebApp(): TgWebApp | null {
   const w = window as unknown as { Telegram?: { WebApp?: TgWebApp } };
   return w.Telegram?.WebApp ?? null;
 }
 export function insideTelegram(): boolean { return !!tgWebApp()?.initData; }
+/** What scrolls the page: inside Telegram it's #root (html.tg, app.css), elsewhere the window. */
+export function pageScroller(): Window | HTMLElement {
+  return (document.documentElement.classList.contains('tg') && document.getElementById('root')) || window;
+}
+
+/** Telegram's own ‹ Back in the header on every page but the one the Mini App opened with. */
+export function useTgBackButton() {
+  const loc = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const bb = insideTelegram() ? tgWebApp()?.BackButton : undefined;
+    if (!bb) return;
+    if (loc.key === 'default') { bb.hide(); return; }
+    const back = () => navigate(-1);
+    bb.show();
+    bb.onClick(back);
+    return () => bb.offClick(back);
+  }, [loc.key, navigate]);
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -44,6 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (wa?.initData) {
           wa.ready?.();
           wa.expand?.();
+          // a vertical swipe would collapse/close the Mini App instead of scrolling (Bot API 7.7+); older clients:
+          // the document never scrolls, #root does (html.tg in app.css), so there is no page top to pull down from
+          if (wa.isVersionAtLeast?.('7.7')) wa.disableVerticalSwipes?.();
+          document.documentElement.classList.add('tg');
           try { wa.setHeaderColor?.('#032D6A'); } catch { /* old clients */ }
         }
         let me: User | null = null;
