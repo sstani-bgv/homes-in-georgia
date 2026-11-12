@@ -403,15 +403,25 @@ const BASE: PS[] = ['published', 'rented'];
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
  * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
 export function PropertyList({ mine, archived, status: only, agentId, base = '' }: { mine?: boolean; archived?: boolean; status?: string; agentId?: number; base?: string }) {
-  const [q, setQ] = useState('');
   const { isStaff } = useAuth();
   const scope = archived ? 'archive' : only ? `only:${only}` : mine ? 'mine' : 'all';
-  // «База объектов» opened from a dashboard number: /objects?tab=all&status=rented
-  const [params] = useSearchParams();
-  const asked = params.get('status') as PS | null;
-  const [status, setStatus] = useState<string>(scope === 'all' && asked && BASE.includes(asked) ? asked : '');
-  const [agent, setAgent] = useState('');
-  const [page, setPage] = useState(0);
+  // search / filters / page live in the URL: «назад» from an object lands on the same search and page (David 11-12).
+  // `ls` says which list they belong to, so a sibling list (cabinet groups, work stages) starts clean.
+  const [params, setParams] = useSearchParams();
+  const own = params.get('ls') === scope;
+  const asked = params.get('status') as PS | null;  // «База объектов» opened from a dashboard number: ?tab=all&status=rented
+  const q = own ? params.get('q') || '' : '';
+  const status = !archived && !only && asked && (own || (scope === 'all' && BASE.includes(asked))) ? asked : '';
+  const agent = own ? params.get('agent') || '' : '';
+  const page = own ? Number(params.get('page')) || 0 : 0;
+  const set = (kv: Record<string, string | number>) => setParams((cur) => {
+    const n = new URLSearchParams(cur);
+    if (!own) ['q', 'status', 'agent', 'page'].forEach((k) => n.delete(k));
+    n.set('ls', scope);
+    Object.entries(kv).forEach(([k, v]) => (v ? n.set(k, String(v)) : n.delete(k)));
+    return n;
+  }, { replace: true });
+  const setPage = (n: number) => set({ page: n });
   const fixedAgent = agentId !== undefined;  // the cabinet: one agent's objects, no agent select
   // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
   const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: FIELD_FILTER }), enabled: isStaff && !mine && !fixedAgent });
@@ -423,7 +433,6 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
   const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: isStaff && (scope === 'all' || scope === 'archive') }); // whole-base totals: staff only
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
-  const filter = (f: () => void) => { f(); setPage(0); };
   const items = itemsOf(data);
   const navigate = useNavigate();
   const link = (id: number) => propLink(base, id);
@@ -433,16 +442,16 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
       <div className="row row-wrap" style={{ marginBottom: 14 }}>
         <div className="input-icon grow" style={{ minWidth: 180, maxWidth: 380 }}>
           <Search size={16} />
-          <input className="input" placeholder="Адрес, район, агент, цена, #тег, телефон" value={q} onChange={(e) => { const v = e.target.value; filter(() => setQ(v)); }} />
+          <input className="input" placeholder="Адрес, район, агент, цена, #тег, телефон" value={q} onChange={(e) => set({ q: e.target.value, page: 0 })} />
         </div>
         {!archived && !only && (
-          <select className="select" style={{ width: 'auto' }} value={status} aria-label="Статус" onChange={(e) => { const v = e.target.value; filter(() => setStatus(v)); }}>
+          <select className="select" style={{ width: 'auto' }} value={status} aria-label="Статус" onChange={(e) => set({ status: e.target.value, page: 0 })}>
             <option value="">Все статусы</option>
             {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
           </select>
         )}
         {isStaff && !mine && !fixedAgent && (
-          <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => { const v = e.target.value; filter(() => setAgent(v)); }}>
+          <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => set({ agent: e.target.value, page: 0 })}>
             <option value="">Все агенты</option>
             {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
               <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>

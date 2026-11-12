@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { BackLink } from '../layout/back';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -84,7 +85,7 @@ export function PropertyPage() {
   const { id } = useParams();
   return (
     <>
-      <Link to="/objects" className="row gap-sm label" style={{ marginBottom: 12, display: 'inline-flex' }}><ArrowLeft size={14} />Объекты</Link>
+      <BackLink to="/objects">Объекты</BackLink>
       <PropertyDetail id={Number(id)} />
     </>
   );
@@ -106,7 +107,7 @@ export function LeadPage() {
   const { id } = useParams();
   return (
     <>
-      <Link to="/leads" className="row gap-sm label" style={{ marginBottom: 12, display: 'inline-flex' }}><ArrowLeft size={14} />Заявки</Link>
+      <BackLink to="/leads">Заявки</BackLink>
       <LeadDetail id={Number(id)} />
     </>
   );

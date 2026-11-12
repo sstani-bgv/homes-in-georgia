@@ -218,7 +218,7 @@ def new_listings(db: Session, q: str | None = None, source: str | None = None, f
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = list(db.scalars(stmt.order_by(Listing.first_seen.desc(), Listing.id).limit(limit).offset(offset)))
     ids = [r.id for r in rows]
-    sim, refused, objs = similar_in_base(db, rows), refusals_for(db, ids), known_objects(db, ids)
+    sim, refused, objs = similar_for(db, ids), refusals_for(db, ids), known_objects(db, ids)
     from app.services import demand
     want = demand.listing_counts(db, rows)  # stage 10: «Под этот объект подходят N активных клиентов»
     return {"items": [{**listing_out(r), "similar": sim.get(r.id, []), "refused": refused.get(r.id), "demand": want.get(r.id, 0),
@@ -243,24 +243,26 @@ def known_objects(db: Session, listing_ids: list[str]) -> dict[str, dict]:
     return out
 
 
-def _near(a: Listing, b: Listing) -> float:
-    """Metres between two pins (equirectangular; fine at city scale, 0.75 = cos(41.7°) for Tbilisi)."""
-    return 111_000 * math.hypot(a.lat - b.lat, (a.lng - b.lng) * 0.75)
+BASE_HINT = "address"  # listing_matches.status of a «В архиве / в базе по этому адресу» row: a hint, nobody decides it
 
 
 def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
                     twin_radius: float = 1500) -> dict[str, list[dict]]:
-    """Objects of our base at the ad's address, for the agent to compare by eye (David 2026-11-09: the agency channel
-    is no longer a source, the base is). Every object in the same building (radius) is shown, whatever its parameters:
-    the agent sees all flats we hold at this address. A «twin» (same bedrooms and floor, area ±10%) also counts up to
-    twin_radius and ranks first: pins can be off by a kilometre (8/10 Shroshi geocoded 1 km away). An object's pin is
-    the pin of its source ad (objects made by hand without an ad have none and are not compared)."""
-    rows = [r for r in rows if r.lat is not None and r.lng is not None]
+    """Objects of our base (archived legacy ones too) at the ad's address, for the agent to compare by eye (David
+    2026-11-09 / 11-12: «по Bakradze 20 в архиве уже 3 объекта — сравните»). An object counts when
+    - its address is the same building, a neighbour corpus (20 / 20A) or a house ≤ NEAR_HOUSES apart on the same street,
+      across Latin / Cyrillic / Georgian spellings (dedup.relation);
+    - or its pin is within `radius` of the ad's, or within `twin_radius` for a «twin» (same bedrooms and floor, area
+      ±10%: pins can be off by a kilometre). The pin is the object's own (agent-confirmed) or its source ad's.
+    -> listing id → [{property_id, reasons, rank}] best first. Run when ads are parsed (store_similar), not per render.
+    ponytail: the whole base in memory, a scan per ad (~10k objects × a sync batch); bucket by street / bbox if slow."""
+    from app.services.dedup import relation, street_house
     if not rows:
         return {}
-    objs = db.execute(select(Property, Listing).join(Listing, Listing.id == Property.listing_id)
-                      .where(Listing.lat.isnot(None), Listing.lng.isnot(None))).all()  # archived count too (David 11-09)
-
+    objs = [(p, street_house(p.address or (a.address if a else None)),
+             (p.lat, p.lng) if p.lat is not None and p.lng is not None else
+             (a.lat, a.lng) if a is not None and a.lat is not None and a.lng is not None else None)
+            for p, a in db.execute(select(Property, Listing).outerjoin(Listing, Listing.id == Property.listing_id)).all()]
     linked = set(db.execute(select(PropertyListing.listing_id, PropertyListing.property_id)
                             .where(PropertyListing.listing_id.in_([r.id for r in rows]))).all())  # already «known_object»
 
@@ -270,15 +272,59 @@ def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
 
     out = {}
     for l in rows:
-        cand = [(not twin(l, p), _near(l, a), p, a) for p, a in objs if a.id != l.id and (l.id, p.id) not in linked]
-        near = sorted((c for c in cand if c[1] <= (radius if c[0] else twin_radius)), key=lambda x: x[:2])
-        if near:  # ponytail: a full scan of the base per ad; a PostGIS / bbox prefilter when the base passes ~10k
-            out[l.id] = [{"id": p.id, "url": f"/properties/{p.id}", "address": p.address or a.address, "status": p.status,
-                          "archive_reason": p.archive_reason,
-                          "photo": f"/api/listing-photos/{a.id}/0" if jload(a.photos, []) else None,
-                          "price_usd": float(p.price) if p.price is not None else a.price_usd, "bedrooms": p.bedrooms,
-                          "area": float(p.area) if p.area is not None else None, "floor": p.floor, "distance_m": round(d)}
-                         for _, d, p, a in near[:20]]
+        mine, pin = street_house(l.address), (l.lat, l.lng) if l.lat is not None and l.lng is not None else None
+        found = []
+        for p, addr, at in objs:
+            if p.listing_id == l.id or (l.id, p.id) in linked:
+                continue
+            rel = relation(mine, addr)
+            d = 111_000 * math.hypot(pin[0] - at[0], (pin[1] - at[1]) * 0.75) if pin and at else None  # metres, equirectangular (0.75 = cos 41.7°)
+            is_twin = twin(l, p)
+            near = d is not None and d <= (twin_radius if is_twin else radius)
+            if not rel and not near:
+                continue
+            why = [rel] if rel else []
+            if near:
+                why.append(f"в {round(d)} м" + (" · те же спальни, этаж, площадь" if is_twin else ""))
+            # same house < neighbour corpus < pin next door < same street
+            rank = (0 if rel == "тот же дом" else 1 if rel and rel.startswith("соседний") else 2 if near else 3,
+                    not is_twin, d if d is not None else 1e9, p.id)
+            found.append((rank, p.id, why))
+        if found:
+            out[l.id] = [{"property_id": pid, "reasons": why, "rank": i}
+                         for i, (_, pid, why) in enumerate(sorted(found)[:20])]
+    return out
+
+
+def store_similar(db: Session, rows: list[Listing]) -> int:
+    """similar_in_base for freshly parsed ads → listing_matches rows (status BASE_HINT). A pair that already is a
+    «похож» card keeps it. No commit. -> ads with at least one object at their address."""
+    from sqlalchemy.dialects.postgresql import insert
+    found = similar_in_base(db, rows)
+    for lid, objs in found.items():
+        for o in objs:
+            db.execute(insert(ListingMatch).values(listing_id=lid, property_id=o["property_id"], score=-o["rank"],
+                                                   reasons=o["reasons"], status=BASE_HINT).on_conflict_do_nothing())
+    return len(found)
+
+
+def similar_for(db: Session, listing_ids: list[str]) -> dict[str, list[dict]]:
+    """The stored «по этому адресу в базе» objects of these ads, with today's status / price / cover photo."""
+    if not listing_ids:
+        return {}
+    rows = db.execute(select(ListingMatch.listing_id, ListingMatch.reasons, Property)
+                      .join(Property, Property.id == ListingMatch.property_id)
+                      .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == BASE_HINT)
+                      .order_by(ListingMatch.score.desc(), ListingMatch.id)).all()
+    cache: dict = {}
+    _covers(db, list({p.id: p for _, _, p in rows}.values()), cache)
+    out: dict[str, list[dict]] = {}
+    for lid, why, p in rows:
+        out.setdefault(lid, []).append({
+            "id": p.id, "url": f"/properties/{p.id}", "address": p.address, "status": p.status,
+            "archive_reason": p.archive_reason, "photo": cache.get(("cover", p.id)), "reasons": why or [],
+            "price_usd": float(p.price) if p.price is not None else None, "bedrooms": p.bedrooms,
+            "area": float(p.area) if p.area is not None else None, "floor": p.floor})
     return out
 
 

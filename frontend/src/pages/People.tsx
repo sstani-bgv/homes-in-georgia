@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Heart, Plus, Search, ThumbsDown } from 'lucide-react';
+import { BackLink } from '../layout/back';
+import { Heart, Plus, Search, ThumbsDown } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { ClientEvent, ClientEventType, ClientRefusal, Owner } from '../api/types';
@@ -95,7 +96,7 @@ export function ClientPage() {
   const { id } = useParams();
   const cid = Number(id);
   const { data: c, isLoading, error } = useQuery({ queryKey: ['client', cid], queryFn: () => api.clients.get(cid) });
-  const back = <Link to="/clients" className="row gap-sm label" style={{ marginBottom: 12, display: 'inline-flex' }}><ArrowLeft size={14} />Клиенты</Link>;
+  const back = <BackLink to="/clients">Клиенты</BackLink>;
   if (error) return <>{back}<ErrorBox error={error} /></>;
   if (isLoading || !c) return <>{back}<Loading /></>;
   const leads = Array.isArray(c.leads) ? c.leads : [];

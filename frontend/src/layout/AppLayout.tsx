@@ -11,6 +11,7 @@ import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
 import { useAuth, useTgBackButton } from '../auth/AuthContext';
+import { useScrollMemory } from './back';
 import { Avatar, Badge, Drawer, Modal } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 
@@ -82,6 +83,7 @@ export function AppLayout() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   useTgBackButton();
+  useScrollMemory();
   const [more, setMore] = useState(false);
   const [add, setAdd] = useState(false);
   const items = NAV.filter((n) => !n.roles || (user && n.roles.includes(user.role)));

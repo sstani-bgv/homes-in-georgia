@@ -9,7 +9,7 @@ import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyS
 import { thumbUrl } from '../api/client';
 import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
 import { useToast } from './toast';
-import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, districtLabel, fmtDateTime, formatPhone, money, SOURCE_LABEL } from '../lib/format';
+import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, districtLabel, fmtDateTime, formatPhone, money, pluralForm, SOURCE_LABEL } from '../lib/format';
 
 /** «Скопировать» next to a phone: tel: links do nothing on desktop / Telegram Desktop. */
 export function CopyPhone({ phone }: { phone: string }) {
@@ -89,8 +89,8 @@ export function SimilarInChannel({ listing, similar }: { listing: Listing & { fl
             {s.photo && <img src={thumbUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
             <div className="col" style={{ minWidth: 0 }}>
               <strong className="ellipsis">{s.address || `Объект #${s.id}`}</strong>
-              <span className="faint" style={{ fontSize: 12 }}>в {s.distance_m} м от этого адреса</span>
-              {s.url && <a href={s.url} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть объект #{s.id}</a>}
+              {!!s.reasons?.length && <span className="faint" style={{ fontSize: 12 }}>{s.reasons.join(' · ')}</span>}
+              {s.url && <Link to={s.url} className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть объект #{s.id}</Link>}
             </div>
           </div>
           <table style={{ fontSize: 13, width: '100%' }}>
@@ -197,7 +197,10 @@ export function CompareSide({ label, photos, address, rows, link, children }: {
       <strong style={{ fontSize: 15 }}>{address || 'Адрес не указан'}</strong>
       <KV items={rows} />
       {children}
-      {link?.href && <a href={link.href} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</a>}
+      {/* our own object: in-app navigation (back returns here, and the Mini App stays the Mini App); a source site: new tab */}
+      {link?.href && (link.href.startsWith('/') && !link.href.startsWith('/api/')
+        ? <Link to={link.href} className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</Link>
+        : <a href={link.href} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</a>)}
     </div>
   );
 }
@@ -217,18 +220,25 @@ export function ListingSide({ l }: { l: Listing & { floor?: number | null } }) {
   );
 }
 
+/** «В архиве по этому адресу: 3 объекта» / «В базе по этому адресу: 2 объекта (в архиве 1)» */
+export function baseAtAddress(similar: SimilarFlat[]): string {
+  const n = similar.length, arch = similar.filter((s) => s.status === 'archived').length;
+  const objs = (k: number) => `${k} ${['объект', 'объекта', 'объектов'][pluralForm(k)]}`;
+  return arch === n ? `В архиве по этому адресу: ${objs(n)}` : `В базе по этому адресу: ${objs(n)}${arch ? ` (в архиве ${arch})` : ''}`;
+}
+
 /** «Есть в базе»: the ad next to the objects of our base at its address. */
 function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: number | null }; onClose: () => void }) {
   const similar = listing.similar || [];
   return (
-    <Modal open wide onClose={onClose} title="По этому адресу в базе">
+    <Modal open wide onClose={onClose} title={baseAtAddress(similar)}>
       <div className="col gap-lg">
-        <div className="alert alert-warn" style={{ fontSize: 13 }}>По этому адресу уже есть объекты в нашей базе. Сравните фото и параметры: это одна из них или другая квартира в том же доме?</div>
+        <div className="alert alert-warn" style={{ fontSize: 13 }}>По этому адресу уже есть объекты в нашей базе, в том числе в архиве. Сравните фото и параметры: это одна из них или другая квартира в том же доме? Бот мог ошибиться — решите сами.</div>
         <div className="cmp">
           <ListingSide l={listing} />
           <div className="col gap-sm" style={{ minWidth: 0 }}>
             {similar.map((s) => (
-              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''}${s.archive_reason ? ` (${ARCHIVE_REASON[s.archive_reason] || s.archive_reason})` : ''} · ${s.distance_m ? `в ${s.distance_m} м` : 'тот же адрес'}`} photos={[s.photo]} address={s.address}
+              <CompareSide key={s.id} label={`Объект #${s.id}${s.status ? ` · ${PROPERTY_STATUS[s.status as PropertyStatus] || s.status}` : ''}${s.archive_reason ? ` (${ARCHIVE_REASON[s.archive_reason] || s.archive_reason})` : ''} ${s.reasons?.length ? ` · ${s.reasons.join(' · ')}` : ''}`} photos={[s.photo]} address={s.address}
                 rows={[['Цена', money(s.price_usd ?? null, 'USD')], ['Спальни', bedroomsLabel(s.bedrooms) || '—'], ['Площадь', s.area ? `${s.area} м²` : '—'], ['Этаж', s.floor ?? '—']]}
                 link={{ href: s.url, text: 'Открыть объект' }} />
             ))}
@@ -267,7 +277,7 @@ export function ListingCard({ listing, locked, footer, chips, onOpen }: { listin
         {(chips || !!similar.length) && (
           <div className="row row-wrap gap-sm" style={{ minWidth: 0 }}>
             {!!similar.length && (
-              <ChipButton tone="redsoft" onClick={() => setCmp(true)}>{similar.length > 1 ? `В базе ${similar.length} объекта по адресу` : `Есть в базе${similar[0].address ? ` · ${similar[0].address}` : ''}`}</ChipButton>
+              <ChipButton tone="redsoft" onClick={() => setCmp(true)}>{baseAtAddress(similar)}</ChipButton>
             )}
             {chips}
           </div>
