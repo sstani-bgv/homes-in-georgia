@@ -1,10 +1,10 @@
 // /contracts and /m/contracts — contract generator (port of the old CRM tab «tab-contract»).
 // Output: «Сохранить PDF» (the server prints this HTML with headless Chrome → stored contract, features/contracts/
 // ContractCard), the printable A4 preview (window.print + the same print CSS) and a .doc file for Word.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, Download, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
@@ -22,15 +22,7 @@ import {
 
 const STEPS = ['Тип', 'Язык', 'Данные', 'Проверка', 'Документ'];
 const TYPE_ICON: Record<CxType, typeof Home> = { rent: Home, comm: Building2, sale: KeyRound };
-const DRAFT_KEY = 'hig-contract-draft';
-
-interface Draft { type: CxType | ''; lang: CxLang | ''; data: CxData; depTouched: boolean; endTouched?: boolean }
-
-function loadDraft(): Draft | null {
-  try { const s = localStorage.getItem(DRAFT_KEY); return s ? JSON.parse(s) as Draft : null; } catch { return null; }
-}
-function saveDraft(d: Draft) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* storage unavailable */ } }
-function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
+const AUTOSAVE_MS = 800;
 
 /** Deal (GET /api/deals/{id}) → contract fields. */
 function fromDeal(deal: Deal, prop?: { area?: number | null; floor?: number | null; cadastral_code?: string | null; address?: string | null } | null): { type: CxType; data: Partial<CxData> } {
@@ -149,26 +141,69 @@ function useDrafts() {
 export function ContractWizard({ compact }: { compact?: boolean }) {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const qc = useQueryClient();
   const dealId = Number(params.get('deal_id')) || 0;
   const leadId = Number(params.get('lead_id')) || 0;
-  const draft = useMemo(() => (dealId || leadId ? null : loadDraft()), [dealId, leadId]);
+  const editId = Number(params.get('edit')) || 0;  // the stored contract (a draft being filled or a generated one)
 
   const [step, setStep] = useState(1);
-  const [type, setType] = useState<CxType | ''>(draft?.type && ENABLED_TYPES.includes(draft.type) ? draft.type : '');
-  const [lang, setLang] = useState<CxLang | ''>(draft?.lang || '');
-  const [d, setD] = useState<CxData>(draft?.data || { ...EMPTY, timestamp: todayStr() });
-  const [depTouched, setDepTouched] = useState(!!draft?.depTouched);
-  const [endTouched, setEndTouched] = useState(!!draft?.endTouched); // the agent typed the end date: no more auto end
+  const [type, setType] = useState<CxType | ''>('');
+  const [lang, setLang] = useState<CxLang | ''>('');
+  const [d, setD] = useState<CxData>({ ...EMPTY, timestamp: todayStr() });
+  const [depTouched, setDepTouched] = useState(false);
+  const [endTouched, setEndTouched] = useState(false); // the agent typed the end date: no more auto end
   const [tab, setTab] = useState<'parties' | 'property' | 'money'>('parties');
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState<Set<keyof CxData>>(new Set());
   const [prefilled, setPrefilled] = useState<{ key: string; text: string } | null>(null);
   const [petTouched, setPetTouched] = useState(false);
 
-  useEffect(() => { saveDraft({ type, lang, data: d, depTouched, endTouched }); }, [type, lang, d, depTouched, endTouched]);
+  // ---- the contract lives in the deal: the form autosaves into it (contracts.autosave) and reopens from it
+  const [contract, setContract] = useState<Contract | null>(null);  // the server's copy: status, PDF, versions
+  const saved = contract?.has_pdf ? contract : null;
+  const cidRef = useRef(editId);
+  const restored = useRef(0);
+  const touched = useRef(false);  // only the agent's input (or a lead prefill) saves, not opening the form
+  const chain = useRef<Promise<unknown>>(Promise.resolve());  // autosaves one after another: one draft, no races
+  const [autoState, setAutoState] = useState<{ at?: string; err?: string }>({});
+  // the deal's open draft: «Оформить договор» again continues it instead of starting over
+  const dealDraft = useQuery({ queryKey: ['contracts', 'draft-of', leadId, dealId],
+    queryFn: () => api.contracts.list({ status: 'draft', ...(leadId ? { lead_id: leadId } : { deal_id: dealId }) }),
+    enabled: !editId && !!(leadId || dealId) });
+  const existing = itemsOf(dealDraft.data)[0];
+  useEffect(() => {
+    if (existing && !editId) setParams((sp) => { sp.set('edit', String(existing.id)); return sp; }, { replace: true });
+  }, [existing?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const fresh = !editId && dealDraft.isSuccess && !existing;  // no draft yet: prefill from the lead / deal
+  const stored = useQuery({ queryKey: ['contracts', 'one', editId], queryFn: () => api.contracts.get(editId), enabled: !!editId });
+  useEffect(() => {
+    const c = stored.data;
+    if (!c || restored.current === c.id) return;
+    restored.current = c.id;
+    restore(c);
+  }, [stored.data]);  // eslint-disable-line react-hooks/exhaustive-deps
+  function restore(c: Contract) {
+    const x = c.data || {};
+    const data = Object.fromEntries(Object.entries(x).filter(([k]) => !k.startsWith('_'))) as Partial<CxData>;
+    setType(c.kind && ENABLED_TYPES.includes(c.kind) ? c.kind : '');
+    setLang(c.lang || '');
+    setD({ ...EMPTY, timestamp: todayStr(), ...data });
+    setDepTouched(!!x._dep); setEndTouched(!!x._end);
+    setStep(c.has_pdf ? 3 : Math.min(5, Number(x._step) || (c.kind ? 2 : 1)));
+    cidRef.current = c.id;
+    setContract(c);
+    touched.current = false;
+    setPrefilled({ key: `contract:${c.id}`, text: c.has_pdf
+      ? `Договор #${c.id} · ${c.status_label}. Поменяйте данные и нажмите «Обновить PDF»: договор перегенерируется, прошлая версия PDF сохранится.`
+      : `Черновик договора #${c.id} восстановлен — продолжайте с того же места.` });
+  }
+  const current = contract ?? stored.data;
+  const locked = !!current && current.status !== 'draft';  // signed / closed: not edited
+  const linkLead = leadId || contract?.lead_id || 0;
+  const linkDeal = dealId || contract?.deal_id || 0;
 
   // ---- prefill from /contracts?deal_id=
-  const deal = useQuery({ queryKey: ['deal', dealId], queryFn: () => api.deals.get(dealId), enabled: !!dealId });
+  const deal = useQuery({ queryKey: ['deal', dealId], queryFn: () => api.deals.get(dealId), enabled: !!dealId && fresh });
   const prop = useQuery({ queryKey: ['property', deal.data?.property_id], queryFn: () => api.properties.get(deal.data!.property_id!), enabled: !!deal.data?.property_id, retry: false });
   useEffect(() => {
     if (!deal.data || prefilled?.key === `deal:${deal.data.id}` || (deal.data.property_id && prop.isLoading)) return;
@@ -177,6 +212,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }, [deal.data, prop.data, prop.isLoading]);
 
   function apply(type: CxType, data: Partial<CxData>, key: string, text: string) {
+    touched.current = true;  // the lead's data is the draft's start: saved right away
+    setErr('');
     setType(type);
     const filled = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '')) as Partial<CxData>;
     if (filled.start_rent && filled.end_rent && !filled.rent_duration_months) filled.rent_duration_months = monthsBetween(filled.start_rent, filled.end_rent);
@@ -194,7 +231,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }
 
   // ---- prefill from /contracts?lead_id= (lead card «Оформить договор», or the picker below)
-  const leadC = useQuery({ queryKey: ['lead-contract', leadId], queryFn: () => api.leads.contract(leadId), enabled: !!leadId });
+  const leadC = useQuery({ queryKey: ['lead-contract', leadId], queryFn: () => api.leads.contract(leadId), enabled: !!leadId && fresh });
   useEffect(() => {
     const x = leadC.data;
     if (!x || prefilled?.key === `lead:${x.lead_id}`) return;
@@ -212,11 +249,33 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }
   const pickable = useQuery({ queryKey: ['leads', 'list', 'contract'], queryFn: () => api.leads.list({ status: CONTRACT_STAGES.join(',') }) });
   function pickLead(id: number) {
-    setParams((sp) => { sp.delete('deal_id'); sp.set('lead_id', String(id)); return sp; }, { replace: true });
+    cidRef.current = 0; restored.current = 0; touched.current = false; setContract(null);
+    setParams({ lead_id: String(id) }, { replace: true });
   }
+
+  // ---- autosave: debounced, from a partly filled form; the wizard's step / sync flags go along (_step, _dep, _end)
+  const payloadData = () => ({ ...d, _step: step, _dep: depTouched, _end: endTouched });
+  useEffect(() => {
+    if (!touched.current || locked || !(linkLead || linkDeal || cidRef.current)) return;
+    const t = setTimeout(() => {
+      const body = { id: cidRef.current || null, kind: type, lang, lead_id: linkLead || null, deal_id: linkDeal || null, data: payloadData() };
+      chain.current = chain.current.then(() => api.contracts.autosave(body).then((c) => {
+        const first = !cidRef.current;
+        cidRef.current = c.id; restored.current = c.id;
+        setContract(c);
+        setAutoState({ at: new Date().toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }) });
+        if (first) {
+          setParams((sp) => { sp.set('edit', String(c.id)); return sp; }, { replace: true });
+          qc.invalidateQueries({ queryKey: ['contracts', 'list'] });
+        }
+      }, (e) => setAutoState({ err: errText(e) })));
+    }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+  }, [type, lang, d, depTouched, endTouched, step]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- field updates with the old auto-sync rules
   const set = (k: keyof CxData, v: string | boolean) => {
+    touched.current = true;
     setMissing((m) => { if (!m.has(k)) return m; const n = new Set(m); n.delete(k); return n; });
     setD((x) => {
       const n: CxData = { ...x, [k]: v };
@@ -255,7 +314,11 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
 
   function next() {
     setErr('');
-    if (step === 1) { if (!type) { setErr('Выберите тип договора'); return; } setStep(2); return; }
+    if (step === 1) {
+      if (!linkLead && !linkDeal) { setErr('Договор привязывается к сделке: выберите заявку выше'); return; }
+      if (!type) { setErr('Выберите тип договора'); return; }
+      setStep(2); return;
+    }
     if (step === 2) { if (!lang) { setErr('Выберите язык договора'); return; } setStep(3); return; }
     if (step === 3) {
       const miss = requiredFields(type as CxType).filter((k) => !String(d[k] ?? '').trim());
@@ -274,10 +337,11 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }
   function back() { setErr(''); setStep((s) => Math.max(1, s - 1)); }
   function reset() {
-    clearDraft();
+    // the current draft stays in its deal (Кабинет → Договоры); the form starts a new one
+    cidRef.current = 0; restored.current = 0; touched.current = false; setContract(null); setAutoState({});
     setType(''); setLang(''); setD({ ...EMPTY, timestamp: todayStr() }); setDepTouched(false); setPetTouched(false);
-    setStep(1); setErr(''); setMissing(new Set()); setPrefilled(null); setSaved(null);
-    if (dealId || leadId) setParams((sp) => { sp.delete('deal_id'); sp.delete('lead_id'); sp.set('new', '1'); return sp; }, { replace: true });
+    setStep(1); setErr(''); setMissing(new Set()); setPrefilled(null);
+    setParams({ new: '1' }, { replace: true });
   }
 
   const fileBase = `Contract_${type || 'x'}_${lang || 'x'}_${(d.cadastral_code || d.client_full_name || 'draft').replace(/[^\w.-]+/g, '_')}`;
@@ -298,17 +362,25 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }
   // Telegram's webview ignores blob / <a download>: the bot sends the same file to the agent's chat instead
   const tg = insideTelegram();
-  // «Сохранить PDF»: the first save creates the contract, later ones (after edits) regenerate it while it is a draft
-  const [saved, setSaved] = useState<Contract | null>(null);
+  // «Сохранить PDF» generates the autosaved draft; after an edit in the form «Обновить PDF» regenerates it (the old
+  // PDF is kept as a version) while it is a draft
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const b = { kind: type as CxType, lang: lang as CxLang, html: pdfHtml(doc!), title: doc!.title, cadastral: d.cadastral_code,
         address: d.street_house, client_name: d.client_full_name, owner_name: d.owner_full_name,
-        lead_id: leadId || leadC.data?.lead_id || null, deal_id: dealId || leadC.data?.deal_id || null,
-        data: d };  // the wizard's CxData: the deal page prefills from the signed contract (contracts.data, leads session)
-      return saved && saved.status === 'draft' ? api.contracts.update(saved.id, b) : api.contracts.create(b);
+        lead_id: linkLead || leadC.data?.lead_id || null, deal_id: linkDeal || leadC.data?.deal_id || null,
+        data: payloadData() };  // the wizard's CxData: the deal page prefills from the signed contract (contracts.data)
+      await chain.current;  // a pending autosave lands first
+      return cidRef.current ? api.contracts.update(cidRef.current, b) : api.contracts.create(b);
     },
-    onSuccess: (c) => { setSaved(c); toast(`PDF сохранён: договор #${c.id}`); },
+    onSuccess: (c) => {
+      const first = !cidRef.current;
+      cidRef.current = c.id; restored.current = c.id;
+      setContract(c);
+      if (first) setParams((sp) => { sp.set('edit', String(c.id)); return sp; }, { replace: true });
+      qc.invalidateQueries({ queryKey: ['contracts'] });
+      toast(c.versions?.length ? `PDF обновлён: договор #${c.id}, версия ${c.versions.length + 1}` : `PDF сохранён: договор #${c.id}`);
+    },
     onError: (e) => toast(errText(e), true),
   });
   const sendTg = useMutation({
@@ -326,11 +398,26 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     </Field>
   );
 
+  if (locked && current) return (
+    <div className="alert alert-info">
+      Договор #{current.id} · {current.status_label}: подписанный или закрытый договор не меняется.{' '}
+      <Link to={`?id=${current.id}`}>Открыть договор</Link>
+    </div>
+  );
+
   return (
     <div className="col gap-lg contract-wizard">
       <div className="no-print">
         {!compact && (
           <PageHead label="Генератор договоров" title="Договоры" actions={<Button variant="secondary" onClick={reset}><RotateCcw size={16} />Новый договор</Button>} />
+        )}
+        {(contract || autoState.err) && (
+          <div className="row row-wrap gap-sm" style={{ fontSize: 12, marginBottom: 6 }} aria-live="polite">
+            {contract && <ContractStatusBadge c={contract} />}
+            {contract && <span className="muted">Договор #{contract.id}{linkLead ? ` · заявка #${linkLead}` : ''}{linkDeal ? ` · сделка #${linkDeal}` : ''}</span>}
+            {autoState.err ? <span style={{ color: 'var(--accent)' }}>Черновик не сохранён: {autoState.err}</span>
+              : autoState.at && <span className="faint">Сохранено в {autoState.at}</span>}
+          </div>
         )}
         <div className="stepper" style={{ marginBottom: 6 }}>
           {STEPS.map((s, i) => (
@@ -342,13 +429,13 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         {prefilled && <div className="alert alert-info mt">{prefilled.text} Проверьте и дополните поля (личные номера сторон вводятся вручную).</div>}
         {deal.error && <div className="alert alert-warn mt">Не удалось загрузить сделку #{dealId}: {errText(deal.error)}</div>}
         {leadC.error && <div className="alert alert-warn mt">Не удалось загрузить заявку #{leadId}: {errText(leadC.error)}</div>}
-        {prefilled && step < 4 && <Button size="sm" variant="ghost" className="no-print" onClick={() => setPrefilled(null)}>Подставить из другой заявки</Button>}
+        {prefilled && step < 4 && !prefilled.key.startsWith('contract') && <Button size="sm" variant="ghost" className="no-print" onClick={() => setPrefilled(null)}>Подставить из другой заявки</Button>}
         {step < 4 && !prefilled && (
-          <Card label="Заявка или сделка" title="Подставить данные" className="mt">
+          <Card label="Сделка" title="Заявка договора" className="mt">
             {itemsOf(pickable.data).length === 0 ? (
-              <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра. Заполните договор вручную.'}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра: договор оформляется из заявки или сделки.'}</div>
             ) : (
-              <Select aria-label="Заявка" value={leadId || ''} onChange={(e) => e.target.value && pickLead(Number(e.target.value))} placeholder="Выбрать заявку — или заполните вручную"
+              <Select aria-label="Заявка" value={leadId || ''} onChange={(e) => e.target.value && pickLead(Number(e.target.value))} placeholder="Выберите заявку: договор сохранится в её сделке"
                 options={itemsOf(pickable.data).map((l) => ({ value: l.id, label: `#${l.id} · ${l.listing?.address || l.listing?.title || 'объект'} · ${l.client?.name || 'клиент'} · ${LEAD_STATUS[l.status]}${l.agent?.name ? ` · ${l.agent.name}` : ''}` }))} />
             )}
           </Card>
@@ -362,7 +449,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               const Icon = TYPE_ICON[t];
               const on = type === t;
               return (
-                <button key={t} type="button" className={`choice ${on ? 'on' : ''}`} onClick={() => { setType(t); setErr(''); }} aria-pressed={on}>
+                <button key={t} type="button" className={`choice ${on ? 'on' : ''}`} onClick={() => { touched.current = true; setType(t); setErr(''); }} aria-pressed={on}>
                   <Icon size={22} /><span className="grow"><b>{CX_TYPES[t].title}</b><small>{CX_TYPES[t].sub}</small></span>
                 </button>
               );
@@ -379,7 +466,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               const off = !!type && !langsFor(type).includes(l);
               return (
                 <button key={l} type="button" className={`choice ${on ? 'on' : ''}`} disabled={off} style={off ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
-                  onClick={() => { setLang(l); setErr(''); }} aria-pressed={on}>
+                  onClick={() => { touched.current = true; setLang(l); setErr(''); }} aria-pressed={on}>
                   <span className="grow"><b lang={l === 'GEO' ? 'ka' : undefined}>{CX_LANGS[l].title}</b><small>{off ? 'Нет такого шаблона для этого типа договора' : CX_LANGS[l].sub}</small></span><Badge tone={on ? 'solid' : 'blue'}>{l}</Badge>
                 </button>
               );
@@ -480,7 +567,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
           {saved && (
             <Card className="no-print" label={`Договор #${saved.id}`} title={<span className="row gap-sm">PDF сохранён <ContractStatusBadge c={saved} /></span>}
               actions={<Link className="btn btn-sm btn-ghost" to={`?id=${saved.id}`}>Открыть договор</Link>}>
-              <ContractActions c={saved} onChange={setSaved} />
+              {saved.pdf_stale && <div className="alert alert-warn" style={{ marginBottom: 8 }}>Данные изменены после генерации: нажмите «Обновить PDF», иначе в PDF старый текст.</div>}
+              <ContractActions c={saved} onChange={setContract} />
             </Card>
           )}
           <div className="muted no-print" style={{ fontSize: 12 }}>Текст договора можно поправить прямо здесь: правка уйдёт в PDF{saved ? ' (нажмите «Обновить PDF»)' : ''}, в печать и в .doc.</div>
@@ -501,13 +589,14 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   );
 }
 
-/** /contracts: the list (active / history); ?id= one contract; ?new=1 (or ?lead_id= / ?deal_id=) the wizard. */
+/** /contracts: the list (active / history); ?id= one contract; ?new=1 (or ?lead_id= / ?deal_id=) the wizard, ?edit= the
+ *  wizard on a stored draft / generated contract (autosaved; «Обновить PDF» regenerates it). */
 function Contracts({ compact }: { compact?: boolean }) {
   const [params] = useSearchParams();
   const base = compact ? '/m/contracts' : '/contracts';
   const id = Number(params.get('id')) || 0;
   if (id) return <ContractView key={id} id={id} base={base} />;
-  if (params.has('new') || params.has('lead_id') || params.has('deal_id')) return <ContractWizard compact={compact} />;
+  if (params.has('new') || params.has('lead_id') || params.has('deal_id') || params.has('edit')) return <ContractWizard compact={compact} />;
   return (
     <div className="col gap-lg">
       {!compact && <PageHead label="Генератор договоров" title="Договоры" />}

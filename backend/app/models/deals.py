@@ -84,21 +84,24 @@ class Contract(Base):
     """A contract generated in the CRM wizard (frontend pages/Contracts.tsx): the document HTML as edited, its PDF
     and the lifecycle draft → signed → deal | closed_no_deal (docs/CONTRACTS.md, migration 0007)."""
     __tablename__ = "contracts"
-    __table_args__ = (Index("contracts_lead_idx", "lead_id"), Index("contracts_created_by_idx", "created_by"))
+    __table_args__ = (Index("contracts_lead_idx", "lead_id"), Index("contracts_created_by_idx", "created_by"),
+                      Index("contracts_deal_idx", "deal_id"))
     id = Column(Integer, primary_key=True)
     lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"))
     deal_id = Column(Integer, ForeignKey("deals.id", ondelete="SET NULL"))
     property_id = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    kind = Column(Text, nullable=False)  # rent | comm | sale
-    lang = Column(Text, nullable=False)  # GEO | RU | EN
+    kind = Column(Text)  # rent | comm | sale; null while an autosaved draft has no type yet (0012)
+    lang = Column(Text)  # GEO | RU | EN
     title = Column(Text)
     cadastral = Column(Text)
     address = Column(Text)
     client_name = Column(Text)
     owner_name = Column(Text)
-    html = Column(Text, nullable=False)
+    html = Column(Text)              # null: an autosaved draft not generated yet
     pdf_path = Column(Text)          # private/contracts/<id>/… generated PDF
+    generated_at = Column(DateTime(timezone=True))  # the last PDF; updated_at later = data edited after it
+    versions = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))  # earlier PDFs [{pdf_path, at, by}]
     signed_pdf_path = Column(Text)   # the signed scan uploaded at «Договор подписан» (optional)
     status = Column(Text, nullable=False, server_default="draft")
     signed_at = Column(DateTime(timezone=True))
@@ -110,6 +113,6 @@ class Contract(Base):
     share_token = Column(Text, unique=True)
     share_expires_at = Column(DateTime(timezone=True))
     drive_file_id = Column(Text)
-    data = Column(JSONB)  # the wizard's fields (frontend CxData): the deal page prefills from the signed contract (0008)
+    data = Column(JSONB)  # the wizard's fields (frontend CxData, + its _step/_dep/_end): the deal page prefills from it (0008)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

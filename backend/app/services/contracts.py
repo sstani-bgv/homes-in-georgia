@@ -160,9 +160,22 @@ def _iso(v):
     return v.isoformat() if v else None
 
 
+def label(c: Contract) -> str:
+    """A draft reads «Черновик» while it is being filled (autosaved, no PDF) and «Сгенерирован» once it has a PDF."""
+    return ("Сгенерирован" if c.pdf_path else "Черновик") if c.status == "draft" else STATUS_LABEL[c.status]
+
+
+def stale(c: Contract) -> bool:
+    """The form data changed after the last PDF: «Обновить PDF» before signing."""
+    return bool(c.pdf_path and c.generated_at and c.updated_at and c.updated_at > c.generated_at)
+
+
 def out(db: Session, c: Contract, full: bool = False) -> dict:
     share = c.share_token if c.share_expires_at and c.share_expires_at > now() else None
-    d = {"id": c.id, "status": c.status, "status_label": STATUS_LABEL[c.status], "kind": c.kind, "lang": c.lang,
+    lead = db.get(Lead, c.lead_id) if c.lead_id else None
+    d = {"id": c.id, "status": c.status, "status_label": label(c), "kind": c.kind, "lang": c.lang,
+         "has_pdf": bool(c.pdf_path), "generated_at": _iso(c.generated_at), "pdf_stale": stale(c),
+         "versions_count": len(c.versions or []), "lead_status": lead.status if lead else None,
          "title": c.title, "cadastral": c.cadastral, "address": c.address, "client_name": c.client_name,
          "owner_name": c.owner_name, "lead_id": c.lead_id, "deal_id": c.deal_id, "property_id": c.property_id,
          "created_by": _name(db, c.created_by), "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at),
@@ -173,7 +186,8 @@ def out(db: Session, c: Contract, full: bool = False) -> dict:
          "share": {"path": share_path(share), "url": env.PUBLIC_URL.rstrip("/") + share_path(share),
                    "expires_at": _iso(c.share_expires_at)} if share else None}
     if full:
-        d["html"] = c.html
+        d["html"], d["data"] = c.html, c.data
+        d["versions"] = [{"n": i, "at": v.get("at"), "by": _name(db, v.get("by"))} for i, v in enumerate(c.versions or [])]
     return d
 
 
@@ -181,23 +195,30 @@ def summary(c: Contract | None) -> dict | None:
     """The lead's contract in lead payloads (GET /leads/{id}, /leads/{id}/contract)."""
     if not c:
         return None
-    return {"id": c.id, "status": c.status, "status_label": STATUS_LABEL[c.status], "signed_at": _iso(c.signed_at),
+    return {"id": c.id, "status": c.status, "status_label": label(c), "has_pdf": bool(c.pdf_path), "signed_at": _iso(c.signed_at),
             "has_signed_pdf": bool(c.signed_pdf_path), "close_reason": c.close_reason,
             "close_reason_label": CONTRACT_CLOSE_REASONS.get(c.close_reason or ""), "closed_at": _iso(c.closed_at)}
 
 
 def for_lead(db: Session, lead_id: int) -> Contract | None:
-    """The lead's live contract (latest active / with a deal), else the latest closed one."""
+    """The lead's live contract: signed / with a deal first, then a generated draft, then one being filled; else the
+    latest closed one (a fresh autosaved draft must not hide the signed contract from the deal guard)."""
     rows = list(db.scalars(select(Contract).where(Contract.lead_id == lead_id).order_by(Contract.id.desc())))
-    return next((c for c in rows if c.status != "closed_no_deal"), rows[0] if rows else None)
+    rank = lambda c: (0 if c.status in ("signed", "deal") else 1 if c.pdf_path else 2) if c.status != "closed_no_deal" else 3  # noqa: E731
+    return min(rows, key=rank) if rows else None
 
 
-def query(db: Session, user: User, status: str | None = None, lead_id: int | None = None, q: str | None = None):
-    """status: active (draft + signed, the default lists) | draft | signed | deal | closed_no_deal | all."""
+def query(db: Session, user: User, status: str | None = None, lead_id: int | None = None, q: str | None = None,
+          deal_id: int | None = None, agent_id: int | None = None):
+    """status: active (draft + signed, the default lists) | draft | signed | deal | closed_no_deal | all.
+    agent_id (staff): that agent's contracts, as the agent sees them in his cabinet."""
     stmt = select(Contract)
-    if not at_least(user, "operator"):
-        mine = select(Lead.id).where(Lead.agent_id == user.id)
-        stmt = stmt.where((Contract.created_by == user.id) | Contract.lead_id.in_(mine))
+    who = user.id if not at_least(user, "operator") else agent_id
+    if who:
+        mine = select(Lead.id).where(Lead.agent_id == who)
+        stmt = stmt.where((Contract.created_by == who) | Contract.lead_id.in_(mine))
+    if deal_id:
+        stmt = stmt.where(Contract.deal_id == deal_id)
     st = status or "active"
     if st == "active":
         stmt = stmt.where(Contract.status.in_(ACTIVE))
@@ -209,29 +230,30 @@ def query(db: Session, user: User, status: str | None = None, lead_id: int | Non
         like = f"%{q.strip()}%"
         stmt = stmt.where(Contract.cadastral.ilike(like) | Contract.address.ilike(like) | Contract.client_name.ilike(like)
                           | Contract.owner_name.ilike(like))
-    return stmt.order_by(Contract.id.desc())
+    return stmt.order_by(Contract.updated_at.desc(), Contract.id.desc())
 
 
 def filename(c: Contract, signed: bool = False) -> str:
     """As the old system's Drive files: by the cadastral code (+ date and client)."""
-    day = (c.signed_at or c.created_at or now()).date().isoformat()
+    day = (c.signed_at or c.generated_at or c.created_at or now()).date().isoformat()
     parts = [c.cadastral or f"contract-{c.id}", day, c.client_name or ""]
     name = re.sub(r"[\\/:*?\"<>|\s]+", " ", " ".join(p for p in parts if p)).strip()[:150]
     return f"{name}{' signed' if signed else ''}.pdf"
 
 
-# ---------------------------------------------------------------- create / edit
+# ---------------------------------------------------------------- create / autosave / (re)generate
 
-def _fields(db: Session, body: dict, user: User) -> dict:
-    kind, lang, page = body.get("kind"), body.get("lang"), body.get("html") or ""
-    if kind not in KINDS or lang not in LANGS:
-        raise DomainError("bad_input", "kind / lang")
-    if not page.strip() or len(page) > MAX_HTML:
-        raise DomainError("bad_input", "html")
-    f = {k: (str(body.get(k) or "").strip() or None) for k in ("title", "cadastral", "address", "client_name", "owner_name")}
+DATA_META = ("_step", "_dep", "_end")  # the wizard's own state kept with CxData: reopened at the same step
+
+
+def _link(db: Session, body: dict, user: User) -> dict:
+    """The deal a contract belongs to (required): the lead («сделка» at the contract stage, the Deal row comes after
+    signing) or the Deal itself; the other ids follow from it."""
     lead_id = body.get("lead_id") or None
     deal_id = body.get("deal_id") or None
     prop_id = body.get("property_id") or None
+    if not lead_id and not deal_id:
+        raise DomainError("no_deal", "Договор привязывается к сделке: выберите заявку или сделку")
     if lead_id:
         lead = get_or_404(db, Lead, int(lead_id), "lead")
         if not at_least(user, "operator") and lead.agent_id != user.id:
@@ -243,17 +265,33 @@ def _fields(db: Session, body: dict, user: User) -> dict:
         if not at_least(user, "operator") and deal.agent_id != user.id:
             raise DomainError("not_found", "deal not found")
         lead_id, prop_id = lead_id or deal.lead_id, prop_id or deal.property_id
-    data = body.get("data")  # the wizard's CxData (scalars only), kept for the deal prefill; absent = left as is
-    if isinstance(data, dict):
-        f["data"] = {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 500}
-    return {**f, "kind": kind, "lang": lang, "html": clean_html(page), "lead_id": lead_id, "deal_id": deal_id,
-            "property_id": prop_id}
+    return {"lead_id": lead_id, "deal_id": deal_id, "property_id": prop_id}
+
+
+def _data(data) -> dict | None:
+    """The wizard's CxData (scalars only), kept for the restore and the deal prefill; not a dict = left as is."""
+    if not isinstance(data, dict):
+        return None
+    return {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 500}
+
+
+def _fields(db: Session, body: dict, user: User) -> dict:
+    kind, lang, page = body.get("kind"), body.get("lang"), body.get("html") or ""
+    if kind not in KINDS or lang not in LANGS:
+        raise DomainError("bad_input", "kind / lang")
+    if not page.strip() or len(page) > MAX_HTML:
+        raise DomainError("bad_input", "html")
+    f = {k: (str(body.get(k) or "").strip() or None) for k in ("title", "cadastral", "address", "client_name", "owner_name")}
+    data = _data(body.get("data"))
+    if data is not None:
+        f["data"] = data
+    return {**f, **_link(db, body, user), "kind": kind, "lang": lang, "html": clean_html(page)}
 
 
 def _store_pdf(c: Contract, data: bytes, signed: bool = False) -> str:
     key = f"private/contracts/{c.id}/{uuid.uuid4().hex}.pdf"
     storage.put(key, data)
-    old = c.signed_pdf_path if signed else c.pdf_path
+    old = c.signed_pdf_path if signed else None  # a generated PDF is kept in versions (regenerate), a scan is replaced
     if old:
         try:
             storage.delete(old)
@@ -262,29 +300,73 @@ def _store_pdf(c: Contract, data: bytes, signed: bool = False) -> str:
     return key
 
 
+def _draft_for(db: Session, link: dict, user: User) -> Contract | None:
+    """The deal's draft being filled (no PDF yet): one per lead / deal, so a reopened form continues it."""
+    col, v = (Contract.lead_id, link["lead_id"]) if link["lead_id"] else (Contract.deal_id, link["deal_id"])
+    return db.scalar(select(Contract).where(col == v, Contract.status == "draft", Contract.pdf_path.is_(None))
+                     .order_by(Contract.id.desc()).with_for_update())
+
+
+def autosave(db: Session, body: dict, user: User) -> Contract:
+    """The wizard's debounced autosave, from the first field: the draft (any fill) in the deal, no PDF. With `id`, that
+    draft (filled or generated) gets the new data; a generated one then shows «PDF устарел» until regenerated."""
+    kind, lang = body.get("kind") or None, body.get("lang") or None
+    if (kind and kind not in KINDS) or (lang and lang not in LANGS):
+        raise DomainError("bad_input", "kind / lang")
+    data = _data(body.get("data")) or {}
+    if body.get("id"):
+        c = get(db, int(body["id"]), user, lock=True)
+        if c.status != "draft":
+            raise DomainError("bad_status", "Подписанный или закрытый договор не меняется", 409)
+    else:
+        link = _link(db, body, user)
+        c = _draft_for(db, link, user)
+        if c is None:
+            c = Contract(**link, created_by=user.id, status="draft")
+            db.add(c)
+            db.flush()
+            log_event(db, "contract", c.id, "draft_started", user, lead_id=c.lead_id)
+    core = lambda x: {k: v for k, v in (x or {}).items() if k not in DATA_META}  # noqa: E731
+    if (kind or c.kind, lang or c.lang, core(data)) == (c.kind, c.lang, core(c.data)):
+        c.data = data  # only the wizard's step / flags: the PDF stays current
+        db.commit()
+        return c
+    c.kind, c.lang, c.data, c.updated_at = kind or c.kind, lang or c.lang, data, now()
+    for col, key in (("cadastral", "cadastral_code"), ("address", "street_house"), ("client_name", "client_full_name"),
+                     ("owner_name", "owner_full_name")):
+        setattr(c, col, str(data.get(key) or "").strip() or None)
+    db.commit()
+    return c
+
+
 def create(db: Session, body: dict, user: User) -> Contract:
     f = _fields(db, body, user)
     pdf = render_pdf(f["html"])
     c = Contract(**f, created_by=user.id)
     db.add(c)
     db.flush()
-    c.pdf_path = _store_pdf(c, pdf)
+    c.pdf_path, c.generated_at = _store_pdf(c, pdf), now()
+    c.updated_at = c.generated_at
     log_event(db, "contract", c.id, "created", user, lead_id=c.lead_id)
     db.commit()
     return c
 
 
 def update(db: Session, cid: int, body: dict, user: User) -> Contract:
-    """Edit + regenerate the PDF while it is a draft (the wizard's «Сохранить PDF» again after an edit)."""
+    """Generate the autosaved draft, or regenerate a generated one after an edit in the same form, while it is a draft.
+    The previous PDF stays in `versions` (GET /contracts/{id}/pdf?version=N)."""
     c = get(db, cid, user, lock=True)
     if c.status != "draft":
         raise DomainError("bad_status", "Подписанный или закрытый договор не меняется", 409)
     f = _fields(db, body, user)
     pdf = render_pdf(f["html"])
+    if c.pdf_path:
+        c.versions = [*(c.versions or []), {"pdf_path": c.pdf_path, "at": _iso(c.generated_at or c.created_at), "by": c.created_by}]
     for k, v in f.items():
         setattr(c, k, v)
-    c.pdf_path, c.updated_at = _store_pdf(c, pdf), now()
-    log_event(db, "contract", c.id, "updated", user)
+    t = now()
+    c.pdf_path, c.generated_at, c.updated_at = _store_pdf(c, pdf), t, t
+    log_event(db, "contract", c.id, "regenerated" if c.versions else "generated", user)
     db.commit()
     return c
 
@@ -297,6 +379,10 @@ def sign(db: Session, cid: int, user: User, pdf: bytes | None = None) -> Contrac
     c = get(db, cid, user, lock=True)
     if c.status not in ("draft", "signed", "deal") or (c.status != "draft" and not pdf):
         raise DomainError("bad_status", f"Договор: {STATUS_LABEL[c.status]}", 409)
+    if not c.pdf_path:
+        raise DomainError("not_generated", "Сначала сгенерируйте договор (PDF)", 409)
+    if c.status == "draft" and stale(c):
+        raise DomainError("pdf_stale", "Данные изменены после генерации: обновите PDF перед подписью", 409)
     if pdf is not None:
         if not pdf.startswith(b"%PDF"):
             raise DomainError("bad_file", "Подписанный договор: нужен PDF")
@@ -335,15 +421,21 @@ def mark_deal(db: Session, deal: Deal, actor: User | None = None) -> None:
     """The deal is confirmed (services/deals.confirm): the lead's active contracts → deal. Does not commit."""
     if not deal.lead_id:
         return
-    for c in db.scalars(select(Contract).where(Contract.lead_id == deal.lead_id, Contract.status.in_(ACTIVE))):
+    for c in db.scalars(select(Contract).where(Contract.lead_id == deal.lead_id, Contract.status.in_(ACTIVE),
+                                               Contract.pdf_path.isnot(None))):  # a draft still being filled stays one
         c.status, c.deal_id, c.updated_at = "deal", deal.id, now()
         log_event(db, "contract", c.id, "deal", actor, deal_id=deal.id)
 
 
 # ---------------------------------------------------------------- files, share links
 
-def pdf_bytes(c: Contract, signed: bool = False) -> bytes:
-    key = (c.signed_pdf_path if signed else None) or c.pdf_path
+def pdf_bytes(c: Contract, signed: bool = False, version: int | None = None) -> bytes:
+    """The current PDF (signed: the scan if there is one); version: an earlier generated PDF (0 = the first)."""
+    vs = c.versions or []
+    if version is not None:
+        key = vs[version]["pdf_path"] if 0 <= version < len(vs) else None
+    else:
+        key = (c.signed_pdf_path if signed else None) or c.pdf_path
     data = storage.read(key) if key else None
     if not data:
         raise DomainError("not_found", "PDF не найден")
@@ -359,6 +451,8 @@ def share(db: Session, cid: int, user: User) -> Contract:
     c = get(db, cid, user, lock=True)
     if c.status == "closed_no_deal":
         raise DomainError("bad_status", "Договор закрыт", 409)
+    if not c.pdf_path:
+        raise DomainError("not_generated", "Сначала сгенерируйте договор (PDF)", 409)
     if not c.share_token or not c.share_expires_at or c.share_expires_at < now() + timedelta(days=1):
         c.share_token = secrets.token_urlsafe(24)
     c.share_expires_at = now() + timedelta(days=env.CONTRACT_SHARE_DAYS)

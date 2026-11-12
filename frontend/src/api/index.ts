@@ -6,7 +6,7 @@ import {
 } from './normalize';
 import type {
   Birthday, Invite, InviteInfo,
-  AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
+  AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractDraftIn, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, LeadStatus, DealPrefill, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
   Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
 } from './types';
@@ -166,7 +166,9 @@ export const api = {
   contracts: {
     send: (filename: string, html: string) => http.post<{ ok: boolean }>('/contracts/send', { filename, html }),
     /** status: active (draft + signed, default) | draft | signed | deal | closed_no_deal | all */
-    list: (q?: { status?: string; lead_id?: number; q?: string }) => http.get<L<Contract>>('/contracts', { ...q, limit: LIMIT }),
+    list: (q?: { status?: string; lead_id?: number; deal_id?: number; agent_id?: number; q?: string }) => http.get<L<Contract>>('/contracts', { ...q, limit: LIMIT }),
+    /** the wizard's debounced autosave: the deal's draft (no PDF), or `id`'s data */
+    autosave: (b: ContractDraftIn) => http.post<Contract>('/contracts/draft', b),
     get: (id: number) => http.get<Contract>(`/contracts/${id}`),
     create: (b: ContractIn) => http.post<Contract>('/contracts', b),
     update: (id: number, b: ContractIn) => http.put<Contract>(`/contracts/${id}`, b),
@@ -178,7 +180,7 @@ export const api = {
     close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
     share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
-    pdf: (id: number, signed = false) => fetchBlob(`/contracts/${id}/pdf${signed ? '?signed=1' : ''}`),
+    pdf: (id: number, signed = false, version?: number) => fetchBlob(`/contracts/${id}/pdf${version != null ? `?version=${version}` : signed ? '?signed=1' : ''}`),
   },
   deals: {
     calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),

@@ -117,10 +117,11 @@ def test_matrix_objects_contracts_deals(db, client, role):
     assert (client.patch(f"/api/properties/{theirs}", json={"price": 777}, headers=h).status_code == 200) == (lvl >= 3)
 
     # contracts: none for a recruit; an agent sees his own only; operator+ sees everyone's
-    r = client.post("/api/contracts", json=CONTRACT, headers=h)
+    from tests.test_contracts import _lead  # noqa: PLC0415 (a contract belongs to a deal: the agent's lead)
+    r = client.post("/api/contracts", json={**CONTRACT, "lead_id": _lead(db, me).id}, headers=h)
     assert (r.status_code == 200) == (lvl >= 2), r.text
     assert client.get("/api/contracts", headers=h).status_code == (200 if lvl >= 2 else 403)
-    theirs_c = client.post("/api/contracts", json=CONTRACT, headers=auth(other)).json()["id"]
+    theirs_c = client.post("/api/contracts", json={**CONTRACT, "lead_id": _lead(db, other).id}, headers=auth(other)).json()["id"]
     if lvl >= 2:
         assert (client.get(f"/api/contracts/{theirs_c}", headers=h).status_code == 200) == (lvl >= 3)
         own_c = r.json()["id"]
