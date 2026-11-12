@@ -94,7 +94,8 @@ def accept(db: Session, token: str, tg: dict) -> User:
     name = " ".join(x for x in (tg.get("first_name"), tg.get("last_name")) if x) or tg.get("username") or f"Сотрудник {tg_id}"
     u = User(tg_id=tg_id, username=tg.get("username"), name=name.strip(), photo_url=tg.get("photo_url"), role=inv.role,
              level=inv.level, districts=inv.districts or [], works_as_agent=inv.works_as_agent,
-             agent_tag=users.clean_agent_tag(db, inv.agent_tag) if inv.agent_tag else None)
+             agent_tag=users.clean_agent_tag(db, inv.agent_tag) if inv.agent_tag else None,
+             birth_date=users.tg_birth_date(tg_id), **{k: tg[k] for k in ("first_name", "last_name") if tg.get(k)})
     db.add(u)
     db.flush()
     inv.used_at, inv.used_by = now(), u.id

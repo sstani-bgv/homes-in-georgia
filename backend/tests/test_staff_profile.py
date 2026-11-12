@@ -114,3 +114,29 @@ def test_birthdays_widget(client, db):
     a = client.get("/api/birthdays", headers=auth(adm)).json()["items"]
     assert a[0]["name"] == "Заза Беридзе" and a[0]["days_left"] == 2 and a[0]["age"] is not None
     assert client.get("/api/birthdays", headers=auth(ag)).json()["items"][0]["age"] is None
+
+
+def test_first_last_name(client, db, monkeypatch):
+    h = auth(make_user(db, "admin", name="Иракли Админ"))
+    r = client.post("/api/users", json={**PROFILE, "first_name": " Мария Анна ", "last_name": "Беридзе"}, headers=h)
+    assert r.status_code == 200, r.text
+    u = r.json()
+    assert (u["first_name"], u["last_name"], u["name"]) == ("Мария Анна", "Беридзе", "Мария Анна Беридзе")
+    assert client.post("/api/users", json={**PROFILE, "first_name": "Нино"}, headers=h).json()["code"] == "profile_required"
+    r = client.patch(f"/api/users/{u['id']}", json={**PROFILE, "last_name": "Гелашвили"}, headers=h)
+    assert r.json()["name"] == "Мария Анна Гелашвили"
+    old = make_user(db, "agent", name="Заза Беридзе Младший")  # set as a whole name: split at the first space
+    assert (old.first_name, old.last_name) == ("Заза", "Беридзе Младший")
+    r = client.patch(f"/api/users/{old.id}", json={**PROFILE, "name": "Гия Канчели"}, headers=h)  # old API callers
+    assert (r.json()["first_name"], r.json()["last_name"]) == ("Гия", "Канчели")
+
+
+def test_birth_date_from_telegram(db, monkeypatch):
+    from app.services import users
+    from app.telegram import client as tg
+    monkeypatch.undo()  # the real users.tg_birth_date, a fake getChat
+    replies = {1: {"birthdate": {"day": 4, "month": 5, "year": 1990}}, 2: {"birthdate": {"day": 4, "month": 5}}, 3: None}
+    monkeypatch.setattr(tg, "call", lambda method, chat_id: replies[chat_id])
+    assert users.tg_birth_date(1) == date(1990, 5, 4)
+    assert users.tg_birth_date(2) is None  # no year: no date
+    assert users.tg_birth_date(3) is None  # hidden / not reachable

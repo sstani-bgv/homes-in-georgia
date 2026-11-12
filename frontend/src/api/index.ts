@@ -30,7 +30,7 @@ export const api = {
     acceptInvite: (token: string, data: Record<string, unknown>) => then(http.post<AuthOut>('/auth/invite', { ...data, token }), normAuth),
     me: () => http.get<User>('/auth/me'),
     /** the user's own profile (cabinet «Заполните профиль») */
-    updateMe: (b: Pick<Partial<User>, 'name' | 'birth_date' | 'phone' | 'email'>) => http.patch<User>('/auth/me', b),
+    updateMe: (b: Pick<Partial<User>, 'first_name' | 'last_name' | 'birth_date' | 'phone' | 'email'>) => http.patch<User>('/auth/me', b),
   },
 
   users: {

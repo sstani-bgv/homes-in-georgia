@@ -20,30 +20,31 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   const qc = useQueryClient();
   const toast = useToast();
   const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: only a superadmin grants admin roles
-  const [f, setF] = useState<Partial<User> & { password?: string }>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
+  const [f, setF] = useState<Partial<User>>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
   const set = <K extends keyof User>(k: K, v: User[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: f.name, role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
-        tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans,
+      const body = { first_name: f.first_name?.trim(), last_name: f.last_name?.trim(), role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
+        tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, plans: f.plans,
         birth_date: f.birth_date || null, email: f.email?.trim() || null,
-        agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent, ...(f.password ? { password: f.password } : {}) };
+        agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent };  // login / password: Telegram-only sign-in, not shown
       return user ? api.users.update(user.id, body) : api.users.create(body);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Сохранено'); onDone(); },
     onError: (e) => toast(errText(e), true),
   });
   const promote = useMutation({ mutationFn: () => api.users.promote(user!.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Рекрут переведён в агенты'); onDone(); } });
-  const suggest = useMutation({ mutationFn: () => api.users.suggestTag(f.name || '', user?.id), onSuccess: (r) => set('agent_tag', r.tag), onError: (e) => toast(errText(e), true) });
+  const suggest = useMutation({ mutationFn: () => api.users.suggestTag(`${f.first_name || ''} ${f.last_name || ''}`.trim(), user?.id), onSuccess: (r) => set('agent_tag', r.tag), onError: (e) => toast(errText(e), true) });
   const toggleDistrict = (d: string) => set('districts', (f.districts || []).includes(d) ? (f.districts || []).filter((x) => x !== d) : [...(f.districts || []), d]);
   const plans = f.plans || { photo: 15, showing: 15, stickers: 15, rental: 15 };
   // required for every employee (Irakli 11-12); the backend checks the same
-  const gaps = [(f.name || '').trim().split(/\s+/).length < 2 && 'имя и фамилия', !f.birth_date && 'дата рождения',
+  const gaps = [!f.first_name?.trim() && 'имя', !f.last_name?.trim() && 'фамилия', !f.birth_date && 'дата рождения',
     (f.phone || '').replace(/\D/g, '').length < 9 && 'телефон', !EMAIL_RE.test((f.email || '').trim()) && 'email'].filter(Boolean);
   return (
     <div className="col gap-lg">
       <div className="form-grid">
-        <Field label="Имя и фамилия *" className="span2"><Input value={f.name || ''} placeholder="Заза Беридзе" onChange={(e) => set('name', e.target.value)} /></Field>
+        <Field label="Имя *"><Input value={f.first_name || ''} placeholder="Заза" onChange={(e) => set('first_name', e.target.value)} /></Field>
+        <Field label="Фамилия *"><Input value={f.last_name || ''} placeholder="Беридзе" onChange={(e) => set('last_name', e.target.value)} /></Field>
         <Field label="Дата рождения *"><Input type="date" value={f.birth_date || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set('birth_date', e.target.value || null)} /></Field>
         <Field label="Email *" hint="Видят только администраторы"><Input type="email" inputMode="email" value={f.email || ''} placeholder="name@mail.com" onChange={(e) => set('email', e.target.value)} /></Field>
         <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
@@ -54,14 +55,12 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
           <div className="row gap-sm">
             <Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => set('agent_tag', e.target.value.replace(/^#+/, '') || null)} />
-            <Button variant="secondary" size="sm" disabled={!f.name} loading={suggest.isPending} onClick={() => suggest.mutate()}>Предложить</Button>
+            <Button variant="secondary" size="sm" disabled={!f.first_name?.trim()} loading={suggest.isPending} onClick={() => suggest.mutate()}>Предложить</Button>
           </div>
         </Field>
         {f.role === 'recruit' ? (
           <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.works_as_agent).map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
-        <Field label="Логин для входа"><Input value={f.login || ''} onChange={(e) => set('login', e.target.value)} autoComplete="off" /></Field>
-        <Field label={user ? 'Новый пароль' : 'Пароль'}><Input type="password" value={f.password || ''} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></Field>
       </div>
       <div>
         <span className="label">Районы</span>

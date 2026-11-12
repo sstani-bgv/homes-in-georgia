@@ -1,7 +1,7 @@
 // Small brand component kit built on CSS variables (styles/app.css).
-import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ChangeEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
-import { Inbox, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Inbox, X } from 'lucide-react';
 import { DISTRICT_LIST, DISTRICTS, districtLabel, initials, phoneBlur, phoneFocus } from '../lib/format';
 import { mediaUrl } from '../api/client';
 
@@ -60,7 +60,94 @@ export function Field({ label, children, className = '', hint }: { label: string
   );
 }
 /** inputMode="tel" (the phoneInput fields): «+995 » appears on focus, a bare one is cleared on blur */
-export const Input = (p: InputHTMLAttributes<HTMLInputElement>) => <input className="input" {...p}
+const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const pad = (n: number) => String(n).padStart(2, '0');
+const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+
+/** The brand date picker behind every <Input type="date">: same value (YYYY-MM-DD) and onChange(e.target.value)
+ * contract as the native input, whose browser calendar can't be styled. Month + year selects for birth dates. */
+function DateInput({ value, onChange, min, max, disabled, placeholder = 'Выберите дату', name, style, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+  const v = typeof value === 'string' && /^\d{4}-\d\d-\d\d$/.test(value) ? value : '';
+  const lo = typeof min === 'string' ? min : '', hi = typeof max === 'string' ? max : '';
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState('');  // YYYY-MM shown
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number }>({ left: 0 });
+  const box = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    // a portal at fixed coordinates: cards / drawers around the field can't clip it or paint over it
+    const place = () => {
+      const r = box.current!.getBoundingClientRect(), below = innerHeight - r.bottom > 380 || r.top < 380;
+      setPos({ left: Math.max(8, Math.min(r.left, innerWidth - 304)), ...(below ? { top: r.bottom + 6 } : { bottom: innerHeight - r.top + 6 }) });
+    };
+    place();
+    const out = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', out);
+    document.addEventListener('keydown', esc);
+    addEventListener('scroll', place, true);
+    addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('mousedown', out); document.removeEventListener('keydown', esc);
+      removeEventListener('scroll', place, true); removeEventListener('resize', place);
+    };
+  }, [open]);
+  const emit = (s: string) => {
+    onChange?.({ target: { value: s, name }, currentTarget: { value: s, name } } as unknown as ChangeEvent<HTMLInputElement>);
+    setOpen(false);
+  };
+  const toggle = () => {
+    const t = isoToday();
+    setView((v || (hi && hi < t ? hi : lo && lo > t ? lo : t)).slice(0, 7));
+    setOpen(!open);
+  };
+  const [y, m] = view.split('-').map(Number);
+  const shift = (n: number) => { const d = new Date(y, m - 1 + n, 1); setView(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); };
+  const y0 = lo ? Number(lo.slice(0, 4)) : 1930, y1 = hi ? Number(hi.slice(0, 4)) : new Date().getFullYear() + 10;
+  const off = (new Date(y, m - 1, 1).getDay() + 6) % 7, days = new Date(y, m, 0).getDate();
+  const iso = (d: number) => `${y}-${pad(m)}-${pad(d)}`;
+  const out = (s: string) => (!!lo && s < lo) || (!!hi && s > hi);
+  const today = isoToday();
+  const label = v ? new Date(`${v}T00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).replace(/\s?г\.$/, '') : '';
+  return (
+    <div className="dp">
+      <button type="button" ref={box} className={`input dp-trigger ${v ? '' : 'dp-empty'}`} disabled={disabled} onClick={toggle} style={style}
+        aria-invalid={rest['aria-invalid']} aria-haspopup="dialog" aria-expanded={open}>
+        <CalendarDays size={16} /><span>{label || placeholder}</span>
+      </button>
+      {open && view && createPortal(
+        <div className="dp-pop" role="dialog" ref={pop} style={pos}>
+          <div className="dp-head">
+            <button type="button" className="dp-nav" aria-label="Предыдущий месяц" onClick={() => shift(-1)}><ChevronLeft size={16} /></button>
+            <select className="dp-sel" value={m} aria-label="Месяц" onChange={(e) => setView(`${y}-${pad(Number(e.target.value))}`)}>
+              {MONTHS.map((n, i) => <option key={n} value={i + 1}>{n}</option>)}
+            </select>
+            <select className="dp-sel" value={y} aria-label="Год" onChange={(e) => setView(`${e.target.value}-${pad(m)}`)}>
+              {Array.from({ length: Math.max(y1, y) - Math.min(y0, y) + 1 }, (_, i) => Math.max(y1, y) - i).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button type="button" className="dp-nav" aria-label="Следующий месяц" onClick={() => shift(1)}><ChevronRight size={16} /></button>
+          </div>
+          <div className="dp-grid">
+            {WEEK.map((w) => <span key={w} className="dp-wd">{w}</span>)}
+            {Array.from({ length: off }, (_, i) => <span key={`b${i}`} />)}
+            {Array.from({ length: days }, (_, i) => {
+              const s = iso(i + 1);
+              return <button key={s} type="button" disabled={out(s)} onClick={() => emit(s)}
+                className={`dp-day${s === v ? ' sel' : ''}${s === today ? ' today' : ''}`}>{i + 1}</button>;
+            })}
+          </div>
+          <div className="dp-foot">
+            {!out(today) && <button type="button" className="dp-link" onClick={() => emit(today)}>Сегодня</button>}
+            {v && <button type="button" className="dp-link dp-clear" onClick={() => emit('')}>Очистить</button>}
+          </div>
+        </div>, document.body,
+      )}
+    </div>
+  );
+}
+
+export const Input = (p: InputHTMLAttributes<HTMLInputElement>) => p.type === 'date' ? <DateInput {...p} /> : <input className="input" {...p}
   {...(p.inputMode === 'tel' ? { onFocus: (e) => { phoneFocus(e); p.onFocus?.(e); }, onBlur: (e) => { phoneBlur(e); p.onBlur?.(e); } } : {})} />;
 export const Textarea = (p: TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea className="textarea" {...p} />;
 export function Select({ options, placeholder, ...p }: SelectHTMLAttributes<HTMLSelectElement> & { options: { value: string | number; label: string }[]; placeholder?: string }) {

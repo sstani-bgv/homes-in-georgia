@@ -11,10 +11,10 @@ from app.models import FIELD_SQL, ROLES, SUPER, User, at_least
 from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
-EDITABLE = ("name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
+EDITABLE = ("name", "first_name", "last_name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
             "birth_date", "email", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent")
 # the employee profile Irakli asked for (11-12): «чтобы дни рождения не пропускали»
-PROFILE = ("name", "birth_date", "phone", "email")
+PROFILE = ("first_name", "last_name", "birth_date", "phone", "email")
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
 TAG_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{1,31}")
 _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюяაბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ",
@@ -57,6 +57,17 @@ def check_password(pw: str, hashed: str | None) -> bool:
         return bcrypt.checkpw(pw.encode(), hashed.encode())
     except ValueError:
         return False
+
+
+def tg_birth_date(tg_id) -> date | None:
+    """Birth date from Telegram: initData / the Login Widget don't carry it, only Bot API getChat (ChatFullInfo.birthdate),
+    and only if the user's privacy shows it and he gave the year (day + month alone don't make a date). None otherwise."""
+    from app.telegram import client as tg
+    b = (tg.call("getChat", chat_id=tg_id) or {}).get("birthdate") or {}
+    try:
+        return date(b["year"], b["month"], b["day"]) if b.get("year") else None
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def by_tg(db: Session, tg_id) -> User | None:
@@ -115,19 +126,23 @@ def tag_of(user: User | None) -> str:
 def missing(u) -> list[str]:
     """Profile fields still to fill: name (first + last), birth_date, phone, email."""
     get = (lambda k: u.get(k)) if isinstance(u, dict) else (lambda k: getattr(u, k, None))
-    out = [] if len((get("name") or "").split()) >= 2 else ["name"]
-    return out + [k for k in PROFILE[1:] if not get(k)]
+    out = [] if get("first_name") and get("last_name") else ["name"]
+    return out + [k for k in PROFILE[2:] if not get(k)]
 
 
-def _clean_profile(data: dict):
-    """Formats of the profile fields present in data (normalised in place); a required field can't be cleared."""
+def _clean_profile(data: dict, u: User | None = None):
+    """Formats of the profile fields present in data (normalised in place); a required field can't be cleared.
+    Names: first_name / last_name; a bare «name» (old callers) is split at the first space; name = «first last»."""
+    if data.get("name") and "first_name" not in data and "last_name" not in data:
+        data["first_name"], _, data["last_name"] = " ".join(str(data["name"]).split()).partition(" ")
     for k in PROFILE:
         if k in data and data[k] is not None and not isinstance(data[k], date):
             data[k] = str(data[k]).strip() or None
         if k in data and data[k] is None:
             raise DomainError("profile_required", f"Поле обязательно: {PROFILE_LABEL[k]}")
-    if "name" in data and len(data["name"].split()) < 2:
-        raise DomainError("bad_name", "Укажите имя и фамилию")
+    if "first_name" in data or "last_name" in data:
+        first = data.get("first_name", u.first_name if u else None)
+        data["name"] = " ".join(x for x in (first, data.get("last_name", u.last_name if u else None)) if x)
     if "phone" in data:
         digits = re.sub(r"\D", "", data["phone"])
         if re.search(r"[^\d\s+()\-.]", data["phone"]) or not 9 <= len(digits) <= 15:
@@ -143,7 +158,7 @@ def _clean_profile(data: dict):
         data["birth_date"] = bd
 
 
-PROFILE_LABEL = {"name": "имя и фамилия", "birth_date": "дата рождения", "phone": "телефон", "email": "email"}
+PROFILE_LABEL = {"name": "имя и фамилия", "first_name": "имя", "last_name": "фамилия", "birth_date": "дата рождения", "phone": "телефон", "email": "email"}
 
 
 def _check(data: dict):
@@ -177,9 +192,9 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
     pw = data.pop("password", None)
     _check(data)
     _guard(db, actor, None, data)
+    _clean_profile(data)
     if gaps := missing(data):
         raise DomainError("profile_required", "Заполните: " + ", ".join(PROFILE_LABEL[k] for k in gaps))
-    _clean_profile(data)
     if data.get("tg_id") and by_tg(db, data["tg_id"]):
         raise DomainError("conflict", "tg_id already registered")
     if data.get("login") and by_login(db, data["login"]):
@@ -206,7 +221,7 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None, full_pr
     pw = data.pop("password", None)
     _check(data)
     _guard(db, actor, u, data)
-    _clean_profile(data)
+    _clean_profile(data, u)
     if full_profile and any(k in data for k in PROFILE) and (
             gaps := missing({k: data.get(k, getattr(u, k)) for k in PROFILE})):
         raise DomainError("profile_required", "Заполните: " + ", ".join(PROFILE_LABEL[k] for k in gaps))
