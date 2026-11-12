@@ -172,7 +172,7 @@ class NotifyTest(unittest.TestCase):
         msg = self.last("sendMessage", 500, mark)
         for want in (f"Клиент выбрал время просмотра · заявка #{self.lid}", texts.when_long(at), "Ваке, ул. Каштановая, 12", "Агент: Георгий"):
             self.assertIn(want, msg["text"])
-        self.assertEqual(self.buttons(msg), [("📋 Открыть заявку", f"https://crm.test/m/leads/{self.lid}")])
+        self.assertEqual(self.buttons(msg), [("📋 Открыть заявку", f"https://crm.test/leads/{self.lid}")])
         self.assertFalse(self.fake.calls(chat=600, since=mark))  # the agent gets C8 contacts_to_agent instead
         with db.tx() as c:
             c.execute("UPDATE users SET tg_id = NULL WHERE id = ?", (self.op,))
@@ -188,7 +188,7 @@ class NotifyTest(unittest.TestCase):
         for want in (f"🆕 <b>Заявка #{self.lid}</b>", "👤 <b>Анна</b> · Telegram", "👥 2 человека", "💰 до $900",
                      "🏠 <b>Объект:</b> Ваке, ул. Каштановая, 12", "2 спальни · 78 м² · $850 · ❗️ эксклюзив", "Источник: канал агентства"):
             self.assertIn(want, card["text"])
-        self.assertEqual(self.buttons(card), [("✋ Взять заявку", f"lg:take:{self.lid}"), ("📋 Открыть в панели", f"https://crm.test/m/leads/{self.lid}")])
+        self.assertEqual(self.buttons(card), [("✋ Взять заявку", f"lg:take:{self.lid}"), ("📋 Открыть в панели", f"https://crm.test/leads/{self.lid}")])
         m = self.fake.mark()
         notify.lead_taken_group({**self.lead, "operator_id": self.op}, {"name": "Нино"})
         ed = self.last("editMessageText", -100777, m)
@@ -201,7 +201,7 @@ class NotifyTest(unittest.TestCase):
         c6 = self.last("sendMessage", 600, m)
         self.assertIn("от оператора Нино", c6["text"])
         self.assertNotIn("Анна", c6["text"])  # no client contacts before the time is chosen
-        self.assertEqual([b[1] for b in self.buttons(c6)], [f"https://crm.test/m/leads/{self.lid}"])
+        self.assertEqual([b[1] for b in self.buttons(c6)], [f"https://crm.test/leads/{self.lid}"])
         self.assertIn("👤 Агент: <b>Георгий</b>", self.last("editMessageText", -100777, m)["text"])
 
     def test_client_ack_edits_the_card(self):

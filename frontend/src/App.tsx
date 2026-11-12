@@ -8,15 +8,14 @@ import { AppLayout } from './layout/AppLayout';
 import { AdminPage } from './pages/Admin';
 import { CabinetPage } from './pages/Cabinet';
 import { CalcPage } from './pages/Calc';
-import { CalendarPage, MCalendar } from './pages/Calendar';
-import { ContractsPage, MContracts } from './pages/Contracts';
+import { CalendarPage } from './pages/Calendar';
+import { ContractsPage } from './pages/Contracts';
 import { DashboardPage } from './pages/Dashboard';
 import { DealsPage } from './pages/Deals';
 import { ExclusiveSignPage } from './pages/ExclusiveSign';
 import { InvitePage } from './pages/Invite';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
-import { MDeal, MDealView, MLead, MLeads, MMe, MNew, MNotFound, MProperties, MProperty, MReports, MobileLayout } from './pages/Mobile';
 import { ClientPage, ClientsPage, OwnersPage } from './pages/People';
 import { ReportsPage } from './pages/Reports';
 import { TeamPage } from './pages/Team';
@@ -42,9 +41,20 @@ function PropertyRedirect() {
   const { id } = useParams();
   return <Navigate to={`/objects/${id}`} replace />;
 }
-function MPropertyRedirect() {
-  const { id } = useParams();
-  return <Navigate to={`/m/properties/${id}`} replace />;
+/** Old Mini App links (/m/..., still on buttons in Telegram chats) → the same page of the main site. */
+function mPath(path: string, search: string): string {
+  const p = path.replace(/^\/m\/?/, '').replace(/\/$/, '');
+  const id = p.match(/^(?:properties|objects|deals)\/(\d+)$/)?.[1];
+  if (/^(properties|objects)\/\d+$/.test(p)) return `/objects/${id}${search}`;
+  if (/^deals\/\d+$/.test(p)) return `/deals?open=${id}`;
+  if (p === 'new') return '/objects?tab=new';
+  if (p === 'properties') return `/objects${search}`;
+  if (p === 'deal' || p === 'deals') return `/deals/new${search}`;
+  return `/${p}${search}`;  // '' (panel) → dashboard; leads, leads/:id, deals/new, reports, me, contracts, calendar as is
+}
+function MRedirect() {
+  const loc = useLocation();
+  return <Navigate to={mPath(loc.pathname, loc.search)} replace />;
 }
 function NotFound() {
   return (
@@ -63,24 +73,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/sign/:token" element={<ExclusiveSignPage />} />
       <Route path="/invite/:token" element={<InvitePage />} />
-      <Route path="/m" element={<RequireAuth><MobileLayout /></RequireAuth>}>
-        <Route index element={<Navigate to="/m/leads" replace />} />
-        <Route path="leads" element={<MLeads />} />
-        <Route path="leads/:id" element={<MLead />} />
-        <Route path="properties" element={<MProperties />} />
-        <Route path="properties/:id" element={<MProperty />} />
-        <Route path="new" element={<MNew />} />
-        <Route path="deal" element={<MDeal />} />
-        <Route path="deals" element={<Navigate to="/m/deal" replace />} />
-        <Route path="deals/new" element={<MDeal />} />
-        <Route path="deals/:id" element={<MDealView />} />
-        <Route path="objects/:id" element={<MPropertyRedirect />} />
-        <Route path="reports" element={<MReports />} />
-        <Route path="me" element={<MMe />} />
-        <Route path="contracts" element={<MContracts />} />
-        <Route path="calendar" element={<MCalendar />} />
-        <Route path="*" element={<MNotFound />} />
-      </Route>
+      <Route path="/m/*" element={<MRedirect />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route index element={<DashboardPage />} />
         <Route path="objects" element={<ObjectsPage />} />

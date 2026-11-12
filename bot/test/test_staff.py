@@ -65,7 +65,7 @@ class BotMenuTest(Base):
             core.client("tg", 42)
             for chat in (100, 42, 100, 42):
                 asyncio.run(bot.sync_menu(FakeBot(), chat))
-            self.assertEqual(calls, [(100, "web_app", "https://crm.example.com/m/")])  # once; the client untouched
+            self.assertEqual(calls, [(100, "web_app", "https://crm.example.com/")])  # once; the client untouched
             with db.tx() as c:
                 c.execute("UPDATE users SET is_active = false WHERE tg_id = 100")
             asyncio.run(bot.sync_menu(FakeBot(), 100))

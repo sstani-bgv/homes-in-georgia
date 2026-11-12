@@ -41,6 +41,10 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* Telegram Mini App (AuthContext adds .tg): the document itself never scrolls — on clients without
+   disableVerticalSwipes a pull-down at the page top collapses the app — #root is the scroll container instead */
+html.tg, html.tg body { height: var(--tg-viewport-stable-height, 100vh); overflow: hidden; overscroll-behavior: none; }
+html.tg #root { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 body {
   margin: 0;
   font-family: var(--font);
