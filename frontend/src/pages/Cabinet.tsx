@@ -1,22 +1,54 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, CalendarClock, CalendarDays, FileText } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { PropertyStatus } from '../api/types';
+import type { PropertyStatus, User } from '../api/types';
 import { FIELD_FILTER } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PropertyStatusBadge } from '../components/domain';
-import { Avatar, Badge, Card, Drawer, Empty, ErrorBox, Loading, PageHead, Progress, Seg, Stat, Tabs } from '../components/ui';
+import { errText, useToast } from '../components/toast';
+import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Progress, Seg, Stat, Tabs } from '../components/ui';
 import { MyLeadsList } from '../features/leads/LeadBoard';
 import { PropertyList } from '../features/properties/lists';
-import { PROPERTY_STATUS, ROLE_LABEL, fmtDate, fmtSlot, money, monthLabel } from '../lib/format';
+import { PROPERTY_STATUS, ROLE_LABEL, fmtDate, fmtSlot, money, monthLabel, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
 import { CalendarView } from './Calendar';
 import { DealStatusBadge, DealView, DealsList } from './Deals';
 import { LevelProgress } from './Team';
 
 const CNT: [string, string][] = [['photo', 'Фото'], ['showing', 'Показы'], ['stickers', 'Расклейка'], ['rental', 'Сдачи']];
+
+export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
+const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+/** «05-04» / «1990-05-04» → «4 мая» (day and month only: the year is private) */
+export const birthdayLabel = (b?: string | null) => { const m = b?.match(/(\d\d)-(\d\d)$/); return m ? `${Number(m[2])} ${MONTHS[Number(m[1]) - 1]}` : ''; };
+
+/** «Заполните профиль» (Irakli 11-12): the user fills his own missing name / birth date / phone / email. */
+function ProfilePrompt({ u }: { u: User }) {
+  const { setMe } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [f, setF] = useState({ name: u.name || '', birth_date: u.birth_date || '', phone: u.phone || '', email: u.email || '' });
+  const save = useMutation({
+    mutationFn: () => api.auth.updateMe({ name: f.name.trim(), birth_date: f.birth_date || null, phone: f.phone || null, email: f.email.trim() || null }),
+    onSuccess: (me) => { setMe(me); qc.invalidateQueries({ queryKey: ['cabinet'] }); toast('Профиль сохранён'); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const ok = f.name.trim().split(/\s+/).length >= 2 && !!f.birth_date && f.phone.replace(/\D/g, '').length >= 9 && EMAIL_RE.test(f.email.trim());
+  return (
+    <Card label="Профиль" title="Заполните профиль">
+      <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Нужно агентству: чтобы связаться с вами и не пропустить ваш день рождения. Email видят только администраторы.</div>
+      <div className="form-grid">
+        <Field label="Имя и фамилия"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Заза Беридзе" /></Field>
+        <Field label="Дата рождения"><Input type="date" value={f.birth_date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, birth_date: e.target.value })} /></Field>
+        <Field label="Телефон"><Input type="tel" inputMode="tel" value={f.phone} onFocus={phoneFocus} onBlur={phoneBlur} onChange={(e) => { const v = phoneInput(e); setF((x) => ({ ...x, phone: v })); }} /></Field>
+        <Field label="Email"><Input type="email" inputMode="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="name@mail.com" /></Field>
+      </div>
+      <div className="mt"><Button disabled={!ok} loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button></div>
+    </Card>
+  );
+}
 
 /** userId: staff looking at an agent's cabinet (undefined = one's own); tabbed: the desktop «Обзор» tab, where
  * objects and deals have their own tabs (the Mini App keeps the short lists here). */
@@ -39,11 +71,14 @@ export function CabinetView({ base = '', userId, tabbed }: { base?: string; user
           <div className="grow">
             <div className="label">{u ? ROLE_LABEL[u.role] : ''}</div>
             <h2 style={{ color: '#fff', fontSize: 22, fontWeight: 900 }}>{u?.name}</h2>
+            {u?.birthday && <div className="label" style={{ marginTop: 2 }}>🎂 {birthdayLabel(u.birthday)}</div>}
           </div>
           {lvl && <div style={{ textAlign: 'right' }}><div className="stat-value" style={{ marginTop: 0 }}>{lvl.level}%</div><div className="label">уровень</div></div>}
         </div>
         {lvl && <div className="mt-lg"><LevelProgress deals={lvl.exclusive_deals} level={lvl.level} /><div className="label mt">{lvl.exclusive_deals} эксклюзивных сделок</div></div>}
       </div>
+
+      {u && u.id === user?.id && !!u.profile_missing?.length && <ProfilePrompt u={u} />}
 
       {cur && (
         <div className="grid g4">

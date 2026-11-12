@@ -5,6 +5,7 @@ import {
   normProperty, normRecommend, normReport,
 } from './normalize';
 import type {
+  Birthday,
   AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, LeadStatus, DealPrefill, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
   Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
@@ -26,6 +27,8 @@ export const api = {
     telegramWebApp: (init_data: string) => then(http.post<AuthOut>('/auth/telegram-webapp', { init_data }), normAuth),
     telegramLogin: (data: Record<string, unknown>) => then(http.post<AuthOut>('/auth/telegram-login', data), normAuth),
     me: () => http.get<User>('/auth/me'),
+    /** the user's own profile (cabinet «Заполните профиль») */
+    updateMe: (b: Pick<Partial<User>, 'name' | 'birth_date' | 'phone' | 'email'>) => http.patch<User>('/auth/me', b),
   },
 
   users: {
@@ -37,6 +40,8 @@ export const api = {
     /** #Zaza, or #ArturB when another agent has that first name (without '#') */
     suggestTag: (name: string, uid?: number) => http.get<{ tag: string }>('/users/agent-tag-suggestion', { name, uid }),
   },
+
+  birthdays: () => http.get<{ items: Birthday[] }>('/birthdays'),
 
   /** staff: any agent's cabinet (user_id); the backend refuses another user's for everyone else */
   cabinet: (userId?: number) => then(http.get<Cabinet>('/me/cabinet', { user_id: userId }), normCabinet),

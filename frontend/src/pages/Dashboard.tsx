@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Building2, CircleUser, Clock, Coins, Handshake, Repeat2, Send } from 'lucide-react';
+import { ArrowRight, Building2, Cake, CircleUser, Clock, Coins, Handshake, Repeat2, Send } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Lead, Property } from '../api/types';
@@ -135,6 +135,29 @@ function MyTasks({ agent = false }: { agent?: boolean }) {
   );
 }
 
+const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+/** «Дни рождения» (Irakli 11-12): today and the next 7 days; the age only comes for admins. */
+function Birthdays() {
+  const { data } = useQuery({ queryKey: ['birthdays'], queryFn: api.birthdays });
+  const items = data?.items || [];
+  return (
+    <Card label="Команда" title="Дни рождения">
+      {items.length === 0 ? <Empty text="В ближайшую неделю нет" /> : items.map((b) => (
+        <div key={b.id} className="list-row">
+          <Avatar name={b.name} src={b.photo_url} />
+          <div className="grow">
+            <b>{b.name}</b>
+            <div className="muted" style={{ fontSize: 12 }}>{b.day} {MONTHS[b.month - 1]}{b.age ? ` · ${b.age} лет` : ''}</div>
+          </div>
+          {b.days_left === 0 ? <span className="badge" style={{ background: 'var(--accent)', color: '#fff' }}><Cake size={12} /> сегодня</span>
+            : <span className="badge">{b.days_left === 1 ? 'завтра' : `через ${b.days_left} дн`}</span>}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const { user, isStaff } = useAuth();
   const { data, isLoading, error } = useQuery({ queryKey: ['dashboard'], queryFn: api.analytics.dashboard, refetchInterval: 60_000 });
@@ -149,6 +172,12 @@ export function DashboardPage() {
   return (
     <>
       <PageHead label={`Добрый день, ${user?.name || ''}`} title="Главная" />
+      {!!user?.profile_missing?.length && (
+        <Link to="/me" className="card row" style={{ padding: '10px 14px', marginBottom: 14, color: 'inherit', textDecoration: 'none', borderColor: 'var(--accent)' }}>
+          <span className="grow"><b>Заполните профиль</b> <span className="muted">· имя и фамилия, дата рождения, телефон, email</span></span>
+          <ArrowRight size={16} color="var(--faint)" />
+        </Link>
+      )}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : data && (
         <>
           <div className={`grid ${['deals', 'commission', 'objects', 'reposts'].filter(show).length > 3 ? 'g5' : 'g4'}`}>
@@ -182,6 +211,7 @@ export function DashboardPage() {
               )}
             </div>
             <div className="col gap-lg">
+              <Birthdays />
               {show('top_agents') && (
                 <Card label="Лидеры" title="Топ-5 агентов" actions={<Link to="/team" className="label">Все</Link>}>
                   {(data.top_agents || []).length === 0 ? <Empty /> : (data.top_agents || []).slice(0, 5).map((a, i) => {

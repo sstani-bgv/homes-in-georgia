@@ -11,7 +11,7 @@ from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
 from app.models import ChannelPost, Client, Deal, Lead, Listing, Property, Reaction, Report, User, at_least, is_field
 from app.services import clients as client_card
-from app.services import deals, leads, properties, reports, users
+from app.services import birthdays, deals, leads, properties, reports, users
 from app.services.common import TZ, get_or_404, jload, now
 from app.services.errors import forbidden
 
@@ -32,6 +32,7 @@ class UserIn(BaseModel):
     password: str | None = None
     photo_url: str | None = None
     birth_date: date | None = None
+    email: str | None = None
     plans: dict | None = None
     agent_tag: str | None = None
     works_as_agent: bool = False
@@ -51,6 +52,7 @@ class UserPatch(BaseModel):
     password: str | None = None
     photo_url: str | None = None
     birth_date: date | None = None
+    email: str | None = None
     plans: dict | None = None
     exclusive_deals: int | None = None
     agent_tag: str | None = None
@@ -68,7 +70,16 @@ def list_users(role: str | None = None, active: bool | None = None, db: Session 
     if not at_least(user, "operator"):  # agents see the team (names/levels), not logins
         return {"items": [{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "field": is_field(u),
                            "level": users.effective_level(u)} for u in rows if u.is_active], "total": len(rows)}
-    return {"items": [user_out(u) for u in rows], "total": len(rows)}
+    return {"items": [user_out(u, user) for u in rows], "total": len(rows)}
+
+
+@router.get("/birthdays")
+def upcoming_birthdays(days: int = 7, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Дни рождения» on «Главная»: active employees, today .. +days; day and month for all, the age for admins."""
+    adm = at_least(user, "admin")
+    return {"items": [{"id": x["id"], "name": x["name"], "photo_url": x["photo_url"], "day": x["date"].day,
+                       "month": x["date"].month, "days_left": x["days_left"], "age": x["age"] if adm else None}
+                      for x in birthdays.upcoming(db, now().astimezone(TZ).date(), min(max(days, 0), 31))]}
 
 
 @router.get("/users/agent-tag-suggestion")
@@ -80,17 +91,17 @@ def agent_tag_suggestion(name: str, uid: int | None = None, db: Session = Depend
 @router.post("/users")
 def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     data = body.model_dump(exclude_none=True)
-    return user_out(users.create(db, data, user))
+    return user_out(users.create(db, data, user), user)
 
 
 @router.patch("/users/{uid}")
 def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
-    return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user))
+    return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user), user)
 
 
 @router.post("/users/{uid}/promote")
 def promote(uid: int, body: PromoteIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
-    return user_out(users.promote(db, uid, body.level, user))
+    return user_out(users.promote(db, uid, body.level, user), user)
 
 
 @router.get("/users/{uid}/stats")
@@ -101,7 +112,7 @@ def user_stats(uid: int, month: str | None = None, db: Session = Depends(get_db,
     y, m = reports.month_bounds(month)
     mo = f"{m}/{y}"
     month_deals = list(db.scalars(select(Deal).where(Deal.agent_id == uid, Deal.month == mo, Deal.status != "cancelled")))
-    return {"user": user_out(u), **users.level_info(u), "month": mo,
+    return {"user": user_out(u, user), **users.level_info(u), "month": mo,
             "deals_month": len(month_deals), "agent_amount_month": sum(float(d.agent_amount or 0) for d in month_deals),
             "deals_total": db.scalar(select(func.count()).where(Deal.agent_id == uid, Deal.status != "cancelled")),
             "properties": dict(db.execute(select(Property.status, func.count()).where(Property.agent_id == uid)
@@ -144,7 +155,7 @@ def cabinet(user_id: int | None = None, db: Session = Depends(get_db, scope="fun
                                  func.count().filter(ChannelPost.date >= week_ago))
                           .where(ChannelPost.agent_id == me.id)).one()
     return {
-        "user": user_out(me), "level": users.level_info(me), "month": mo,
+        "user": user_out(me, user), "level": users.level_info(me), "month": mo,
         "counters": next((c for c in reports.counters(db, mo) if c["user"]["id"] == me.id), None),
         "month_summary": {"deals": len(month_deals), "agent_amount": sum(float(d.agent_amount or 0) for d in month_deals),
                           "commission": sum(float(d.commission_total or 0) for d in month_deals)},

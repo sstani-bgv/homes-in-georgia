@@ -29,7 +29,14 @@ export interface User {
   is_active: boolean;
   login?: string | null;
   photo_url?: string | null;
+  /** full date: admins and the user himself only (else null) */
   birth_date?: string | null;
+  /** «MM-DD», for everyone who sees the user */
+  birthday?: string | null;
+  /** admins and the user himself only */
+  email?: string | null;
+  /** profile fields still empty: name (first + last) / birth_date / phone / email */
+  profile_missing?: ('name' | 'birth_date' | 'phone' | 'email')[];
   exclusive_deals: number;
   plans?: Plans;
   /** the agent's post hashtag without '#' (Zaza, ArturB), unique */
@@ -623,3 +630,6 @@ export interface ListingsStats {
   active: { total: number; avg_price: number; excl_pct: number; by_rooms: Record<string, number>; top_agents: { name: string; count: number }[] };
   weekly: { current: WeeklyListings; last_week: WeeklyListings; week_start: string };
 }
+
+/** «Дни рождения» on «Главная»: active employees, today .. +7 days; age for admins only */
+export interface Birthday { id: number; name: string; photo_url?: string | null; day: number; month: number; days_left: number; age?: number | null }

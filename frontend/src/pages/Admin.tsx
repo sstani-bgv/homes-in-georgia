@@ -8,10 +8,12 @@ import { ADMIN_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
-import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneInput } from '../lib/format';
+import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
+import { EMAIL_RE, birthdayLabel } from './Cabinet';
 import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
 
+const MISSING: Record<string, string> = { name: 'фамилия', birth_date: 'ДР', phone: 'телефон', email: 'email' };
 const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit'];
 
 function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () => void }) {
@@ -24,6 +26,7 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
     mutationFn: () => {
       const body = { name: f.name, role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
         tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, login: f.login || null, plans: f.plans,
+        birth_date: f.birth_date || null, email: f.email?.trim() || null,
         agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent, ...(f.password ? { password: f.password } : {}) };
       return user ? api.users.update(user.id, body) : api.users.create(body);
     },
@@ -34,15 +37,20 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   const suggest = useMutation({ mutationFn: () => api.users.suggestTag(f.name || '', user?.id), onSuccess: (r) => set('agent_tag', r.tag), onError: (e) => toast(errText(e), true) });
   const toggleDistrict = (d: string) => set('districts', (f.districts || []).includes(d) ? (f.districts || []).filter((x) => x !== d) : [...(f.districts || []), d]);
   const plans = f.plans || { photo: 15, showing: 15, stickers: 15, rental: 15 };
+  // required for every employee (Irakli 11-12); the backend checks the same
+  const gaps = [(f.name || '').trim().split(/\s+/).length < 2 && 'имя и фамилия', !f.birth_date && 'дата рождения',
+    (f.phone || '').replace(/\D/g, '').length < 9 && 'телефон', !EMAIL_RE.test((f.email || '').trim()) && 'email'].filter(Boolean);
   return (
     <div className="col gap-lg">
       <div className="form-grid">
-        <Field label="Имя" className="span2"><Input value={f.name || ''} onChange={(e) => set('name', e.target.value)} /></Field>
+        <Field label="Имя и фамилия *" className="span2"><Input value={f.name || ''} placeholder="Заза Беридзе" onChange={(e) => set('name', e.target.value)} /></Field>
+        <Field label="Дата рождения *"><Input type="date" value={f.birth_date || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set('birth_date', e.target.value || null)} /></Field>
+        <Field label="Email *" hint="Видят только администраторы"><Input type="email" inputMode="email" value={f.email || ''} placeholder="name@mail.com" onChange={(e) => set('email', e.target.value)} /></Field>
         <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
         <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
-        <Field label="Телефон"><Input value={f.phone || ''} onChange={(e) => set('phone', phoneInput(e))} inputMode="tel" /></Field>
+        <Field label="Телефон *"><Input type="tel" value={f.phone || ''} onFocus={phoneFocus} onBlur={phoneBlur} onChange={(e) => set('phone', phoneInput(e))} inputMode="tel" /></Field>
         <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
           <div className="row gap-sm">
             <Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => set('agent_tag', e.target.value.replace(/^#+/, '') || null)} />
@@ -75,8 +83,9 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Switch checked={!!f.works_as_agent} onChange={(v) => set('works_as_agent', v)} label="Работает как агент: заявки, свои объекты, рейтинг агентов" />
       )}
       <Switch checked={!!f.is_active} onChange={(v) => set('is_active', v)} label="Активен" />
+      {gaps.length > 0 && <div style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 600 }}>Заполните: {gaps.join(', ')}</div>}
       <div className="row row-wrap">
-        <Button disabled={!f.name} loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button>
+        <Button disabled={gaps.length > 0} loading={save.isPending} onClick={() => save.mutate()}>Сохранить</Button>
         {user?.role === 'recruit' && <Button variant="secondary" loading={promote.isPending} onClick={() => promote.mutate()}>Перевести в агенты</Button>}
       </div>
     </div>
@@ -93,10 +102,17 @@ function Users() {
   const items = itemsOf(data);
   // active on top; the ones who left are folded under «Неактивные (N)» (Stanislav 11-11)
   const [showOff, setShowOff] = useState(false);
-  const active = items.filter((u) => u.is_active), inactive = items.filter((u) => !u.is_active);
+  const [gapsOnly, setGapsOnly] = useState(false);
+  const shown = gapsOnly ? items.filter((u) => u.profile_missing?.length) : items;
+  const active = shown.filter((u) => u.is_active), inactive = shown.filter((u) => !u.is_active);
+  const incomplete = items.filter((u) => u.is_active && u.profile_missing?.length).length;
   const row = (u: User) => (
                 <tr key={u.id} className="clickable" onClick={() => setOpen(u)}>
-                  <td><div className="row"><Avatar name={u.name} src={u.photo_url} /><b>{u.name}</b></div></td>
+                  <td><div className="row"><Avatar name={u.name} src={u.photo_url} />
+                    <div><b>{u.name}</b>
+                      {u.birthday && <div className="faint" style={{ fontSize: 12 }}>🎂 {birthdayLabel(u.birthday)}</div>}
+                      {!!u.profile_missing?.length && <div><Badge tone="warn">нет: {u.profile_missing.map((k) => MISSING[k]).join(', ')}</Badge></div>}
+                    </div></div></td>
                   <td><Badge tone={ADMIN_ROLES.includes(u.role) ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
                   <td className="num">{u.level ? `${u.level}%` : '—'}</td>
                   <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
@@ -108,7 +124,10 @@ function Users() {
     <>
       <div className="row row-between row-wrap" style={{ marginBottom: 14 }}>
         <Seg value={role} onChange={setRole} options={[{ value: '', label: 'Все' }, ...ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))]} />
-        <Button onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
+        <div className="row row-wrap">
+          {incomplete > 0 && <button type="button" className={`chip ${gapsOnly ? 'active' : ''}`} onClick={() => setGapsOnly((v) => !v)}>Не заполнен профиль: {incomplete}</button>}
+          <Button onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
+        </div>
       </div>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
         <div className="card table-wrap">

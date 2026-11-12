@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.api.deps import create_token, current_user
 from app.db import get_db
-from app.models import User, is_field
+from datetime import date
+
+from app.models import User, at_least, is_field
 from app.services import users
 from app.services.common import now
 from app.services.errors import DomainError
@@ -53,11 +55,15 @@ def verify_login_widget(data: dict, bot_token: str, max_age: int = MAX_AGE) -> d
     return fields
 
 
-def user_out(u: User) -> dict:
-    return {"id": u.id, "tg_id": u.tg_id, "username": u.username, "name": u.name, "phone": u.phone, "role": u.role,
+def user_out(u: User, viewer: User | None = None) -> dict:
+    """viewer None = the user himself (/me, login). Email and the birth year (age) only to admins and the user."""
+    own = viewer is None or viewer.id == u.id or at_least(viewer, "admin")
+    bd = u.birth_date
+    return {"email": u.email if own else None, "birthday": bd.strftime("%m-%d") if bd else None,
+            "profile_missing": users.missing(u), "id": u.id, "tg_id": u.tg_id, "username": u.username, "name": u.name, "phone": u.phone, "role": u.role,
             "level": users.effective_level(u) if is_field(u) else u.level, "mentor_id": u.mentor_id,
             "districts": u.districts, "is_active": u.is_active, "login": u.login, "photo_url": u.photo_url,
-            "birth_date": u.birth_date.isoformat() if u.birth_date else None, "exclusive_deals": u.exclusive_deals,
+            "birth_date": bd.isoformat() if bd and own else None, "exclusive_deals": u.exclusive_deals,
             "plans": u.plans, "agent_tag": u.agent_tag, "works_as_agent": u.works_as_agent, "field": is_field(u), "created_at": u.created_at.isoformat() if u.created_at else None,
             "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None}
 
@@ -141,3 +147,16 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db, scope="
 @router.get("/me")
 def me(user: User = Depends(current_user)):
     return user_out(user)
+
+
+class ProfileIn(BaseModel):
+    name: str | None = None
+    birth_date: date | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+@router.patch("/me")
+def patch_me(body: ProfileIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """The user fills his own profile in the cabinet («Заполните профиль»), a field at a time if he likes."""
+    return user_out(users.update(db, user.id, body.model_dump(exclude_unset=True), None, full_profile=False))

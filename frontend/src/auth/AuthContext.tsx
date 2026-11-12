@@ -11,6 +11,8 @@ interface AuthState {
   error: string | null;
   signIn: (out: AuthOut) => void;
   signOut: () => void;
+  /** the user after editing his own profile (cabinet) */
+  setMe: (u: User) => void;
   hasRole: (...roles: Role[]) => boolean;
   isStaff: boolean;
   isAdmin: boolean;
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthState>(() => {
     const hasRole = (...roles: Role[]) => !!user && roles.includes(user.role);
     return {
-      user, loading, error, signIn, signOut, hasRole,
+      user, loading, error, signIn, signOut, setMe: setUser, hasRole,
       isStaff: atLeast(user, 'operator'),
       isAdmin: atLeast(user, 'admin'),
     };

@@ -91,6 +91,10 @@ def sent(monkeypatch):
     return rec
 
 
+# a complete employee profile (users.PROFILE): required to create a user / edit his profile through the API
+PROFILE = {"birth_date": "1990-05-04", "phone": "+995 599 111 222", "email": "team@homes.ge"}
+
+
 def make_user(db, role="agent", name=None, **kw):
     u = User(name=name or f"{role} {db.query(User).count() + 1}", role=role, **kw)
     if kw.get("password_hash") is None and kw.get("login"):

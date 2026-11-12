@@ -1,5 +1,6 @@
 """Users, roles, agent levels (apps-script getAgentLevel / getNextLevelAt / promoteRecruit)."""
 import re
+from datetime import date
 
 import bcrypt
 from sqlalchemy import func, select
@@ -11,7 +12,10 @@ from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
 EDITABLE = ("name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
-            "birth_date", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent")
+            "birth_date", "email", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent")
+# the employee profile Irakli asked for (11-12): «чтобы дни рождения не пропускали»
+PROFILE = ("name", "birth_date", "phone", "email")
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
 TAG_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{1,31}")
 _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюяაბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ",
                "a b v g d e e zh z i y k l m n o p r s t u f kh ts ch sh shch _ y _ e yu ya "
@@ -108,6 +112,40 @@ def tag_of(user: User | None) -> str:
     return f"#{user.agent_tag or user.name.split()[0]}"
 
 
+def missing(u) -> list[str]:
+    """Profile fields still to fill: name (first + last), birth_date, phone, email."""
+    get = (lambda k: u.get(k)) if isinstance(u, dict) else (lambda k: getattr(u, k, None))
+    out = [] if len((get("name") or "").split()) >= 2 else ["name"]
+    return out + [k for k in PROFILE[1:] if not get(k)]
+
+
+def _clean_profile(data: dict):
+    """Formats of the profile fields present in data (normalised in place); a required field can't be cleared."""
+    for k in PROFILE:
+        if k in data and data[k] is not None and not isinstance(data[k], date):
+            data[k] = str(data[k]).strip() or None
+        if k in data and data[k] is None:
+            raise DomainError("profile_required", f"Поле обязательно: {PROFILE_LABEL[k]}")
+    if "name" in data and len(data["name"].split()) < 2:
+        raise DomainError("bad_name", "Укажите имя и фамилию")
+    if "phone" in data:
+        digits = re.sub(r"\D", "", data["phone"])
+        if re.search(r"[^\d\s+()\-.]", data["phone"]) or not 9 <= len(digits) <= 15:
+            raise DomainError("bad_phone", "Телефон: номер целиком, например +995 599 123 456")
+    if "email" in data:
+        data["email"] = data["email"].lower()
+        if not EMAIL_RE.fullmatch(data["email"]):
+            raise DomainError("bad_email", "Неверный email")
+    if "birth_date" in data:
+        bd = data["birth_date"] if isinstance(data["birth_date"], date) else date.fromisoformat(data["birth_date"])
+        if not date(1920, 1, 1) <= bd <= date.today():
+            raise DomainError("bad_birth_date", "Неверная дата рождения")
+        data["birth_date"] = bd
+
+
+PROFILE_LABEL = {"name": "имя и фамилия", "birth_date": "дата рождения", "phone": "телефон", "email": "email"}
+
+
 def _check(data: dict):
     if "role" in data and data["role"] not in ROLES:
         raise DomainError("bad_role", f"role must be one of {ROLES}")
@@ -139,8 +177,9 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
     pw = data.pop("password", None)
     _check(data)
     _guard(db, actor, None, data)
-    if not data.get("name"):
-        raise DomainError("name_required", "name is required")
+    if gaps := missing(data):
+        raise DomainError("profile_required", "Заполните: " + ", ".join(PROFILE_LABEL[k] for k in gaps))
+    _clean_profile(data)
     if data.get("tg_id") and by_tg(db, data["tg_id"]):
         raise DomainError("conflict", "tg_id already registered")
     if data.get("login") and by_login(db, data["login"]):
@@ -159,12 +198,18 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
     return u
 
 
-def update(db: Session, uid: int, data: dict, actor: User | None = None) -> User:
+def update(db: Session, uid: int, data: dict, actor: User | None = None, full_profile: bool = True) -> User:
+    """full_profile: an edit that touches the profile must leave it complete (the admin's form); the user's own
+    cabinet (full_profile=False) may fill it a field at a time. Edits that don't touch it (Активен, role) always pass."""
     u = get_or_404(db, User, uid, "user")
     data = dict(data)
     pw = data.pop("password", None)
     _check(data)
     _guard(db, actor, u, data)
+    _clean_profile(data)
+    if full_profile and any(k in data for k in PROFILE) and (
+            gaps := missing({k: data.get(k, getattr(u, k)) for k in PROFILE})):
+        raise DomainError("profile_required", "Заполните: " + ", ".join(PROFILE_LABEL[k] for k in gaps))
     if data.get("tg_id"):
         other = by_tg(db, data["tg_id"])
         if other is not None and other.id != u.id:

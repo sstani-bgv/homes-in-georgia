@@ -2,15 +2,15 @@
 import argparse
 import logging
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.config import settings as env
 from app.db import SessionLocal
 from app.models import Deal, Job, Lead, Property
-from app.services import catalog, jobs, leads
-from app.services.common import log_event, now
+from app.services import birthdays, catalog, jobs, leads
+from app.services.common import TZ, log_event, now
 from app.telegram import notify
 
 log = logging.getLogger("app.worker")
@@ -129,6 +129,18 @@ def contract_drive(db: Session, job: Job):
     return contracts.drive_upload(db, _ref_id(job))
 
 
+@handler("birthdays")
+def birthdays_job(db: Session, job: Job):
+    """09:00 Tbilisi: today's birthdays → the team, tomorrow's → a reminder to admins (services/birthdays.py)."""
+    day = date.fromisoformat(job.ref)
+    if day != now().astimezone(TZ).date():
+        return "stale"  # the worker was down that morning: no belated greetings
+    if today := birthdays.upcoming(db, day, 0):
+        notify.birthdays_today(today)
+    if tomorrow := [x for x in birthdays.upcoming(db, day, 1) if x["days_left"] == 1]:
+        notify.birthdays_tomorrow(tomorrow)
+
+
 @handler("review_batch")
 def review_batch(db: Session, job: Job):
     return "noop"  # the bot's own review loop handles catalog moderation cards
@@ -170,6 +182,8 @@ def run_job(db: Session, job: Job) -> str:
 def tick(limit: int = 50) -> dict:
     """One pass: claim due jobs one at a time (each in its own transaction, row-locked, SKIP LOCKED)."""
     stats: dict[str, int] = {}
+    with SessionLocal() as db:
+        birthdays.ensure_job(db)
     for _ in range(limit):
         with SessionLocal() as db:
             due = jobs.due(db, limit=1)

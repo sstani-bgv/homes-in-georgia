@@ -15,7 +15,7 @@ from app.importers import sheets_csv
 from app.models import Deal, Evaluation, Job, Owner, Report, TickerMessage, User
 from app.services import deals, evaluations, jobs, reports, users
 from app.services.errors import DomainError
-from tests.conftest import REPO, auth, make_user
+from tests.conftest import PROFILE, REPO, auth, make_user
 
 BOT_TOKEN = "123456:TEST-TOKEN"
 
@@ -136,7 +136,7 @@ def test_role_checks(db, client):
     assert client.get("/api/settings", headers=auth(ag)).status_code == 403
     assert client.post("/api/users", json={"name": "X"}, headers=auth(ag)).status_code == 403
     admin = make_user(db, "admin")
-    r = client.post("/api/users", json={"name": "Новый", "role": "recruit", "mentor_id": ag.id}, headers=auth(admin))
+    r = client.post("/api/users", json={**PROFILE, "name": "Новый Рекрут", "role": "recruit", "mentor_id": ag.id}, headers=auth(admin))
     assert r.status_code == 200
     r = client.post(f"/api/users/{r.json()['id']}/promote", json={"level": 50}, headers=auth(admin))
     assert r.json()["role"] == "agent"

@@ -1092,6 +1092,39 @@ def report_posted(report):
             tg.send(chat, p["text"], thread_id=topic)
 
 
+MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
+          "декабря")
+
+
+def _bday_who(x, age=False):
+    tag = f" (@{e(x['username'])})" if x.get("username") else ""
+    return f"<b>{e(x['name'])}</b>{tag}" + (f", {x['age']}" if age else "")
+
+
+@safe
+def birthdays_today(people):
+    """The morning greeting: WORK_GROUP_CHAT_ID topic TOPIC_GENERAL (the team's work group, where the reports go);
+    without a work group, every active employee in private. Day only, no age (privacy)."""
+    text = "🎂 <b>Сегодня день рождения</b>\n" + "\n".join(f"🎉 {_bday_who(x)}" for x in people) + "\n\nПоздравляем! 🥳"
+    chat, topic = chat_and_topic("WORK_GROUP_CHAT_ID", "TOPIC_GENERAL")
+    if chat:
+        return tg.send(chat, text, thread_id=topic)
+    mine = {str(x.get("tg_id")) for x in people}
+    for t in store.staff_tg_ids(("superadmin", "admin", "operator", "agent", "recruit")):
+        if str(t) not in mine:
+            tg.send(t, text)
+
+
+@safe
+def birthdays_tomorrow(people):
+    """The day-before reminder, to admins and superadmins in private (with the age)."""
+    d = people[0]["date"]
+    text = (f"🎁 <b>Завтра, {d.day} {MONTHS[d.month - 1]}, день рождения</b>\n"
+            + "\n".join(f"• {_bday_who(x, age=True)}" for x in people) + "\n\nНе забудьте поздравить.")
+    for t in store.staff_tg_ids(("admin", "superadmin")):
+        tg.send(t, text)
+
+
 def lead_btn(lid):
     return lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]])
 

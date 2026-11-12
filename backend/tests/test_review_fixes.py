@@ -10,7 +10,7 @@ from app.models import Deal, Job, Lead, LeadSlot, Owner, Property
 from app.services import deals, jobs, leads, properties
 from app.services.dedup import address_match, extract_phones, phone_match
 from app.services.errors import DomainError
-from tests.conftest import auth, make_client, make_client_listing, make_listing, make_user
+from tests.conftest import PROFILE, auth, make_client, make_client_listing, make_listing, make_user
 from tests.test_lead_stages import signed_contract
 
 
@@ -279,7 +279,7 @@ def test_settings_and_user_validation(db, client):
     b = make_user(db, "agent", tg_id=222)
     assert client.patch(f"/api/users/{b.id}", json={"tg_id": 111}, headers=auth(admin)).status_code == 409
     assert client.patch(f"/api/users/{b.id}", json={"login": "A1"}, headers=auth(admin)).status_code == 409
-    assert client.patch(f"/api/users/{a.id}", json={"tg_id": 111, "name": "Same"}, headers=auth(admin)).status_code == 200
+    assert client.patch(f"/api/users/{a.id}", json={**PROFILE, "tg_id": 111, "name": "Same Name"}, headers=auth(admin)).status_code == 200
 
 
 # ---------------------------------------------------------------- importer

@@ -4,7 +4,7 @@ import pytest
 
 from app.models import Lead, Property, User, at_least, is_field, role_level
 from app.services import leads, users
-from tests.conftest import auth, make_client, make_client_listing, make_listing, make_user
+from tests.conftest import PROFILE, auth, make_client, make_client_listing, make_listing, make_user
 
 
 def test_superadmin_working_as_agent(db, client):
@@ -17,7 +17,7 @@ def test_superadmin_working_as_agent(db, client):
     # admin side: settings, users, sources, admin-only writes
     assert client.get("/api/settings", headers=h).status_code == 200
     assert client.put("/api/sources/schedule", json={}, headers=h).status_code != 403
-    r = client.post("/api/users", json={"name": "Новый админ", "role": "admin"}, headers=h)
+    r = client.post("/api/users", json={**PROFILE, "name": "Новый Админ", "role": "admin"}, headers=h)
     assert r.status_code == 200, r.text
     # only a superadmin grants admin roles; a plain admin can't
     assert client.post("/api/users", json={"name": "X", "role": "superadmin"}, headers=auth(admin)).status_code == 403
@@ -154,11 +154,11 @@ def test_matrix_users_and_settings(db, client, role):
     sup = make_user(db, "superadmin", "Давид")
     st = lambda r: r.status_code  # noqa: E731
     # operators / agents / recruits: managed from admin up
-    assert (st(client.post("/api/users", json={"name": "Новый", "role": "operator"}, headers=h)) == 200) == (lvl >= 4)
+    assert (st(client.post("/api/users", json={**PROFILE, "name": "Новый Оператор", "role": "operator"}, headers=h)) == 200) == (lvl >= 4)
     assert (st(client.patch(f"/api/users/{agent.id}", json={"is_active": False}, headers=h)) == 200) == (lvl >= 4)
     # admins / superadmins: only a superadmin
-    assert (st(client.post("/api/users", json={"name": "А", "role": "admin"}, headers=h)) == 200) == (lvl >= 5)
-    assert (st(client.patch(f"/api/users/{adm.id}", json={"name": "Иракли 2"}, headers=h)) == 200) == (lvl >= 5)
+    assert (st(client.post("/api/users", json={**PROFILE, "name": "Анна Админ", "role": "admin"}, headers=h)) == 200) == (lvl >= 5)
+    assert (st(client.patch(f"/api/users/{adm.id}", json={**PROFILE, "name": "Иракли 2"}, headers=h)) == 200) == (lvl >= 5)
     assert (st(client.patch(f"/api/users/{agent.id}", json={"role": "admin"}, headers=h)) == 200) == (lvl >= 5)
     assert (st(client.patch(f"/api/users/{sup.id}", json={"is_active": False}, headers=h)) == 200) == (lvl >= 5 and role == "superadmin")
     # settings: read from operator, write from admin; Telegram routing (integration) only a superadmin
