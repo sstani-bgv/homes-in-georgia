@@ -59,3 +59,13 @@ def test_could_be_same_floor_area_bedrooms():
     assert not could_be_same(ad, N(floor=3, bedrooms=1, area=60)) and not could_be_same(N(floor=3, bedrooms=1, area=62), N(floor=3, bedrooms=1, area=60))
     assert could_be_same(ad, N(floor=2, bedrooms=1, area=52.6))         # the cadastre's area, rounded
     assert could_be_same(ad, N(floor=None, bedrooms=None, area=None))   # nothing known: the address decides
+
+
+def test_similar_text_alone_is_no_match():
+    from types import SimpleNamespace as N
+    from app.services.properties import same_flat_possible
+    ad = N(address="Ortachala curtaveli st. 22", floor=1, bedrooms=1, area=38)
+    assert not same_flat_possible(ad, N(address="Vera barnovi st. 71", floor=5, bedrooms=1, area=20))
+    assert not same_flat_possible(ad, N(address="Vera barnovi st. 71", floor=1, bedrooms=1, area=38))  # another house
+    assert same_flat_possible(ad, N(address="22 Tsurtaveli St", floor=1, bedrooms=1, area=38))
+    assert same_flat_possible(ad, N(address=None, floor=None, bedrooms=1, area=38))

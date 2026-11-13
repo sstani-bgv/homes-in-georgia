@@ -43,11 +43,11 @@ def test_verdicts(db):
     hashes = jdump([0x0F0F0F0F0F0F0F0E, 0x123456789ABCDEF0])
     v, _, why = _verdict(db, p, id="mh9003", address="другой", text="звоните 599 00 00 00", photo_hashes=hashes)
     assert v == "same" and why == ["общих фото: 2"]
-    # same district / bedrooms / floor, area within 10%, other phone → similar, an operator decides
-    v, _, why = _verdict(db, p, id="mh9004", address="Чавчавадзе 1", text="599 00 00 00", area=66.0)
+    # same district / bedrooms / floor, the cadastre's area (to 1 m²), other phone → similar, an operator decides
+    v, _, why = _verdict(db, p, id="mh9004", address="Палиашвили 10", text="599 00 00 00", area=70.5)
     assert v == "similar" and why == ["район, спальни, этаж и площадь совпадают"]
-    # area off by more than 10% → nothing
-    assert _verdict(db, p, id="mh9005", address="Чавчавадзе 1", text="599 00 00 00", area=60.0)[0] == "none"
+    # another area (66 vs 70 m²) → nothing (11-13)
+    assert _verdict(db, p, id="mh9005", address="Палиашвили 10", text="599 00 00 00", area=66.0)[0] == "none"
     # one shared photo alone is not enough (a common building shot)
     one = jdump([0x0F0F0F0F0F0F0F0F])
     assert _verdict(db, p, id="mh9006", address="x", text="-", floor=9, photo_hashes=one)[0] == "none"
@@ -66,9 +66,12 @@ def test_embedding_similarity_when_vectors_exist(db, monkeypatch):
             return [vec]
     from app import embeddings
     monkeypatch.setattr(embeddings, "encoder", lambda: Enc)
-    l = make_listing(db, "mh9100", source="myhome", urls="[]", address="x", text="-", floor=9, description_ru="Уютная")
+    l = make_listing(db, "mh9100", source="myhome", urls="[]", address="x", text="-", floor=None, description_ru="Уютная")
     found = matching.match(db, l)
     assert found[0]["verdict"] == "similar" and found[0]["reasons"][0].startswith("похожее описание")
+    # a similar text alone, another floor → no card (11-13)
+    l2 = make_listing(db, "mh9101", source="myhome", urls="[]", address="x", text="-", floor=9, description_ru="Уютная")
+    assert matching.match(db, l2) == []
 
 
 def test_new_listings_are_linked_or_queued_and_feed_shows_them(db, client, sent):

@@ -109,7 +109,7 @@ def verdict(f: dict, o: dict, sim: float | None = None) -> tuple[str, float, lis
         why.append("район, спальни, этаж и площадь совпадают")
     if sim is not None and sim >= TEXT_SIM:
         why.append(f"похожее описание ({sim:.2f})")
-    if not why:
+    if not why or not P.same_flat_possible(l, p):  # a similar text alone is no reason: another floor / area / house
         return NONE, 0.0, []
     if phone:
         why.append("тот же телефон")

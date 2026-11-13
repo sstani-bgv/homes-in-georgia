@@ -238,12 +238,29 @@ def known_objects(db: Session, listing_ids: list[str]) -> dict[str, dict]:
                                      .join(Property, Property.id == PropertyListing.property_id)
                                      .where(PropertyListing.listing_id.in_(listing_ids))):
         out[lid]["known_object"] = {"id": pid, "address": addr}
-    for m, addr in db.execute(select(ListingMatch, Property.address).join(Property, Property.id == ListingMatch.property_id)
-                              .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == "pending")
-                              .order_by(ListingMatch.score.desc(), ListingMatch.id)):
-        out[m.listing_id]["matches"].append({"property_id": m.property_id, "address": addr, "score": m.score,
+    ads = {x.id: x for x in db.scalars(select(Listing).where(Listing.id.in_(listing_ids)))}
+    for m, p in db.execute(select(ListingMatch, Property).join(Property, Property.id == ListingMatch.property_id)
+                           .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == "pending")
+                           .order_by(ListingMatch.score.desc(), ListingMatch.id)):
+        if m.listing_id in ads and not same_flat_possible(ads[m.listing_id], p):
+            continue  # a card made before the rule (11-13)
+        out[m.listing_id]["matches"].append({"property_id": m.property_id, "address": p.address, "score": m.score,
                                              "reasons": m.reasons})
     return out
+
+
+def same_flat_possible(l, p) -> bool:
+    """A «похож» card needs more than a similar text (11-13: «похожее описание 0.93» for Ortachala 38 m², 1st floor vs
+    Vera 20 m², 5th floor): floor / bedrooms / area agree (could_be_same) and, when both addresses name a house, it is
+    that house or its corpus."""
+    if not could_be_same(l, p):
+        return False
+    from app.services.dedup import relation, street_house
+    a, b = street_house(l.address), street_house(p.address)
+    if a[1] is None or b[1] is None:
+        return True
+    rel = relation(a, b)
+    return bool(rel) and (rel == "тот же дом" or rel.startswith("соседний"))
 
 
 BASE_HINT = "address"  # listing_matches.status of a «В архиве / в базе по этому адресу» row: a hint, nobody decides it
