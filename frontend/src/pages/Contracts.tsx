@@ -5,15 +5,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Download, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send } from 'lucide-react';
+import { Building2, Copy, Download, ExternalLink, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Contract, Deal, LeadContract } from '../api/types';
 import { ContractActions, ContractList, ContractStatusBadge, ContractView } from '../features/contracts/ContractCard';
-import { insideTelegram } from '../auth/AuthContext';
+import { insideTelegram, tgWebApp, useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
-import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
+import { Badge, Button, Card, Field, Input, Modal, PageHead, Select, Switch, Tabs } from '../components/ui';
 import { useSettledId } from '../components/RegistryApps';
 import { OwnerLookup, parseRegistryText, useKnownObjects, type ExtractFields, type KnownObject } from '../features/contracts/OwnerLookup';
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
@@ -555,10 +555,12 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
             <div className="form-grid">
               <div className="span2">{F({ k: 'timestamp', label: 'Дата договора', type: 'date' })}</div>
               {F({ k: 'owner_full_name', label: sale ? 'Продавец (ФИО)' : 'Собственник (ФИО)', placeholder: 'Полное имя' })}
-              {F({ k: 'owner_personal_number', label: sale ? 'Личный номер продавца' : 'Личный номер собственника', placeholder: 'Personal ID' })}
+              <div>{F({ k: 'owner_personal_number', label: sale ? 'Личный номер продавца' : 'Личный номер собственника', placeholder: 'Personal ID' })}
+                <CecCheck pid={String(d.owner_personal_number ?? '')} fullName={String(d.owner_full_name ?? '')} /></div>
               {sale && <div className="span2">{F({ k: 'owner_birth_day', label: 'Дата рождения продавца', type: 'date' })}</div>}
               {F({ k: 'client_full_name', label: sale ? 'Покупатель (ФИО)' : 'Арендатор (ФИО)', placeholder: 'Полное имя' })}
-              {F({ k: 'client_personal_number', label: sale ? 'Личный номер покупателя' : 'Личный номер арендатора', placeholder: 'Personal ID' })}
+              <div>{F({ k: 'client_personal_number', label: sale ? 'Личный номер покупателя' : 'Личный номер арендатора', placeholder: 'Personal ID' })}
+                <CecCheck pid={String(d.client_personal_number ?? '')} fullName={String(d.client_full_name ?? '')} /></div>
               {sale && <div className="span2">{F({ k: 'client_birth_day', label: 'Дата рождения покупателя', type: 'date' })}</div>}
             </div>
           )}
@@ -665,6 +667,48 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
 
 /** /contracts: the list (active / history); ?id= one contract; ?new=1 (or ?lead_id= / ?deal_id=) the wizard, ?edit= the
  *  wizard on a stored draft / generated contract (autosaved; «Обновить PDF» regenerates it). */
+// Optional check of a party on the CEC voter list (11-13). voters.cec.gov.ge sends X-Frame-Options: SAMEORIGIN (no iframe),
+// ignores URL params (no pre-fill) and sits behind Cloudflare Turnstile + an SMS code, so we only open it in a popup
+// and hand the agent the values to paste: personal number, surname, and the agent's own phone (the code goes to whoever checks).
+const CEC_URL = 'https://voters.cec.gov.ge/';
+function CecCheck({ pid, fullName }: { pid: string; fullName: string }) {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const id = pid.replace(/\D/g, '');
+  const surname = fullName.trim().split(/\s+/).pop() ?? '';  // ponytail: "Имя Фамилия" order assumed
+  const phone = (user?.phone ?? '').replace(/\D/g, '').slice(-9);  // the site wants 5XXXXXXXX without +995
+  const copy = (v: string, what: string) => navigator.clipboard?.writeText(v).then(() => toast(`${what} скопирован${what === 'Фамилия' ? 'а' : ''}`), () => toast('Не удалось скопировать', true));
+  const go = () => {
+    void navigator.clipboard?.writeText(id).catch(() => undefined);  // before the popup takes focus
+    const wa = insideTelegram() ? tgWebApp() : null;
+    if (wa?.openLink) wa.openLink(CEC_URL);
+    else window.open(CEC_URL, 'cec', 'popup,width=520,height=780');  // blocked → the link in the modal
+    setOpen(true);
+  };
+  const row = (label: string, v: string, what: string) => (
+    <div className="row gap-sm" style={{ justifyContent: 'space-between' }}>
+      <span><span className="faint">{label}: </span><b>{v}</b></span>
+      <Button variant="ghost" size="sm" onClick={() => copy(v, what)}><Copy size={14} />Копировать</Button>
+    </div>
+  );
+  return (
+    <>
+      <Button variant="ghost" size="sm" disabled={!id} onClick={go} style={{ marginTop: 4 }}><UserCheck size={14} />Проверить в ЦИК</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Проверка в ЦИК">
+        <div className="col gap-sm">
+          <span>Личный номер скопирован — вставьте его на сайте ЦИК, затем фамилию и телефон, и введите код из SMS.</span>
+          {row('Личный номер', id, 'Номер')}
+          {surname && row('Фамилия', surname, 'Фамилия')}
+          {phone ? row('Телефон', phone, 'Телефон') : <span className="faint">В профиле нет вашего телефона — укажите номер, на который придёт код.</span>}
+          <a href={CEC_URL} target="_blank" rel="noreferrer" className="row gap-sm"><ExternalLink size={14} />Открыть voters.cec.gov.ge</a>
+          <span className="faint" style={{ fontSize: 12 }}>Проверка необязательна. Фамилию на сайте вводят по-грузински.</span>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 function Contracts({ compact }: { compact?: boolean }) {
   const [params] = useSearchParams();
   const base = compact ? '/m/contracts' : '/contracts';
