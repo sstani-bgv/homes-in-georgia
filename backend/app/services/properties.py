@@ -214,8 +214,15 @@ def new_listings(db: Session, q: str | None = None, source: str | list[str] | No
         stmt = stmt.where(Listing.agent_suspect == 0, Listing.agent_reasons == "[]")
     elif flag == "agent_suspect":
         stmt = stmt.where(or_(Listing.agent_suspect == 1, Listing.agent_reasons != "[]"))
-    elif flag == "duplicate":
-        stmt = stmt.where(Listing.dup_sources.contains('"agency"'))
+    elif flag in ("in_base", "in_archive"):
+        # the card's red label (baseAtAddress): «В базе по этому адресу» = a shown hint object is not archived,
+        # «В архиве» = all are. Same rules as the card: similar_for over the few hinted ads (~100 on prod, 11-13)
+        hinted = select(ListingMatch.listing_id).where(ListingMatch.status == BASE_HINT,
+                                                       ListingMatch.listing_id.in_(select(stmt.subquery().c.id)))
+        sim = similar_for(db, list(db.scalars(hinted.distinct())))
+        live = {lid for lid, objs in sim.items() if any(o["status"] != "archived" for o in objs)}
+        stmt = stmt.where(Listing.id.in_(live if flag == "in_base" else set(sim) - live),
+                          ~Listing.dup_sources.contains('"agency"'))  # the card shows «уже в канале» instead
     # an object's own origin ad is not "known": released objects (owner refused) come back to the feed through it
     linked = select(PropertyListing.listing_id).join(Property, Property.id == PropertyListing.property_id).where(
         Property.listing_id.is_distinct_from(PropertyListing.listing_id))

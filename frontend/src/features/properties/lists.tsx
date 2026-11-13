@@ -178,7 +178,9 @@ export function NewListings({ base = '' }: { base?: string }) {
       </Modal>
       <FeedFilters f={f} patch={(p) => setF((o) => ({ ...o, ...p }))} view={view} onView={setView} facets={facets} sourceLabel={sourceName}
         seg={{ value: f.flag || '', onChange: set('flag'), options: [
-          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' }] }}
+          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' },
+          // the card's red label «В базе / В архиве по этому адресу» (11-13; the old «Дубль» = agency channel matched nothing)
+          { value: 'in_base', label: 'В базе' }, { value: 'in_archive', label: 'В архиве' }] }}
         found={data ? `Найдено: ${data.total ?? itemsOf(data).length}` : ''} filtered={filtered} onReset={() => setF({ q: f.q, flag: '', known: f.known })}
         actions={(!!data?.known_total || f.known) && (
           <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>

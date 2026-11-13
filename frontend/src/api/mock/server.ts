@@ -1,7 +1,7 @@
 // VITE_MOCK=1 in-memory API. Mimics §7 shapes and the main state transitions so the UI can be exercised offline.
 import { ApiError, getToken } from '../client';
 import { scenarioRows, type DistRow, type Scenario } from '../../lib/scenarios';
-import type { Deal, EventItem, Lead, LeadStatus, Property, PropertyStatus, Report, User } from '../types';
+import type { Deal, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, Report, User } from '../types';
 import { STAFF_ROLES } from '../types';
 import * as F from './fixtures';
 
@@ -184,8 +184,17 @@ on('GET', '/listings/new', (_m, _b, q) => {
   if (s) ls = ls.filter((l) => `${l.title} ${l.address} ${l.district}`.toLowerCase().includes(s));
   if (q.get('source')) ls = ls.filter((l) => l.source === q.get('source'));
   if (q.get('district')) ls = ls.filter((l) => l.district === q.get('district'));
+  // «по этому адресу» hints (11-13): L1000 / L1003 have a live object, L1001 / L1004 only archived ones
+  const sim = (l: Listing, st: string[]) => st.map((status, k) => ({ id: 900 + k, url: `/properties/${900 + k}`, address: l.address, status,
+    archive_reason: status === 'archived' ? 'not_actual' : null, photo: l.photos?.[0] ?? null, photos: l.photos || [], price_usd: l.price,
+    bedrooms: l.bedrooms, area: l.area, floor: null, reasons: ['тот же дом'] }));
+  const hints: Record<string, string[]> = { L1000: ['published', 'archived'], L1003: ['review'], L1001: ['archived'], L1004: ['archived', 'archived'] };
+  ls = ls.map((l) => (hints[l.id] ? { ...l, similar: sim(l, hints[l.id]) } : l));
   const flag = q.get('flag');
-  if (flag) ls = ls.filter((l) => (l.ai_flags as Record<string, unknown> | null)?.[flag]);
+  const live = (l: Listing) => (l.similar || []).some((x) => x.status !== 'archived');
+  if (flag === 'in_base') ls = ls.filter(live);
+  else if (flag === 'in_archive') ls = ls.filter((l) => l.similar?.length && !live(l));
+  else if (flag) ls = ls.filter((l) => (l.ai_flags as Record<string, unknown> | null)?.[flag]);
   return page(ls);
 });
 on('GET', '/listings/new/facets', () => {

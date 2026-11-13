@@ -736,7 +736,7 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 .feed-filters .seg { flex-wrap: nowrap; }
 .feed-filters .seg button { display: inline-flex; align-items: center; justify-content: center; }
 .seg-full .seg { display: flex; width: 100%; }
-.seg-full .seg button { flex: 1 1 auto; font-size: 13px; padding: 9px 6px; white-space: nowrap; }
+.seg-full .seg button { flex: 1 1 auto; font-size: 13px; padding: 9px 4px; /* 5 options fit 375 px (11-13) */ white-space: nowrap; }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .fbox { position: relative; min-width: 0; }
 .fbox .flabel { position: absolute; top: 8px; left: 12px; font-size: 12px; color: var(--muted); pointer-events: none; z-index: 1; }
