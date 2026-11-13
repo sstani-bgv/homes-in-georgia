@@ -390,10 +390,12 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   });
 
   // ---- field helper
+  // red only while still empty: the term fills the pay day and the dates itself, they must not stay red (11-13)
+  const bad = (k: keyof CxData) => missing.has(k) && !String(d[k] ?? '').trim();
   const F = ({ k, label, type: t = 'text', placeholder }: { k: keyof CxData; label: string; type?: string; placeholder?: string }) => (
     <Field label={`${label}${req.has(k) ? ' *' : ''}`} hint={k === 'cadastral_code' ? cadastralHint(String(d[k] ?? '')) : undefined}>
       <Input type={t} value={String(d[k] ?? '')} placeholder={placeholder} inputMode={t === 'number' ? 'decimal' : undefined}
-        aria-invalid={missing.has(k) || undefined} style={missing.has(k) ? { borderColor: 'var(--accent)' } : undefined}
+        aria-invalid={bad(k) || undefined} style={bad(k) ? { borderColor: 'var(--accent)' } : undefined}
         onChange={(e) => set(k, k === 'cadastral_code' ? cadastralInput(e) : e.target.value)} />
     </Field>
   );
