@@ -46,3 +46,15 @@ def test_manual_object_with_owner_skips_the_call(db, client):
     bad = client.post("/api/properties", json={"source_type": "direct", "owner_name": "X", "owner_phone": "12"}, headers=auth(ag))
     if bad.status_code >= 400:  # a rejected phone leaves no half-made object
         assert db.query(Property).count() == 1
+
+
+def test_platform_filter_lists_objects_without_agent(db, client):
+    """Stanislav 11-13: an object with no agent is the platform's; «Платформа» in the agent filter = agent_id IS NULL."""
+    ag, op = make_user(db, "agent"), make_user(db, "operator")
+    mine = properties.take(db, make_listing(db, "ss5").id, ag)
+    legacy = Property(status="published", address="Ваке", source_type="legacy")
+    db.add(legacy)
+    db.commit()
+    ids = lambda **q: [x["id"] for x in client.get("/api/properties", params=q, headers=auth(op)).json()["items"]]
+    assert ids(agent_id=0) == [legacy.id]
+    assert ids(agent_id=ag.id) == [mine.id]

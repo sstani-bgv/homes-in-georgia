@@ -14,7 +14,7 @@ import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, MultiSelect, Select, Seg } from '../../components/ui';
 import { ListingsMap } from './ListingsMap';
 import { usePageState } from '../../layout/back';
-import { ARCHIVE_REASON, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
+import { ARCHIVE_REASON, PLATFORM, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
 
 /** "fb:Some group" -> "Facebook · Some group"; site sources stay as they are. */
 const PREFIX_LABEL: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', th: 'Threads', tg: 'Telegram' };
@@ -205,7 +205,7 @@ export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id
     <CompareSide label={`Объект #${p.id} в базе`} photos={own.length ? own : p.photos || []} address={p.address} rows={[
       ['Цена', money(p.price, p.currency || 'USD')], ['Район', districtLabel(p.district) || '—'], ['Спальни', bedroomsLabel(p.bedrooms) || '—'],
       ['Площадь', p.area ? `${p.area} м²` : '—'], ['Этаж', p.floor ? `${p.floor}${p.total_floors ? ` из ${p.total_floors}` : ''}` : '—'],
-      ['Агент собственника', (p.owner?.agent || p.agent)?.name || '—'],
+      ['Агент собственника', (p.owner?.agent || p.agent)?.name || PLATFORM],
       ...(p.owner ? [['Собственник', <>{p.owner.name || '—'}{phone && <> · <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>{formatPhone(phone)}</a> <CopyPhone phone={phone} /></>}</>] as [string, React.ReactNode]] : []),
     ]}>
       <div className="row row-wrap gap-sm">
@@ -250,7 +250,7 @@ function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
         <span className="label">{[districtLabel(p.district), bedroomsLabel(p.bedrooms), p.area ? `${p.area} м²` : null].filter(Boolean).join(' · ') || '—'}</span>
         <div className="price">{money(p.price, p.currency || 'USD')}<span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>/мес</span></div>
         <div className="row row-between gap-sm faint" style={{ fontSize: 12, marginTop: 'auto' }}>
-          <span className="ellipsis">#{p.id} · {p.agent?.name || 'без агента'}</span>
+          <span className="ellipsis">#{p.id} · {p.agent?.name || PLATFORM}</span>
           <span style={{ flex: 'none' }}>{ago(p.updated_at || p.created_at)}</span>
         </div>
       </div>
@@ -271,7 +271,7 @@ export function PropertyMiniCard({ p, to, onMove }: { p: Property; to: string; o
         </div>
       </div>
       <div className="row row-between mt" style={{ marginTop: 8 }}>
-        <span className="faint" style={{ fontSize: 11, fontWeight: 600 }}>{p.agent?.name || '—'}</span>
+        <span className="faint" style={{ fontSize: 11, fontWeight: 600 }}>{p.agent?.name || PLATFORM}</span>
         {p.status === 'call_failed' && p.next_call_at ? <span className="badge badge-redsoft">звонок {fmtDateTime(p.next_call_at)}</span>
           : p.shoot_at && p.status === 'shoot_scheduled' ? <span className="badge">съёмка {fmtDateTime(p.shoot_at)}</span>
           : <span className="faint" style={{ fontSize: 11 }}>{ago(p.updated_at || p.created_at)}</span>}
@@ -477,6 +477,7 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
         {isStaff && !mine && !fixedAgent && (
           <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => set({ agent: e.target.value, page: 0 })}>
             <option value="">Все агенты</option>
+            <option value="0">{PLATFORM} (без агента)</option>
             {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
               <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>
             ))}
@@ -507,7 +508,7 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
                       <td className="muted num">{p.id}</td>
                       <td><Link to={link(p.id)} style={{ fontWeight: 700, color: 'inherit' }}>{p.address || '—'}</Link><div><Place district={p.district} /></div></td>
                       <td className="num" style={{ fontWeight: 700 }}>{money(p.price, p.currency || 'USD')}</td>
-                      <td>{p.agent?.name || '—'}</td>
+                      <td>{p.agent?.name || PLATFORM}</td>
                       <td><div className="row row-wrap gap-sm"><PropertyStatusBadge status={p.status} /><ExclusiveConflictBadge p={p} /></div></td>
                       {(archived || only === 'archived') && <td>{ARCHIVE_REASON[p.archive_reason || ''] || '—'}{p.archive_comment && <div className="muted" style={{ fontSize: 12 }}>{p.archive_comment}</div>}</td>}
                       <td className="muted">{ago(p.updated_at || p.created_at)}</td>

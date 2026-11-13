@@ -55,7 +55,7 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     old = db.get(User, o.agent_id) if o.agent_id else None
     cr = create(db, "property", p.id, "transfer_owner", {
         "owner_id": o.id, "agent_id": to.id,
-        "owner_agent": {"old": old.name if old else None, "new": to.name}}, actor, reason)
+        "owner_agent": {"old": old.name if old else P.PLATFORM, "new": to.name}}, actor, reason)
     db.commit()
     P._notify("change_request_new", cr)
     return cr

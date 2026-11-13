@@ -96,6 +96,12 @@ export const DISTRICTS = DISTRICT_LIST.map((d) => d[1]);
 const DISTRICT_OLD: Record<string, string> = { 'Вере': 'Вера', 'Ваке-Багеби': 'Багеби', 'Ваке-Сабуртало': 'Ваке' };
 const BY_TAG = Object.fromEntries(DISTRICT_LIST.map(([t, ru]) => [t.toLowerCase(), ru]));
 /** A stored district (ru label, old value or an English tag like «Saburtalo» from the old base) -> the label to show. */
+/** An object with no agent (agent_id NULL, e.g. legacy imports) belongs to the platform (Stanislav 11-13) */
+export const PLATFORM = 'Платформа';
+export function agentLabel(a?: { name: string; agent_tag?: string | null } | null): string {
+  return a ? `${a.name}${a.agent_tag ? ` · #${a.agent_tag}` : ''}` : PLATFORM;
+}
+
 export function districtLabel(v?: string | null): string {
   const s = (v || '').trim();
   return DISTRICT_OLD[s] || BY_TAG[s.replace(/^#/, '').toLowerCase()] || s;
