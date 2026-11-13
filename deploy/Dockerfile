@@ -10,9 +10,16 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/backend:/app TZ=Asia/Tbilisi
 WORKDIR /app
-# ffmpeg: bot video fetchers (yt-dlp merges/HLS); chromium + fonts: contract PDFs (backend/app/services/contracts.py)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg chromium fonts-noto-core fonts-montserrat \
-    && rm -rf /var/lib/apt/lists/*
+# ffmpeg: bot video fetchers (yt-dlp merges/HLS); chromium + fonts: contract PDFs (backend/app/services/contracts.py).
+# David's contract drafts are set in Georgia (Microsoft core fonts, contrib) with FreeSerif for the Georgian letters
+# and an Oswald header — the PDFs print with the same fonts as the Google Docs originals.
+RUN sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources \
+    && echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg chromium fonts-noto-core fonts-montserrat \
+       fonts-freefont-ttf ttf-mscorefonts-installer wget ca-certificates \
+    && mkdir -p /usr/share/fonts/truetype/oswald \
+    && wget -qO /usr/share/fonts/truetype/oswald/Oswald.ttf "https://github.com/google/fonts/raw/main/ofl/oswald/Oswald%5Bwght%5D.ttf" \
+    && fc-cache -f && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt backend/requirements.txt
 COPY bot/requirements.txt bot/requirements.txt
 RUN pip install -r backend/requirements.txt -r bot/requirements.txt

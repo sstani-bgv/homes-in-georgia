@@ -2,7 +2,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -348,6 +348,39 @@ def registry_applications(personal_id: str | None = None, cadastral: str | None 
     CAPTCHA) and copies the cadastral code from there."""
     from app.services import registry
     return registry.search(page, f"user:{user.id}", cadastral=cadastral, personal_id=personal_id, limit=120)
+
+
+@router.get("/registry/known")
+def registry_known(personal_id: str, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """The contract generator: the owner's objects the CRM already has by his personal ID (earlier contracts, e-signatures,
+    exclusive confirmations) — the cadastral code fills in at once, without the registry."""
+    from app.services import registry
+    return {"items": registry.known(db, personal_id)}
+
+
+class RegistryTextIn(BaseModel):
+    text: str = Field(max_length=500_000)
+
+
+@router.post("/registry/parse-text")
+def registry_parse_text(body: RegistryTextIn, user: User = Depends(current_user)):
+    """The contract generator: the agent copied the NAPR application page (after its CAPTCHA) or the extract's text and
+    pasted it here → the code and every field found (registry.parse_extract)."""
+    from app.services import registry
+    fields = registry.parse_extract(body.text)
+    return {"cadastral_code": fields.get("cadastral_code"), "fields": fields}
+
+
+@router.post("/registry/extract-code")
+async def registry_extract_code(file: UploadFile = File(...), user: User = Depends(current_user)):
+    """The contract generator: a registry extract (PDF) from the phone / NAPR → the code and every field found
+    (address, floor, flat, area, owner and his personal ID; registry.parse_extract)."""
+    from app.services import registry
+    content = await file.read()
+    if len(content) > P.MAX_OWNER_DOC or not content.startswith(b"%PDF"):
+        raise DomainError("bad_file", "Выписка — PDF до 15 МБ")
+    fields = registry.parse_extract(registry.text_of_pdf(content) or "")
+    return {"cadastral_code": fields.get("cadastral_code"), "fields": fields}
 
 
 @router.post("/public/exclusive/{token}")

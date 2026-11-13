@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Download, ExternalLink, FileText, Pencil, Send, Share2, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Download, ExternalLink, FileText, Pencil, PenLine, Send, Share2, Upload, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf } from '../../api/client';
 import type { Contract, ContractCloseReason, ContractStatus } from '../../api/types';
@@ -104,8 +104,68 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
           <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(link)}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>
         </div>
       )}
+      <ESignBlock c={c} onChange={(x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); }} />
       <SignModal c={c} open={signOpen} onClose={() => setSignOpen(false)} onDone={(x) => { setSignOpen(false); done(x, 'Отмечено: договор подписан'); }} />
       <CloseModal c={c} open={closeOpen} onClose={() => setCloseOpen(false)} onDone={(x) => { setCloseOpen(false); done(x, 'Договор закрыт: сделка не состоялась'); }} />
+    </div>
+  );
+}
+
+/** Electronic signing (backend services/esign.py): a personal link for the owner and one for the tenant; when both
+ *  have signed, the signed PDF replaces the draft and the contract becomes «Договор подписан» by itself. */
+function ESignBlock({ c, onChange }: { c: Contract; onChange: (c: Contract) => void }) {
+  const toast = useToast();
+  const tg = insideTelegram();
+  const es = c.esign;
+  const m = useMutation({ mutationFn: (fn: () => Promise<Contract>) => fn(), onSuccess: onChange, onError: (e) => toast(errText(e), true) });
+  if (c.status !== 'draft' && !es) return null;
+  if (c.kind === 'sale' && !es) return null;
+  if (!es) {
+    return (
+      <div className="row row-wrap gap-sm">
+        <Button variant="secondary" loading={m.isPending} onClick={() => m.mutate(() => api.contracts.esign(c.id))}>
+          <PenLine size={16} />Подписать электронно
+        </Button>
+        <span className="muted" style={{ fontSize: 12 }}>Собственник и арендатор получат по ссылке и распишутся с телефона</span>
+      </div>
+    );
+  }
+  const text = (label: string) => `Договор ${c.address || c.cadastral || `#${c.id}`}: подпишите, пожалуйста (${label.toLowerCase()})`;
+  const send = async (url: string, label: string) => {
+    if (tg) { tgWebApp()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(label))}`); return; }
+    if (navigator.share && mobile()) {
+      try { await navigator.share({ url, title: text(label) }); } catch { /* closed */ }
+      return;
+    }
+    await navigator.clipboard?.writeText(url).then(() => toast('Ссылка скопирована'), () => undefined);
+  };
+  return (
+    <div className="col gap-sm" style={{ border: '1px solid var(--line, #dfe4ee)', borderRadius: 12, padding: 12 }}>
+      <b><PenLine size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Электронная подпись{es.complete ? ': подписан обеими сторонами' : ''}</b>
+      {es.signers.map((s) => {
+        const url = s.path ? absolute(s.path) : '';
+        return (
+          <div key={s.role} className="row row-wrap gap-sm" style={{ alignItems: 'center' }}>
+            <span style={{ minWidth: 110 }}>{s.label}</span>
+            {s.signed_at
+              ? <Badge tone="ok">подписал(а) · {s.full_name} · {fmtDateTime(s.signed_at)}</Badge>
+              : <Badge tone="grey">ожидает подписи</Badge>}
+            {url && !s.signed_at && <>
+              <Button size="sm" variant="secondary" onClick={() => send(url, s.label)}>{tg ? <><Send size={14} />Отправить</> : <><Share2 size={14} />Отправить ссылку</>}</Button>
+              {!tg && <Button size="sm" variant="ghost" onClick={() => navigator.clipboard?.writeText(url).then(() => toast('Ссылка скопирована'), () => undefined)}><Copy size={14} />Копировать</Button>}
+              {!tg && <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(s.label))}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>}
+            </>}
+          </div>
+        );
+      })}
+      {c.status === 'draft' && (
+        <div className="row row-wrap gap-sm">
+          <span className="muted grow" style={{ fontSize: 12 }}>Ссылки личные: каждая сторона видит договор, вводит ФИО, личный номер, телефон и расписывается. Правка текста отменяет неподписанные ссылки.</span>
+          <Button size="sm" variant="ghost" loading={m.isPending} onClick={() => {
+            if (window.confirm(es.signers.some((s) => s.signed_at) ? 'Отменить подписание? Уже данные подписи будут удалены.' : 'Отменить ссылки на подпись?')) m.mutate(() => api.contracts.esignCancel(c.id));
+          }}><XCircle size={14} />Отменить подписание</Button>
+        </div>
+      )}
     </div>
   );
 }

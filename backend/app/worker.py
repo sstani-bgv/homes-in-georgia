@@ -141,6 +141,13 @@ def birthdays_job(db: Session, job: Job):
         notify.birthdays_tomorrow(tomorrow)
 
 
+@handler("contract_esign_pdf")
+def contract_esign_pdf(db: Session, job: Job):
+    """Both parties signed but printing the signed PDF failed in the request: print it again (services/esign.finalize)."""
+    from app.services import esign
+    return esign.finalize(db, _ref_id(job))
+
+
 @handler("review_batch")
 def review_batch(db: Session, job: Job):
     return "noop"  # the bot's own review loop handles catalog moderation cards
