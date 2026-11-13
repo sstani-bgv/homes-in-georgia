@@ -336,7 +336,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   }));
   // a registry extract / the pasted NAPR page: the code always, the other fields where still empty; says what it filled
   const applyExtract = (f: ExtractFields) => {
-    const LABEL: Record<string, string> = { cadastral_code: 'код', street_house: 'адрес', floor: 'этаж', apartment_number: 'квартира',
+    const LABEL: Record<string, string> = { cadastral_code: 'код', street_house: 'адрес', street_house_en: 'адрес (ENG)', floor: 'этаж', apartment_number: 'квартира',
       apartment_area: 'площадь', owner_full_name: 'собственник', owner_personal_number: 'личный номер' };
     // only the empty fields: what the agent typed stays (a different code is pointed out, not replaced)
     const put: Partial<CxData> = {};
@@ -574,6 +574,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
                     onCode={(c) => { if (c !== d.cadastral_code) { set('cadastral_code', c); toast(`Из реестра: ${c}`); } }} />
                 </div>
                 <div className="span2">{F({ k: 'street_house', label: 'Адрес', placeholder: 'Улица, номер дома' })}</div>
+                {/* 11-13: the RU / ENG contracts print this one; filled from the extract's Georgian, editable */}
+                <div className="span2">{F({ k: 'street_house_en', label: 'Адрес (ENG)', placeholder: 'Tabidze St, 43 — для русской и английской версии' })}</div>
                 {F({ k: 'floor', label: 'Этаж', placeholder: '2' })}
                 {F({ k: 'apartment_number', label: 'Квартира №', placeholder: 'Номер' })}
                 <div className="span2">{F({ k: 'apartment_area', label: 'Площадь, м²', placeholder: '45 или 45.05' })}</div>

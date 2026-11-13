@@ -383,18 +383,6 @@ def registry_parse_text(body: RegistryTextIn, user: User = Depends(current_user)
     return {"cadastral_code": fields.get("cadastral_code"), "fields": fields}
 
 
-@router.post("/registry/extract-code")
-async def registry_extract_code(file: UploadFile = File(...), user: User = Depends(current_user)):
-    """The contract generator: a registry extract (PDF) from the phone / NAPR → the code and every field found
-    (address, floor, flat, area, owner and his personal ID; registry.parse_extract)."""
-    from app.services import registry
-    content = await file.read()
-    if len(content) > P.MAX_OWNER_DOC or not content.startswith(b"%PDF"):
-        raise DomainError("bad_file", "Выписка — PDF до 15 МБ")
-    fields = registry.parse_extract(registry.text_of_pdf(content) or "")
-    return {"cadastral_code": fields.get("cadastral_code"), "fields": fields}
-
-
 class RegistryUrlIn(BaseModel):
     url: str = Field(max_length=2000)
 

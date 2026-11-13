@@ -25,6 +25,7 @@ export interface CxData {
   client_birth_day: string;
   cadastral_code: string;
   street_house: string;
+  street_house_en?: string; // 11-13: the address in English for the RU / ENG halves (registry.address_en), editable
   floor: string;
   apartment_number: string;
   apartment_area: string;
@@ -77,7 +78,7 @@ export function reviewLabels(type: CxType): [keyof CxData | 'one_month', string]
   if (sale) head.push(['owner_birth_day', 'Дата рождения продавца']);
   head.push(['client_full_name', sale ? 'Покупатель' : 'Арендатор'], ['client_personal_number', sale ? 'ID покупателя' : 'ID арендатора']);
   if (sale) head.push(['client_birth_day', 'Дата рождения покупателя']);
-  head.push(['cadastral_code', 'Кадастровый код'], ['street_house', 'Адрес'], ['floor', 'Этаж'], ['apartment_number', 'Квартира №'], ['apartment_area', 'Площадь, м²']);
+  head.push(['cadastral_code', 'Кадастровый код'], ['street_house', 'Адрес'], ['street_house_en', 'Адрес (ENG)'], ['floor', 'Этаж'], ['apartment_number', 'Квартира №'], ['apartment_area', 'Площадь, м²']);
   if (sale) return [...head, ['sale_price', 'Цена продажи, USD'], ['transfer_date', 'Дата передачи']];
   const rent: [keyof CxData | 'one_month', string][] = [['start_rent', 'Начало аренды'], ['end_rent', 'Окончание аренды'], ['rent_duration_months', 'Срок, мес.'],
     ['price_usd', 'Цена в месяц, USD'], ['deposit_usd', 'Депозит, USD'], ['pay_day', 'День оплаты'], ['one_month', 'Первый платёж за период до']];
@@ -162,6 +163,9 @@ export interface ContractDoc extends DraftDoc { lang: CxLang; key: DraftKey; tit
 export function draftValues(d: CxData): Record<string, string> {
   const v: Record<string, string> = { one_month: cxOnem(d.start_rent) };
   for (const [k, x] of Object.entries(d)) if (typeof x === 'string') v[k] = DATE_FIELDS.includes(k as keyof CxData) ? cxFmt(x) : x;
+  // 11-13: GEO prints [[street_house]] (Georgian); the Russian / English halves of the bilingual drafts print
+  // [[street_house_en]] — the English line, or the address as typed when there is none (typed in English / Russian)
+  v.street_house_en = d.street_house_en?.trim() || d.street_house;
   return v;
 }
 

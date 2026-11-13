@@ -13,6 +13,7 @@ import re
 import socket
 import time
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
 
@@ -145,9 +146,65 @@ def _street(addr: str) -> str:
     return re.sub(r"\s+", " ", ", ".join(keep)).strip()
 
 
+# 11-13 (Stanislav): the RU / ENG contracts print the address in English — the extract's Georgian, romanized by the
+# 2002 national system without apostrophes (as on street signs), street type as «St / Ave / …» after the name
+_LAT = dict(zip("აბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ",
+                "a b g d e v z t i k l m n o p zh r s t u p k gh q sh ch ts dz ts ch kh j h".split()))
+_TYPES = {"ქუჩა": "St", "გამზირი": "Ave", "ჩიხი": "Dead-end", "შესახვევი": "Lane", "მოედანი": "Sq",
+          "ხეივანი": "Alley", "აღმართი": "Rise", "დასახლება": "Settlement", "კვარტალი": "Block"}
+_GENITIVE = {"აღმაშენებლის": "აღმაშენებელი"}  # the stem shortens: the suffix rule below can't restore it
+
+
+def _latin(word: str) -> str:
+    out = "".join(_LAT.get(ch, ch) for ch in word)
+    return "-".join(w[:1].upper() + w[1:] for w in out.split("-"))
+
+
+def _nominative(word: str) -> str:
+    """The name's genitive before the street type → its own form: ტაბიძის → ტაბიძე, რუსთაველის → რუსთაველი,
+    კოსტავას → კოსტავა. ponytail: suffix rules; a stem that shortens (აღმაშენებლის) needs _GENITIVE, the agent edits the rest."""
+    if word in _GENITIVE:
+        return _GENITIVE[word]
+    if word.endswith("ების"):  # თავისუფლების → თავისუფლება
+        return word[:-2] + "ა"
+    if word.endswith("ძის"):
+        return word[:-2] + "ე"
+    if word.endswith("ის") and len(word) > 3:
+        return word[:-1]
+    if len(word) > 3 and word[-1] == "ს" and word[-2] in "აოუე":
+        return word[:-1]
+    return word
+
+
+def address_en(addr: str) -> str:
+    """«ამბერკი ტაბიძის ქუჩა, N 43» → «Amberki Tabidze St, 43»; «ქალაქი თბილისი , ქუჩა ადამ მიცკევიჩი , N 54» →
+    «Adam Mitskevichi St, 54, Tbilisi». Not Georgian (typed in English / Russian) → as is."""
+    if not re.search("[\u10d0-\u10f0]", addr or ""):
+        return (addr or "").strip()
+    geo = re.compile("[\u10d0-\u10f0]")
+    out, city = [], None
+    for part in addr.split(","):
+        num = re.search(r"(?:^|\s)N\s*(\w[\w/-]*)", part)
+        words = (part[:num.start()] + " " + part[num.end():] if num else part).split()
+        if words[:1] in (["ქალაქი"], ["ქ."]) and len(words) > 1:  # «ქალაქი თბილისი» → «Tbilisi», at the end
+            city = " ".join(_latin(w) for w in words[1:])
+            continue
+        kind = next((w for w in words if w in _TYPES), None)
+        if kind:
+            name = words[:words.index(kind)]
+            # «ტაბიძის ქუჩა»: the name came first, its last Georgian word is in the genitive
+            g = [j for j, w in enumerate(name) if geo.search(w)]
+            if g:
+                name[g[-1]] = _nominative(name[g[-1]])
+            words = name + [w for w in words[words.index(kind) + 1:]] + [_TYPES[kind]]  # «ქუჩა ადამ მიცკევიჩი» too
+        text = " ".join(w if w in _TYPES.values() else _latin(w) for w in words)
+        out += [x for x in (text, num and _latin(num.group(1)).lower()) if x]
+    return ", ".join(out + ([city] if city else []))
+
+
 def parse_extract(text: str) -> dict:
     """Everything a registry extract (or the NAPR application page, pasted) says that the contract wizard has a field for:
-    {cadastral_code, street_house, floor, apartment_number, apartment_area, owner_full_name, owner_personal_number,
+    {cadastral_code, street_house, street_house_en, floor, apartment_number, apartment_area, owner_full_name, owner_personal_number,
     address} — a key only when found."""
     text = georgian(text or "")
     out: dict = {}
@@ -160,6 +217,7 @@ def parse_extract(text: str) -> dict:
         out["address"] = addr
         if street := _street(addr):
             out["street_house"] = street
+            out["street_house_en"] = address_en(street)
         if f := re.search(r"სართ(?:ული)?\.?\s*N?\s*(-?\d+)", addr):
             out["floor"] = f.group(1)
         if b := re.search(r"ბინა\s*N?\s*([\w/-]+)", addr):
@@ -169,7 +227,8 @@ def parse_extract(text: str) -> dict:
     if "apartment_number" not in out and (b := re.search(r"ბინა\s*N\s*([\w/-]+)", text)):
         out["apartment_number"] = b.group(1)
     if area := _area(text, out.get("cadastral_code")):
-        out["apartment_area"] = area
+        # 11-13: whole m² in the contract (30.40 → 30, 52.5 → 53, half up — not Python's banker's round)
+        out["apartment_area"] = str(Decimal(area).quantize(Decimal(1), ROUND_HALF_UP))
     # «მესაკუთრეები: NAME ,P/N: 01001012345» — the first owner
     o = re.search(r"მესაკუთრ\w*\s*:?\s*\n?\s*([^\n,]{3,80}?)\s*,\s*P/N\s*:?\s*(\d{9,11})", text)
     if o:
