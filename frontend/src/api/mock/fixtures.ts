@@ -62,6 +62,13 @@ const listingSeeds: [string, string, number, number, number, Listing['ai_flags']
   ['Вере', 'Барнова 21', 1500, 3, 130, { owner: true }],
   ['Исани', 'Навтлугская 5', 480, 1, 44, {}],
 ];
+// 300 map points around Tbilisi to see the clusters (11-13): seeded, so the mock map is the same on every reload
+let seed = 7;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+for (let i = 0; i < 300; i++) {
+  const [d, a, p, b, ar] = listingSeeds[i % 8];
+  listingSeeds.push([d, `${a.replace(/\d+$/, '')}${10 + i}`, Math.round(p * (0.7 + rnd() * 0.6) / 10) * 10, b, ar, {}]);
+}
 export const listings: Listing[] = listingSeeds.map(([district, address, price, bedrooms, area, flags], i) => ({
   id: `L${1000 + i}`,
   source: SOURCES[i % SOURCES.length],
@@ -71,7 +78,9 @@ export const listings: Listing[] = listingSeeds.map(([district, address, price, 
   price, currency: 'USD', district, address, bedrooms, rooms: bedrooms + 1, area,
   photos: [photo(i, district), photo(i + 1, district), photo(i + 2, district)],
   ai_flags: flags,
-  created_at: iso(-(i * 47 + 12) * min),
+  created_at: i < 8 ? iso(-(i * 47 + 12) * min) : iso(-rnd() * 40 * day),
+  // denser in the centre (Vake–Saburtalo–old town), sparser to the edges
+  lat: 41.715 + (rnd() - 0.5) * 0.09 * (0.3 + rnd()), lng: 44.79 + (rnd() - 0.5) * 0.14 * (0.3 + rnd()),
   taken_by: i === 3 ? ref(4) : null,
   property_id: null,
 }));
