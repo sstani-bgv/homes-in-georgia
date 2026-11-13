@@ -165,6 +165,8 @@ export const api = {
     },
     close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
     share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
+    esign: (id: number) => http.post<Contract>(`/contracts/${id}/esign`),
+    esignCancel: (id: number) => http.post<Contract>(`/contracts/${id}/esign/cancel`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
     pdf: (id: number, signed = false) => fetchBlob(`/contracts/${id}/pdf${signed ? '?signed=1' : ''}`),
   },

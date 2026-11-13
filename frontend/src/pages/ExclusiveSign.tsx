@@ -11,6 +11,7 @@ import { fmtDateTime, phoneInput } from '../lib/format';
 import { cadastralError, cadastralInput, cadastralNorm } from '../lib/cadastral';
 import { CheckCircle2, Copy, ExternalLink, Upload } from 'lucide-react';
 import { RegistryApps, day, useSettledId, type RegApp, type RegTexts } from '../components/RegistryApps';
+import { SignaturePad } from '../components/SignaturePad';
 
 interface SignView { id: number; address: string; cadastral_code: string; owner_name: string; owner_phone: string; signed_at: string | null }
 
@@ -50,33 +51,6 @@ const UI: Record<Lang, { name: string; pid: string; phone: string; cad: string; 
   ka: { name: 'სახელი და გვარი', pid: 'პირადი ნომერი', phone: 'ტელეფონი', cad: 'საკადასტრო კოდი', cadBad: 'შეამოწმეთ კოდი: ციფრები წერტილით, მაგ. 01.14.12.003.045', sign: 'მოაწერეთ ხელი თითით', clear: 'წაშლა', agree: 'ვეთანხმები ზემოთ აღნიშნულ პირობებს', send: 'ხელმოწერა', done: 'ხელშეკრულება ხელმოწერილია. გმადლობთ!' },
   en: { name: 'Full name', pid: 'Personal ID number', phone: 'Phone', cad: 'Cadastral code', cadBad: 'Check the code: digits separated by dots, e.g. 01.14.12.003.045', sign: 'Sign with your finger', clear: 'Clear', agree: 'I agree to the above terms', send: 'Sign', done: 'Signed. Thank you!' },
 };
-
-function SignaturePad({ onInk, padRef, clearLabel }: { onInk: (v: boolean) => void; padRef: React.RefObject<HTMLCanvasElement>; clearLabel: string }) {
-  const last = useRef<[number, number] | null>(null);
-  useEffect(() => {
-    const c = padRef.current!;
-    const r = c.getBoundingClientRect(), k = window.devicePixelRatio || 1;
-    c.width = r.width * k; c.height = r.height * k;
-    const ctx = c.getContext('2d')!;
-    ctx.scale(k, k); ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a1f2b';
-  }, [padRef]);
-  const at = (e: React.PointerEvent): [number, number] => { const r = padRef.current!.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-  const move = (e: React.PointerEvent) => {
-    if (!last.current) return;
-    const ctx = padRef.current!.getContext('2d')!, p = at(e);
-    ctx.beginPath(); ctx.moveTo(...last.current); ctx.lineTo(...p); ctx.stroke();
-    last.current = p; onInk(true);
-  };
-  const clear = () => { const c = padRef.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); onInk(false); };
-  return (
-    <div className="col gap-sm">
-      <canvas ref={padRef} style={{ width: '100%', height: 180, border: '1.5px dashed var(--line, #c9d1e0)', borderRadius: 12, touchAction: 'none', background: '#fff' }}
-        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); last.current = at(e); }}
-        onPointerMove={move} onPointerUp={() => { last.current = null; }} onPointerCancel={() => { last.current = null; }} />
-      <Button variant="secondary" size="sm" onClick={clear}>{clearLabel}</Button>
-    </div>
-  );
-}
 
 export function ExclusiveSignPage() {
   const { token = '' } = useParams();

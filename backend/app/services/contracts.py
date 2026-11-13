@@ -172,6 +172,8 @@ def out(db: Session, c: Contract, full: bool = False) -> dict:
          "in_drive": bool(c.drive_file_id), "filename": filename(c),
          "share": {"path": share_path(share), "url": env.PUBLIC_URL.rstrip("/") + share_path(share),
                    "expires_at": _iso(c.share_expires_at)} if share else None}
+    from app.services import esign  # esign imports this module
+    d["esign"] = esign.out(db, c)
     if full:
         d["html"] = c.html
     return d
@@ -280,6 +282,9 @@ def update(db: Session, cid: int, body: dict, user: User) -> Contract:
     if c.status != "draft":
         raise DomainError("bad_status", "Подписанный или закрытый договор не меняется", 409)
     f = _fields(db, body, user)
+    if f["html"] != c.html:
+        from app.services import esign
+        esign.before_edit(db, c)  # unsigned e-sign links die with the old text; a signed text is frozen
     pdf = render_pdf(f["html"])
     for k, v in f.items():
         setattr(c, k, v)

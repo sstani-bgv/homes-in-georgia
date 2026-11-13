@@ -3,14 +3,14 @@
 import re
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, paginate
 from app.db import get_db
 from app.models import User
-from app.services import contracts as C
+from app.services import contracts as C, esign as E
 from app.services.errors import DomainError
 from app.telegram import client as tg
 
@@ -52,6 +52,16 @@ class ContractIn(BaseModel):
     deal_id: int | None = None
     property_id: int | None = None
     data: dict | None = None  # the wizard's CxData (deal prefill); omitted = kept
+
+
+class ESignIn(BaseModel):
+    full_name: str = Field(max_length=200)
+    personal_id: str = Field(max_length=200)
+    phone: str = Field(max_length=200)
+    consent: bool = False
+    signature: str = Field(max_length=E.MAX_SIGNATURE)
+    doc_sha256: str = Field(max_length=64)
+    lang: str | None = Field(None, max_length=5)
 
 
 class CloseIn(BaseModel):
@@ -102,6 +112,17 @@ async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Ses
     return C.out(db, C.sign(db, cid, user, await file.read() if file else None), full=True)
 
 
+@router.post("/contracts/{cid}/esign")
+def contracts_esign(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Подписать электронно»: a signing link for the owner and one for the tenant (services/esign.py)."""
+    return C.out(db, E.start(db, cid, user), full=True)
+
+
+@router.post("/contracts/{cid}/esign/cancel")
+def contracts_esign_cancel(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return C.out(db, E.cancel(db, cid, user), full=True)
+
+
 @router.post("/contracts/{cid}/close")
 def contracts_close(cid: int, body: CloseIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.close(db, cid, user, body.reason, body.comment), full=True)
@@ -131,3 +152,21 @@ def public_contract_pdf(token: str, download: bool = False, db: Session = Depend
     c = C.by_share_token(db, token)
     signed = bool(c.signed_pdf_path)
     return _pdf(C.pdf_bytes(c, signed), C.filename(c, signed), download)
+
+
+# a party's electronic signing page (frontend /esign/<token>): no login, the token is the access (services/esign.py)
+@public.get("/public/esign/{token}")
+def public_esign(token: str, db: Session = Depends(get_db, scope="function")):
+    return E.view(db, token)
+
+
+@public.post("/public/esign/{token}")
+def public_esign_sign(token: str, body: ESignIn, request: Request, db: Session = Depends(get_db, scope="function")):
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client and request.client.host)
+    return E.sign(db, token, body.model_dump(), ip, request.headers.get("user-agent"))
+
+
+@public.get("/public/esign/{token}/pdf")
+def public_esign_pdf(token: str, download: bool = False, db: Session = Depends(get_db, scope="function")):
+    c, data = E.signed_pdf(db, token)
+    return _pdf(data, C.filename(c, True), download)

@@ -357,7 +357,34 @@ export interface Contract extends ContractSummary {
   in_drive?: boolean;
   filename: string;
   share?: { path: string; url: string; expires_at: string } | null;
+  /** electronic signing (backend services/esign.py): null until «Подписать электронно» */
+  esign?: ContractESign | null;
   html?: string;
+}
+export interface ContractESign {
+  complete: boolean;
+  doc_sha256: string;
+  /** path: the party's page /esign/<token> (null once both signed) */
+  signers: { role: 'owner' | 'tenant'; label: string; path: string | null; signed_at: string | null; full_name: string | null }[];
+}
+/** GET /public/esign/{token}: what one party's signing page shows */
+export interface ESignView {
+  role: 'owner' | 'tenant';
+  role_label: { ka: string; ru: string; en: string };
+  contract_id: number;
+  kind: Contract['kind'];
+  lang: Contract['lang'];
+  title?: string | null;
+  address?: string | null;
+  cadastral?: string | null;
+  doc_sha256: string;
+  prefill: { full_name: string; personal_id: string };
+  signed_at: string | null;
+  full_name: string | null;
+  parties: { role: 'owner' | 'tenant'; label: { ka: string; ru: string; en: string }; signed: boolean }[];
+  complete: boolean;
+  /** the contract to read (null once this party signed) */
+  html: string | null;
 }
 export interface ContractIn {
   kind: Contract['kind']; lang: Contract['lang']; html: string; title?: string; cadastral?: string; address?: string;
@@ -609,7 +636,7 @@ export interface Cabinet {
 
 export type Settings = Record<string, unknown>;
 
-export interface AppConfig { bot_username?: string; public_url?: string; mock?: boolean }
+export interface AppConfig { bot_username?: string; public_url?: string; mock?: boolean; bot_id?: string }
 
 export interface WeeklyListings { total: number; week_start: string; by_agent: Record<string, number>; top_agents: { name: string; count: number }[] }
 /** GET /api/analytics/listings */
