@@ -15,6 +15,8 @@ import { DealsPage } from './pages/Deals';
 import { ExclusiveSignPage } from './pages/ExclusiveSign';
 import { InvitePage } from './pages/Invite';
 import { ESignPage } from './pages/ESign';
+import { NdaSignPage } from './pages/NdaSign';
+import { NdasPage } from './pages/Ndas';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
 import { ClientPage, ClientsPage, OwnersPage } from './pages/People';
@@ -74,6 +76,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/sign/:token" element={<ExclusiveSignPage />} />
       <Route path="/esign/:token" element={<ESignPage />} />
+      <Route path="/nda/:token" element={<NdaSignPage />} />
       <Route path="/invite/:token" element={<InvitePage />} />
       <Route path="/m/*" element={<MRedirect />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
@@ -91,6 +94,7 @@ export function App() {
         <Route path="owners" element={<RequireAuth roles={STAFF}><OwnersPage /></RequireAuth>} />
         <Route path="team" element={<TeamPage />} />
         <Route path="contracts" element={<ContractsPage />} />
+        <Route path="ndas" element={<RequireAuth roles={STAFF}><NdasPage /></RequireAuth>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />

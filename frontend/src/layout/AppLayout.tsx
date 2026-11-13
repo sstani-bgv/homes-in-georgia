@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Building2, CalendarDays, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
-  Settings, Trophy, UsersRound,
+  Settings, Trophy, UsersRound, ShieldCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ADMIN_ROLES, STAFF_ROLES, atLeast } from '../api/types';
@@ -26,6 +26,7 @@ export const NAV: NavItem[] = [
   { to: '/calendar', label: 'Календарь', icon: CalendarDays },
   { to: '/clients', label: 'Клиенты', icon: UsersRound, roles: STAFF },
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
+  { to: '/ndas', label: 'NDA агентов', icon: ShieldCheck, roles: STAFF },
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
   { to: '/admin', label: 'Управление', icon: Settings, roles: ADMIN_ROLES },
