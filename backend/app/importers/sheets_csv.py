@@ -47,6 +47,12 @@ def num(v) -> Decimal | None:
         return None
 
 
+def sheet_int(v) -> int | None:
+    """A counter cell Sheets turned into a date: «1900-01-27» is serial 28 (day 0 = 1899-12-30)."""
+    m = re.match(r"\s*(1900-\d\d-\d\d)", str(v or ""))
+    return (date.fromisoformat(m.group(1)) - date(1899, 12, 30)).days if m else integer(v)
+
+
 def integer(v) -> int | None:
     n = num(v)
     return int(n) if n is not None else None
@@ -148,6 +154,9 @@ class Importer:
                 for u in people:
                     if getattr(u, attr):
                         self._users_by_name.setdefault(getattr(u, attr).lower().replace("_", " "), u)
+            for u in people:  # the sheets may carry the full name; users.name is the first name only
+                if u.first_name and u.last_name:
+                    self._users_by_name.setdefault(f"{u.first_name} {u.last_name}".lower(), u)
         return self._users_by_name.get(n)
 
     def _remember(self, u: User):
@@ -345,13 +354,15 @@ class Importer:
             #  cadastral, client_name, client_phone, owner_name, owner_phone, date_str, is_excl, source, raw, deal_type, month]
             lvl = integer(r[3])
             return self._deal("Reports_Deals", r, created_at=dt(r[0]), agent=self.user_by_name(r[2]),
-                              agent_level=lvl if lvl in (50, 70, 90) else None, agent_deal_num=integer(r[4]),
+                              agent_level=lvl if lvl in (50, 70, 90) else None, agent_deal_num=sheet_int(r[4]),
                               ad_link=s(r[5]), price=num(r[6]), commission_total=num(r[7]), agent_amount=num(r[8]),
                               platform_amount=num(r[9]), cadastral=s(r[10]), client_name=s(r[11]), client_phone=s(r[12]),
                               owner_name=s(r[13]), owner_phone=s(r[14]), rent_from=day(r[15]),
                               is_exclusive="скл" in (r[16] or "").lower() and "неэкс" not in (r[16] or "").lower(),
                               deal_type="sale" if (r[19] or "").strip().lower() in ("sale", "продажа") else "rent",
-                              month=s(r[20]) if re.fullmatch(r"\d{1,2}/\d{4}", (r[20] or "").strip()) else None)
+                              # since June 2026 the old CRM writes the rent start's DAY as the month («8/2026» for
+                              # 08.11): the month comes from the rent start then, as for a CRM deal
+                              month=None if day(r[15]) else s(r[20]) if re.fullmatch(r"\d{1,2}/\d{4}", (r[20] or "").strip()) else None)
         self.each("Reports_Deals", reports_deals, positional_width=21)
 
         def rental(r, rec):

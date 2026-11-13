@@ -244,14 +244,16 @@ def agents(db: Session, month: str | None = None) -> list[dict]:
     mo = f"{m}/{y}"
     board = {r["id"]: r for r in leaderboard(db, mo, limit=1000)}
     counters = {r["user"]["id"]: r for r in reports.counters(db, mo)}
-    lead_load = dict(db.execute(select(Lead.agent_id, func.count()).where(Lead.status.not_in(("rented", "refused")))
+    # in work only (Irakli 11-13): not the archived old-CRM leads, not rented / archived objects
+    lead_load = dict(db.execute(select(Lead.agent_id, func.count()).where(Lead.status.not_in(("rented", "refused")),
+                                                                         Lead.archived_at.is_(None))
                                 .group_by(Lead.agent_id)).all())
-    props = dict(db.execute(select(Property.agent_id, func.count()).where(Property.status.not_in(("archived",)))
+    props = dict(db.execute(select(Property.agent_id, func.count()).where(Property.status.not_in(("archived", "rented")))
                             .group_by(Property.agent_id)).all())
     out = []
     # «Команда» shows only working agents (Irakli 2026-11-09): a deactivated one stays in the history, not on the board
     for u in db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)).order_by(User.name)):
-        out.append({"id": u.id, "name": u.name, "username": u.username, "role": u.role, "is_active": u.is_active,
+        out.append({"id": u.id, "name": u.name, "first_name": u.first_name, "last_name": u.last_name, "username": u.username, "role": u.role, "is_active": u.is_active,
                     "mentor_id": u.mentor_id, **users.level_info(u), "deals_month": board.get(u.id, {}).get("deals", 0),
                     "agent_amount_month": board.get(u.id, {}).get("agent_amount", 0), "open_leads": lead_load.get(u.id, 0),
                     "properties": props.get(u.id, 0), "counters": counters.get(u.id)})

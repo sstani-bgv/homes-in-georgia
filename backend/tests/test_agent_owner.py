@@ -18,7 +18,7 @@ def test_agent_tag_suggestion_and_uniqueness(db, client):
 
     assert client.patch(f"/api/users/{zaza.id}", json={"agent_tag": "#Zaza"}, headers=auth(admin)).json()["agent_tag"] == "Zaza"
     r = client.patch(f"/api/users/{artur.id}", json={"agent_tag": "zaza"}, headers=auth(admin))  # case-insensitive
-    assert r.status_code == 409 and "уже у агента Zaza Beridze" in r.json()["detail"]
+    assert r.status_code == 409 and "уже у агента Zaza" in r.json()["detail"]
     assert client.patch(f"/api/users/{artur.id}", json={"agent_tag": "Ар тур"}, headers=auth(admin)).json()["code"] == "bad_tag"
     assert users.suggest_agent_tag(db, "Zaza Kapanadze") == "ZazaK"  # #Zaza is taken
     assert client.patch(f"/api/users/{zaza.id}", json={"agent_tag": ""}, headers=auth(admin)).json()["agent_tag"] is None
@@ -29,7 +29,7 @@ def test_resolve_agent_by_profile_tag_then_setting(db):
     zaza = make_user(db, "agent", "Zaza Beridze", agent_tag="Zaza")
     tamara = make_user(db, "agent", "Tamara Kapanadze")
     settings.set(db, "agent_tags", '{"#Tamar": "Tamara Kapanadze", "#Zaza": "Someone Else"}')
-    assert inbound.resolve_agent(db, "#zaza") == ("Zaza Beridze", zaza)  # the profile wins over the setting
+    assert inbound.resolve_agent(db, "#zaza") == ("Zaza", zaza)  # the profile wins over the setting
     assert inbound.resolve_agent(db, "#Tamar") == ("Tamara Kapanadze", tamara)
 
 
@@ -66,7 +66,7 @@ def test_owner_bound_to_agent_blocks_others_staff_override_and_transfer(db, clie
     db.expire_all()
     assert db.get(Property, first["id"]).agent_id == levan.id
     ev = [e for e in client.get(f"/api/properties/{first['id']}/history", headers=auth(nino)).json() if e["action"] == "owner_transferred"]
-    assert ev[0]["data"]["comment"] == "Zaza Beridze → Леван · агент ушёл" and ev[0]["data"]["moved"]
+    assert ev[0]["data"]["comment"] == "Zaza → Леван · агент ушёл" and ev[0]["data"]["moved"]
     assert db.query(Event).filter_by(entity="owner", entity_id=str(owner.id), action="owner_transferred").count() == 1
     # Zaza is now the one blocked
     assert _owner_confirmed(db, client, zaza, "ss3", phone="599203040").json()["code"] == "owner_taken"

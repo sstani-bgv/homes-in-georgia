@@ -84,7 +84,7 @@ def _tg_user(db: Session, tg: dict) -> User:
     if tg.get("photo_url"):
         u.photo_url = tg["photo_url"]
     if not u.name or u.name.startswith("Superadmin "):
-        u.name = " ".join(x for x in (tg.get("first_name"), tg.get("last_name")) if x) or u.name
+        u.name = tg.get("first_name") or tg.get("last_name") or u.name
     if not u.birth_date:
         u.birth_date = users.tg_birth_date(u.tg_id)
     return u

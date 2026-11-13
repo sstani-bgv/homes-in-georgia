@@ -24,7 +24,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     tg_id = Column(BigInteger, unique=True)
     username = Column(Text)
-    name = Column(Text, nullable=False)  # «first last», kept in sync by the users service (migration 0012)
+    name = Column(Text, nullable=False)  # the first name shown across the CRM, kept in sync by the users service (0015)
     first_name = Column(Text)
     last_name = Column(Text)
     phone = Column(Text)
@@ -55,6 +55,7 @@ class User(Base):
         if name and not (self.first_name or self.last_name):
             self.first_name, _, last = name.strip().partition(" ")
             self.last_name = last.strip() or None
+            return self.first_name or name
         return name
 
     @property

@@ -91,7 +91,7 @@ def accept(db: Session, token: str, tg: dict) -> User:
     if (other := users.by_tg(db, tg_id)) is not None:
         raise DomainError("tg_already_bound", f"Этот Telegram уже привязан к аккаунту «{other.name}». "
                           "Откройте ссылку из другого Telegram или просто войдите в CRM", 409)
-    name = " ".join(x for x in (tg.get("first_name"), tg.get("last_name")) if x) or tg.get("username") or f"Сотрудник {tg_id}"
+    name = tg.get("first_name") or tg.get("last_name") or tg.get("username") or f"Сотрудник {tg_id}"
     u = User(tg_id=tg_id, username=tg.get("username"), name=name.strip(), photo_url=tg.get("photo_url"), role=inv.role,
              level=inv.level, districts=inv.districts or [], works_as_agent=inv.works_as_agent,
              agent_tag=users.clean_agent_tag(db, inv.agent_tag) if inv.agent_tag else None,

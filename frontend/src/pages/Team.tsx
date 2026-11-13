@@ -246,7 +246,7 @@ function UserCard({ a }: { a: AgentStat }) {
   const s = stats.data || {};
   return (
     <div className="col gap-lg">
-      <div className="row"><Avatar size="lg" name={a.name} /><div><h2>{a.name}</h2><div className="label">{a.role ? ROLE_LABEL[a.role] : ''} · {a.level || 50}%</div></div></div>
+      <div className="row"><Avatar size="lg" name={a.name} /><div><h2>{[a.first_name, a.last_name].filter(Boolean).join(' ') || a.name}</h2><div className="label">{a.role ? ROLE_LABEL[a.role] : ''} · {a.level || 50}%</div></div></div>
       <Card label="Уровень"><LevelProgress deals={a.exclusive_deals} level={a.level} /></Card>
       <KV items={[
         ['Эксклюзивов', a.exclusive_deals], ['Сделок за месяц', a.deals_month ?? '—'], ['Заявок в работе', a.active_leads ?? '—'], ['Объектов в работе', a.active_properties ?? '—'],

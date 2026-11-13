@@ -38,15 +38,15 @@ def test_create_accept_web(client, db, monkeypatch):
     assert inv["status"] == "pending" and inv["web_link"] == f"https://admin.hge.ge/invite/{tok}" and len(tok) >= 32
     assert inv["bot_link"] is None  # no separate login bot configured
     info = client.get(f"/api/auth/invite/{tok}").json()
-    assert info == {"status": "pending", "role": "agent", "invited_by": "Иракли Админ", "expires_at": inv["expires_at"]}
+    assert info == {"status": "pending", "role": "agent", "invited_by": "Иракли", "expires_at": inv["expires_at"]}
     r = client.post("/api/auth/invite", json={**widget(777), "token": tok})
     assert r.status_code == 200, r.text
     me = r.json()["user"]
-    assert me["tg_id"] == 777 and me["name"] == "Нино Беридзе" and me["role"] == "agent" and me["level"] == 50
+    assert me["tg_id"] == 777 and me["name"] == "Нино" and me["last_name"] == "Беридзе" and me["role"] == "agent" and me["level"] == 50
     assert me["agent_tag"] == "Nino" and me["districts"] == ["Ваке"]
     assert me["profile_missing"] == ["birth_date", "phone", "email"]  # → «Заполните профиль»
     row = client.get("/api/invites", headers=h).json()["items"][0]
-    assert row["status"] == "accepted" and row["used_by"]["name"] == "Нино Беридзе" and row["created_by"] == "Иракли Админ"
+    assert row["status"] == "accepted" and row["used_by"]["name"] == "Нино" and row["created_by"] == "Иракли"
     acts = {(e.entity, e.action) for e in db.query(Event).all()}
     assert {("invite", "created"), ("invite", "accepted"), ("user", "created")} <= acts
     # reused
@@ -98,7 +98,7 @@ def test_already_bound_tg(client, db):
     make_user(db, "agent", name="Заза Беридзе", tg_id=900)
     tok = token_of(invite(client, auth(make_user(db, "admin"))))
     r = client.post("/api/auth/invite", json={**widget(900), "token": tok})
-    assert r.status_code == 409 and r.json()["code"] == "tg_already_bound" and "Заза Беридзе" in r.json()["detail"]
+    assert r.status_code == 409 and r.json()["code"] == "tg_already_bound" and "«Заза»" in r.json()["detail"]
     assert client.get(f"/api/auth/invite/{tok}").json()["status"] == "pending"  # still usable by the right person
 
 

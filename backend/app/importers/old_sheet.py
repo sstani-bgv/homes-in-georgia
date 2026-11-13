@@ -311,7 +311,7 @@ class Run:
                      client_name=s(g(r, 9)), client_phone=s(g(r, 10)), address=addr, metro=s(g(r, 14)),
                      commission_total=num(g(r, 16)) or num(g(r, 17)), agent_level=pct if pct in (50, 70, 90) else None,
                      deal_type="sale" if sale and not price else "rent",
-                     month=start.strftime("%m/%Y") if start else None,
+                     month=f"{start.month}/{start.year}" if start else None,  # «9/2026», as every other deal
                      raw={"_import_key": key, "_sheet": "old:Rent_out_Apartment",
                           "row": ["" if x is None else str(x) for x in r]})
             if when(g(r, 0)):

@@ -68,11 +68,11 @@ def test_upcoming_feb29_and_inactive(db):
     make_user(db, "agent", name="Март Первый", birth_date=date(1985, 3, 1))
     db.commit()
     got = birthdays.upcoming(db, date(2027, 2, 28), 0)  # 2027 isn't leap: Feb 29 → Feb 28
-    assert [x["name"] for x in got] == ["Лиза Високосная"] and got[0]["age"] == 27
+    assert [x["name"] for x in got] == ["Лиза"] and got[0]["age"] == 27
     assert [x["name"] for x in birthdays.upcoming(db, date(2028, 2, 28), 0)] == []  # 2028 is leap: Feb 29 itself
-    assert [x["name"] for x in birthdays.upcoming(db, date(2028, 2, 29), 0)] == ["Лиза Високосная"]
+    assert [x["name"] for x in birthdays.upcoming(db, date(2028, 2, 29), 0)] == ["Лиза"]
     week = birthdays.upcoming(db, date(2027, 2, 25), 7)
-    assert [(x["name"], x["days_left"]) for x in week] == [("Лиза Високосная", 3), ("Март Первый", 4)]
+    assert [(x["name"], x["days_left"]) for x in week] == [("Лиза", 3), ("Март", 4)]
     assert [x["name"] for x in birthdays.upcoming(db, date(2026, 12, 30), 7)] == []  # wraps into next year fine
 
 
@@ -93,9 +93,9 @@ def test_birthday_job(db, sent):
     db.commit()
     assert _run(db, today.isoformat()) == "ok"
     (people,), = sent.of("birthdays_today")
-    assert [x["name"] for x in people] == ["Именинник Сегодня"]
+    assert [x["name"] for x in people] == ["Именинник"]
     (people,), = sent.of("birthdays_tomorrow")
-    assert [x["name"] for x in people] == ["Именинник Завтра"] and people[0]["age"] == tomorrow.year - 1995
+    assert [x["name"] for x in people] == ["Именинник"] and people[0]["age"] == tomorrow.year - 1995
     assert _run(db, (today - timedelta(days=1)).isoformat()) == "stale"  # a missed morning isn't sent late
     assert len(sent.of("birthdays_today")) == 1
 
@@ -112,7 +112,7 @@ def test_birthdays_widget(client, db):
     make_user(db, "agent", name="Заза Беридзе", birth_date=(today + timedelta(days=2)).replace(year=1990))
     adm, ag = make_user(db, "admin", name="Иракли Админ"), make_user(db, "agent", name="Нино Агент")
     a = client.get("/api/birthdays", headers=auth(adm)).json()["items"]
-    assert a[0]["name"] == "Заза Беридзе" and a[0]["days_left"] == 2 and a[0]["age"] is not None
+    assert a[0]["name"] == "Заза" and a[0]["days_left"] == 2 and a[0]["age"] is not None
     assert client.get("/api/birthdays", headers=auth(ag)).json()["items"][0]["age"] is None
 
 
@@ -121,10 +121,10 @@ def test_first_last_name(client, db, monkeypatch):
     r = client.post("/api/users", json={**PROFILE, "first_name": " Мария Анна ", "last_name": "Беридзе"}, headers=h)
     assert r.status_code == 200, r.text
     u = r.json()
-    assert (u["first_name"], u["last_name"], u["name"]) == ("Мария Анна", "Беридзе", "Мария Анна Беридзе")
+    assert (u["first_name"], u["last_name"], u["name"]) == ("Мария Анна", "Беридзе", "Мария Анна")
     assert client.post("/api/users", json={**PROFILE, "first_name": "Нино"}, headers=h).json()["code"] == "profile_required"
     r = client.patch(f"/api/users/{u['id']}", json={**PROFILE, "last_name": "Гелашвили"}, headers=h)
-    assert r.json()["name"] == "Мария Анна Гелашвили"
+    assert r.json()["name"] == "Мария Анна"
     old = make_user(db, "agent", name="Заза Беридзе Младший")  # set as a whole name: split at the first space
     assert (old.first_name, old.last_name) == ("Заза", "Беридзе Младший")
     r = client.patch(f"/api/users/{old.id}", json={**PROFILE, "name": "Гия Канчели"}, headers=h)  # old API callers

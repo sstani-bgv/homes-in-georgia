@@ -27,7 +27,7 @@ export interface User {
   mentor_id?: number | null;
   districts: string[];
   is_active: boolean;
-  /** name = «first_name last_name» (migration 0012) */
+  /** name = first_name only, shown across the CRM (migration 0015); full name on the agent's card */
   first_name?: string | null;
   last_name?: string | null;
   login?: string | null;
@@ -593,6 +593,8 @@ export interface SourceSchedule {
 export interface Source { id: number | string; name: string; kind?: string | null; url?: string | null; enabled: boolean; last_run_at?: string | null; count?: number }
 
 export interface AgentStat {
+  first_name?: string | null;
+  last_name?: string | null;
   id: number;
   name: string;
   photo_url?: string | null;

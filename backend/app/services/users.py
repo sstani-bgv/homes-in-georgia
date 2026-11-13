@@ -132,7 +132,7 @@ def missing(u) -> list[str]:
 
 def _clean_profile(data: dict, u: User | None = None):
     """Formats of the profile fields present in data (normalised in place); a required field can't be cleared.
-    Names: first_name / last_name; a bare «name» (old callers) is split at the first space; name = «first last»."""
+    Names: first_name / last_name; a bare «name» (old callers) is split at the first space; name = first_name."""
     if data.get("name") and "first_name" not in data and "last_name" not in data:
         data["first_name"], _, data["last_name"] = " ".join(str(data["name"]).split()).partition(" ")
     for k in PROFILE:
@@ -141,8 +141,8 @@ def _clean_profile(data: dict, u: User | None = None):
         if k in data and data[k] is None:
             raise DomainError("profile_required", f"Поле обязательно: {PROFILE_LABEL[k]}")
     if "first_name" in data or "last_name" in data:
-        first = data.get("first_name", u.first_name if u else None)
-        data["name"] = " ".join(x for x in (first, data.get("last_name", u.last_name if u else None)) if x)
+        # name = the first name: the CRM shows only it, the full name is on the agent's card (Irakli 11-13)
+        data["name"] = data.get("first_name", u.first_name if u else None) or data.get("last_name", u.last_name if u else None)
     if "phone" in data:
         digits = re.sub(r"\D", "", data["phone"])
         if re.search(r"[^\d\s+()\-.]", data["phone"]) or not 9 <= len(digits) <= 15:
