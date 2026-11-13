@@ -183,6 +183,7 @@ export const api = {
     esignCancel: (id: number) => http.post<Contract>(`/contracts/${id}/esign/cancel`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
     pdf: (id: number, signed = false, version?: number) => fetchBlob(`/contracts/${id}/pdf${version != null ? `?version=${version}` : signed ? '?signed=1' : ''}`),
+    extract: (id: number) => fetchBlob(`/contracts/${id}/extract`),
   },
   deals: {
     calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),

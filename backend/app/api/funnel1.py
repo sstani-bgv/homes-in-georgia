@@ -383,6 +383,22 @@ async def registry_extract_code(file: UploadFile = File(...), user: User = Depen
     return {"cadastral_code": fields.get("cadastral_code"), "fields": fields}
 
 
+class RegistryUrlIn(BaseModel):
+    url: str = Field(max_length=2000)
+
+
+@router.post("/registry/extract-from-url")
+def registry_extract_from_url(body: RegistryUrlIn, user: User = Depends(current_user)):
+    """The contract generator: the agent pasted the link to the extract (NAPR's GetBlob PDF) → the server downloads it
+    (NAPR hosts only), keeps the PDF in private storage and returns every field found; `file` goes into the contract's
+    data (extract_file) with the link (extract_url) — the card offers both. Empty fields: a scan without text."""
+    from app.services import registry
+    pdf = registry.download_extract(body.url)
+    fields = registry.parse_extract(registry.text_of_pdf(pdf) or "")
+    return {"cadastral_code": fields.get("cadastral_code"), "fields": fields, "file": registry.store_extract(pdf),
+            "url": body.url.strip()}
+
+
 @router.post("/public/exclusive/{token}")
 async def public_exclusive_sign(token: str, request: Request, file: UploadFile = File(...),
                                 id_doc: UploadFile | None = File(None), extract: UploadFile | None = File(None), full_name: str = Form(""),

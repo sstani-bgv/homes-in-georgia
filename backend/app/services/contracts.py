@@ -274,7 +274,7 @@ def _data(data) -> dict | None:
     """The wizard's CxData (scalars only), kept for the restore and the deal prefill; not a dict = left as is."""
     if not isinstance(data, dict):
         return None
-    return {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 500}
+    return {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= (2000 if k == "extract_url" else 500)}
 
 
 def _fields(db: Session, body: dict, user: User) -> dict:

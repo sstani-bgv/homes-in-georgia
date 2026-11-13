@@ -6,10 +6,10 @@
 //     extract (PDF). The CRM can't read the NAPR page itself (another site, behind NAPR's own CAPTCHA).
 import { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, ClipboardPaste, Database, Upload } from 'lucide-react';
+import { CheckCircle2, ClipboardPaste, Database, Link2, Upload } from 'lucide-react';
 import { http } from '../../api/client';
 import { errText, useToast } from '../../components/toast';
-import { Button, Modal, Textarea } from '../../components/ui';
+import { Button, Input, Modal, Textarea } from '../../components/ui';
 import { REG_RU, RegistryApps, day } from '../../components/RegistryApps';
 
 export interface KnownObject {
@@ -30,9 +30,46 @@ export function useKnownObjects(personalId: string) {
   });
 }
 
-/** onCode: a cadastral code found in the clipboard on return from NAPR (RegistryApps, 09736a7) */
-export function OwnerLookup({ personalId, current, onKnown, onFields, onCode }: {
-  personalId: string; current: string; onKnown: (o: KnownObject) => void; onFields: (f: ExtractFields) => void; onCode?: (code: string) => void;
+interface UrlOut extends ExtractOut { file: string; url: string }
+
+/** The extract by its link (NAPR's «download» PDF, https://bs.napr.gov.ge/GetBlob?…): pasted → the server downloads it,
+ * fills the empty fields and keeps the PDF; the link and the file go into the contract's data (onSaved). */
+function ExtractLink({ saved, onFields, onSaved }: {
+  saved?: string; onFields: (f: ExtractFields) => string[]; onSaved: (url: string, file: string) => void;
+}) {
+  const [url, setUrl] = useState(saved || '');
+  const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(saved ? { text: 'Выписка сохранена с договором' } : null);
+  const load = useMutation({
+    mutationFn: (u: string) => http.post<UrlOut>('/registry/extract-from-url', { url: u }),
+    onMutate: () => setNote(null),
+    onSuccess: (r) => {
+      onSaved(r.url, r.file);
+      if (!Object.keys(r.fields).length) { setNote({ text: 'Скан без текста — выписка сохранена, заполните поля вручную', bad: true }); return; }
+      const names = onFields(r.fields);
+      setNote({ text: names.length ? `Заполнено из выписки: ${names.join(', ')}` : 'Выписка сохранена; поля уже были заполнены — ничего не изменено' });
+    },
+    onError: (e) => setNote({ text: errText(e), bad: true }),
+  });
+  const go = (u: string) => { const t = u.trim(); if (t) load.mutate(t); };
+  return (
+    <div className="col gap-sm">
+      <span className="label"><Link2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />Ссылка на выписку</span>
+      <div className="row gap-sm">
+        <Input style={{ flex: 1, minWidth: 0 }} inputMode="url" value={url} placeholder="https://bs.napr.gov.ge/GetBlob?…" onChange={(e) => setUrl(e.target.value)}
+          onPaste={(e) => { const t = e.clipboardData.getData('text').trim(); if (t) { e.preventDefault(); setUrl(t); go(t); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); go(url); } }} />
+        <Button loading={load.isPending} disabled={!url.trim()} onClick={() => go(url)}>Загрузить</Button>
+      </div>
+      {note && <span style={{ fontSize: 13, color: note.bad ? 'var(--danger, #c0392b)' : 'var(--ok, #1a7f4b)' }}>{note.text}</span>}
+    </div>
+  );
+}
+
+/** onCode: a cadastral code found in the clipboard on return from NAPR (RegistryApps, 09736a7).
+ * onFields fills the empty fields and returns their names; onExtract keeps the extract's link + saved PDF. */
+export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, extractUrl, onExtract }: {
+  personalId: string; current: string; onKnown: (o: KnownObject) => void; onFields: (f: ExtractFields) => string[]; onCode?: (code: string) => void;
+  extractUrl?: string; onExtract: (url: string, file: string) => void;
 }) {
   const toast = useToast();
   const known = useKnownObjects(personalId);
@@ -67,12 +104,19 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode }: 
     },
     onError: (e) => toast(errText(e), true),
   });
+  const link = <ExtractLink saved={extractUrl} onFields={onFields} onSaved={onExtract} />;
   if (!personalId) {
-    return <span className="faint" style={{ fontSize: 12 }}>Введите личный номер собственника на вкладке «Стороны» — кадастровый код подставится из базы CRM или из Публичного реестра.</span>;
+    return (
+      <div className="col gap">
+        {link}
+        <span className="faint" style={{ fontSize: 12 }}>Или введите личный номер собственника на вкладке «Стороны» — кадастровый код подставится из базы CRM или из Публичного реестра.</span>
+      </div>
+    );
   }
   const items = known.data || [];
   return (
     <div className="col gap">
+      {link}
       {items.length > 0 && (
         <div className="col gap-sm">
           <span className="label"><Database size={14} style={{ verticalAlign: -2, marginRight: 4 }} />Уже есть в базе CRM</span>

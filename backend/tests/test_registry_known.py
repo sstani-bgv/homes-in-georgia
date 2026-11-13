@@ -98,3 +98,71 @@ def test_parse_extract_fields():
         "street_house": "ჭავჭავაძის გამზირი, N 5", "floor": "4", "apartment_number": "12", "apartment_area": "65.30",
         "owner_full_name": "ანა ტესტი", "owner_personal_number": "01001088888",
     }
+
+
+# the Batumi extract's layout (pypdf text of a 2023 NAPR extract), names and numbers made up: the address wraps, the plot's
+# «დაზუსტებული ფართობი» comes first, the flat's area sits in the ownership table on lines of its own
+NEW_EXTRACT = """*882023000001* მიწის (უძრავი ქონების) საკადასტრო კოდი N 05.36.24.120.02.01.510
+ამონაწერი საჯარო რეესტრიდან
+მისამართი: ქალაქი ბათუმი , წმინდა ანდრია
+პირველწოდებულის III ჩიხი N12
+ნაკვეთის საკუთრების ტიპი: თანასაკუთრება
+დაზუსტებული ფართობი:2500.00  კვ.მ.
+მესაკუთრეები:
+ნინო ტესტი ,P/N: 01001077777
+მესაკუთრე: საკუთრების ტიპი: საკუთრება: ფართი: წილი:
+ნინო ტესტი საკუთრება ფართი(მშენებარე) სართული11,ბინა
+N76,ბლოკი ''ა"
+30.40
+კვ.მ.
+იპოთეკა
+"""
+
+
+def test_parse_new_extract():
+    from app.services import registry as R
+    assert R.parse_extract(NEW_EXTRACT) == {
+        "cadastral_code": "05.36.24.120.02.01.510",
+        "address": "ქალაქი ბათუმი , წმინდა ანდრია პირველწოდებულის III ჩიხი N12",
+        "street_house": "წმინდა ანდრია პირველწოდებულის III ჩიხი N12", "floor": "11", "apartment_number": "76",
+        "apartment_area": "30.40", "owner_full_name": "ნინო ტესტი", "owner_personal_number": "01001077777",
+    }
+
+
+def test_extract_url_check(monkeypatch):
+    import pytest
+    from app.services import registry as R
+    from app.services.errors import DomainError
+    monkeypatch.setattr(R.socket, "getaddrinfo", lambda h, *a, **k: [(0, 0, 0, "", ("10.0.0.5" if h == "int.napr.gov.ge" else "91.239.207.10", 443))])
+    assert str(R._check_url("http://bs.napr.gov.ge/GetBlob?pid=101&bid=x")) == "https://bs.napr.gov.ge/GetBlob?pid=101&bid=x"
+    for bad in ("https://evil.com/?napr.gov.ge", "https://napr.gov.ge.evil.com/", "https://int.napr.gov.ge/",
+                "https://bs.napr.gov.ge:8443/", "file:///etc/passwd", "https://127.0.0.1/", ""):
+        with pytest.raises(DomainError):
+            R._check_url(bad)
+
+
+def test_extract_from_url_saved_with_contract(db, client, monkeypatch):
+    from app import storage
+    from app.services import registry as R
+    from tests.test_contracts import _lead
+    ag, ag2 = make_user(db, "agent"), make_user(db, "agent")
+    lead_a, lead_b = _lead(db, ag), _lead(db, ag2)
+    pdf = b"%PDF-1.4 fake extract"
+    monkeypatch.setattr(R, "download_extract", lambda url: pdf)
+    monkeypatch.setattr(R, "text_of_pdf", lambda b: NEW_EXTRACT if b == pdf else None)
+    url = "https://bs.napr.gov.ge/GetBlob?pid=101&bid=abc"
+    r = client.post("/api/registry/extract-from-url", json={"url": url}, headers=auth(ag))
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["fields"]["owner_personal_number"] == "01001077777" and out["url"] == url
+    assert R.EXTRACT_KEY_RE.match(out["file"]) and storage.read(out["file"]) == pdf
+    c = client.post("/api/contracts/draft", json={"lead_id": lead_a.id, "kind": "rent", "data": {"extract_url": url, "extract_file": out["file"]}},
+                    headers=auth(ag)).json()
+    assert c["data"]["extract_url"] == url
+    got = client.get(f"/api/contracts/{c['id']}/extract", headers=auth(ag))
+    assert got.status_code == 200 and got.content == pdf
+    # data is the wizard's: a key outside the extracts (another private file) is never served
+    other = client.post("/api/contracts/draft", json={"lead_id": lead_b.id, "kind": "rent", "data": {"extract_file": "private/properties/1/x.pdf"}},
+                        headers=auth(ag2)).json()
+    assert client.get(f"/api/contracts/{other['id']}/extract", headers=auth(ag2)).status_code == 404
+    assert client.post("/api/registry/extract-from-url", json={"url": url}).status_code == 401

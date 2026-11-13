@@ -338,14 +338,18 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   const applyExtract = (f: ExtractFields) => {
     const LABEL: Record<string, string> = { cadastral_code: 'код', street_house: 'адрес', floor: 'этаж', apartment_number: 'квартира',
       apartment_area: 'площадь', owner_full_name: 'собственник', owner_personal_number: 'личный номер' };
+    // only the empty fields: what the agent typed stays (a different code is pointed out, not replaced)
     const put: Partial<CxData> = {};
     for (const k of Object.keys(LABEL) as (keyof ExtractFields & keyof CxData)[]) {
       const v = f[k];
-      if (v && (k === 'cadastral_code' || !String(d[k] ?? '').trim())) (put as Record<string, string>)[k] = v;
+      if (v && !String(d[k] ?? '').trim()) (put as Record<string, string>)[k] = v;
     }
     setD((x) => ({ ...x, ...put }));
     const names = Object.keys(put).map((k) => LABEL[k]);
-    toast(names.length ? `Из реестра: ${names.join(', ')}` : 'Поля уже заполнены — из реестра ничего не изменено');
+    const typed = String(d.cadastral_code ?? '').trim();
+    if (f.cadastral_code && typed && typed !== f.cadastral_code) toast(`В выписке другой кадастровый код: ${f.cadastral_code} — проверьте`, true);
+    else toast(names.length ? `Из реестра: ${names.join(', ')}` : 'Поля уже заполнены — из реестра ничего не изменено');
+    return names;
   };
   const [autoFor, setAutoFor] = useState('');
   useEffect(() => {
@@ -554,6 +558,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
                 <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.13.015.029.01.150' })}</div>
                 <div className="span2">
                   <OwnerLookup personalId={ownerPid} current={String(d.cadastral_code ?? '')} onKnown={applyKnown} onFields={applyExtract}
+                    extractUrl={d.extract_url} onExtract={(url, file) => setD((x) => ({ ...x, extract_url: url, extract_file: file }))}
                     onCode={(c) => { if (c !== d.cadastral_code) { set('cadastral_code', c); toast(`Из реестра: ${c}`); } }} />
                 </div>
                 <div className="span2">{F({ k: 'street_house', label: 'Адрес', placeholder: 'Улица, номер дома' })}</div>

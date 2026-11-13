@@ -123,6 +123,19 @@ def contracts_pdf(cid: int, signed: bool = False, download: bool = False, versio
     return _pdf(C.pdf_bytes(c, signed, version), name if version is None else name.replace(".pdf", f" v{version + 1}.pdf"), download)
 
 
+@router.get("/contracts/{cid}/extract")
+def contracts_extract(cid: int, download: bool = False, db: Session = Depends(get_db, scope="function"),
+                      user: User = Depends(current_user)):
+    """The registry extract saved with the contract (data.extract_file, registry.store_extract)."""
+    from app import storage
+    from app.services import registry
+    key = str((C.get(db, cid, user).data or {}).get("extract_file") or "")
+    data = storage.read(key) if registry.EXTRACT_KEY_RE.match(key) else None  # data is the wizard's: only our extracts
+    if not data:
+        raise DomainError("not_found", "Выписка не сохранена", 404)
+    return _pdf(data, f"Выписка из реестра, договор {cid}.pdf", download)
+
+
 @router.post("/contracts/{cid}/sign")
 async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Session = Depends(get_db, scope="function"),
                          user: User = Depends(current_user)):

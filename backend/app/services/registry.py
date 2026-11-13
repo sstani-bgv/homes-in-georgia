@@ -5,9 +5,12 @@ naprweb.reestri.gov.ge (the form my.gov.ge service 176 embeds) searches applicat
 (its documents, the extract ამონაწერი) asks for reCAPTCHA. So we only list them: the owner taps one, NAPR's own page
 opens on his phone, he ticks the CAPTCHA himself, downloads the extract and uploads it back (properties.sign_contract).
 The search has no CORS headers, so the browser can't call it: this proxy, scoped to a signing token, cached."""
+import hashlib
 import io
+import ipaddress
 import logging
 import re
+import socket
 import time
 from datetime import datetime, timezone
 
@@ -116,12 +119,17 @@ def _area(text: str, code: str | None) -> str | None:
     first, the flat after it). None for a land plot's code (≤ 5 parts, e.g. 66.56.06.005): its area isn't a flat's."""
     if not code or len(code.split(".")) < 6:
         return None
+    # the ownership table («მესაკუთრე: საკუთრების ტიპი: … ფართი: წილი:») holds the flat's own area, maybe on its own lines
+    t = re.search(r"მესაკუთრე\s*:\s*საკუთრების\s+ტიპი(.{0,600}?)(?:იპოთეკა|$)", text, re.S)
+    if t and (m := re.search(_NUM + _SQM, t.group(1), re.I)):
+        best = m.group(1).replace(",", ".")
+        return best[:-3] if best.endswith(".00") else best
     best = None
     for line in text.splitlines():
         m = re.search(_NUM + _SQM, line, re.I)
         if not m or "ფართ" not in line:
             continue
-        if re.search(r"ნაკვეთ|მიწ", line):  # the land plot
+        if re.search(r"ნაკვეთ|მიწ|დაზუსტებული", line):  # the land plot («დაზუსტებული ფართობი» is the plot's)
             continue
         best = m.group(1).replace(",", ".")
     if best and best.endswith(".00"):
@@ -133,7 +141,7 @@ def _street(addr: str) -> str:
     """«ქალაქი თბილისი, ვაკის რაიონი, ჭავჭავაძის გამზირი, N 5, სართული 4, ბინა N 12» → «ჭავჭავაძის გამზირი, N 5»:
     the contract prints the city, the floor and the flat on their own («ქ. თბილისი, [[street_house]], სარ. …»)."""
     parts = [p.strip(" .") for p in addr.split(",")]
-    keep = [p for p in parts if p and not re.search(r"თბილისი|რაიონი|^სართ|ბინა|^ბ\.|სადარბაზო|^კორპ", p)]
+    keep = [p for p in parts if p and not re.search(r"თბილისი|^ქალაქი|^ქ\.|რაიონი|^სართ|ბინა|^ბ\.|სადარბაზო|^კორპ", p)]
     return re.sub(r"\s+", " ", ", ".join(keep)).strip()
 
 
@@ -145,7 +153,8 @@ def parse_extract(text: str) -> dict:
     out: dict = {}
     if code := code_from_text(text):
         out["cadastral_code"] = code
-    m = re.search(r"მისამართი\s*:?\s*(.+)", text)
+    # the address may wrap onto the next lines (until the next «label:» line)
+    m = re.search(r"მისამართი\s*:?\s*(.+(?:\n(?![^\n]*:)[^\n]+){0,2})", text)
     if m:
         addr = re.sub(r"\s+", " ", m.group(1)).strip(" ,.")[:300]
         out["address"] = addr
@@ -167,6 +176,76 @@ def parse_extract(text: str) -> dict:
         out["owner_full_name"] = re.sub(r"\s+", " ", o.group(1)).strip()
         out["owner_personal_number"] = o.group(2)
     return out
+
+
+# ---------------------------------------------------------------- the extract by a link the agent pasted
+
+# where NAPR serves extracts: the «download» link is https://bs.napr.gov.ge/GetBlob?pid=…&bid=… (docs napr-api-findings);
+# the extract's footer names public.reestri.gov.ge. Only these hosts (and their subdomains): no SSRF to anything else.
+EXTRACT_HOSTS = ("napr.gov.ge", "reestri.gov.ge")
+MAX_EXTRACT = 10 * 1024 * 1024
+EXTRACT_PREFIX = "private/registry-extracts/"
+EXTRACT_KEY_RE = re.compile(r"^private/registry-extracts/[0-9a-f]{64}\.pdf$")
+NOT_NAPR = "Ссылка не на выписку NAPR: нужна ссылка вида https://bs.napr.gov.ge/GetBlob?…"
+
+
+def _check_url(url: str) -> httpx.URL:
+    """https on a NAPR host whose every address is public; http is upgraded (old links); DomainError otherwise."""
+    try:
+        u = httpx.URL((url or "").strip())
+    except Exception:
+        raise DomainError("bad_url", NOT_NAPR, 422)
+    host = (u.host or "").lower().rstrip(".")
+    if u.scheme not in ("http", "https") or not any(host == h or host.endswith("." + h) for h in EXTRACT_HOSTS):
+        raise DomainError("bad_url", NOT_NAPR, 422)
+    if u.port not in (None, 80, 443):
+        raise DomainError("bad_url", NOT_NAPR, 422)
+    try:
+        addrs = {a[4][0] for a in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)}
+    except OSError:
+        raise DomainError("download_failed", "Не удалось скачать выписку: сайт NAPR не отвечает", 502)
+    # ponytail: checked before connecting, not pinned (DNS rebinding); the host allowlist is the main guard
+    if not addrs or any(not ipaddress.ip_address(a.split("%")[0]).is_global for a in addrs):
+        raise DomainError("bad_url", NOT_NAPR, 422)
+    return u.copy_with(scheme="https", port=None)
+
+
+def download_extract(url: str) -> bytes:
+    """The PDF behind the link: redirects followed by hand (each hop re-checked), ≤ 10 MB, must start with %PDF."""
+    u = _check_url(url)
+    if "/_dea/" in str(u) or u.fragment:  # the application page (#/view/…), behind its CAPTCHA
+        raise DomainError("bad_url", "Это ссылка на заявку, а не на выписку: откройте заявку, нажмите на выписку (PDF) и скопируйте её ссылку", 422)
+    try:
+        with httpx.Client(timeout=httpx.Timeout(20, connect=6), follow_redirects=False,
+                          headers={"User-Agent": "Mozilla/5.0", "Accept": "application/pdf,*/*"}) as cl:
+            for _ in range(5):
+                with cl.stream("GET", u) as r:
+                    if r.is_redirect:
+                        u = _check_url(str(r.url.join(r.headers.get("location", ""))))
+                        continue
+                    r.raise_for_status()
+                    data = bytearray()
+                    for chunk in r.iter_bytes():
+                        data += chunk
+                        if len(data) > MAX_EXTRACT:
+                            raise DomainError("too_large", "Выписка больше 10 МБ", 422)
+                    break
+            else:
+                raise DomainError("download_failed", "Не удалось скачать выписку: слишком много перенаправлений", 502)
+    except httpx.HTTPError as e:
+        log.warning("extract download %s: %s", u.host, e)  # not the URL: its bid opens the owner's document
+        raise DomainError("download_failed", "Не удалось скачать выписку по ссылке — проверьте ссылку или загрузите PDF", 502)
+    if not bytes(data[:1024]).lstrip().startswith(b"%PDF-"):
+        raise DomainError("not_pdf", "По ссылке не PDF-выписка: откройте выписку на сайте NAPR и скопируйте ссылку на неё", 422)
+    return bytes(data)
+
+
+def store_extract(pdf: bytes) -> str:
+    """Private storage, keyed by the content hash (the same extract twice = one file; the key can't be guessed)."""
+    from app import storage
+    key = f"{EXTRACT_PREFIX}{hashlib.sha256(pdf).hexdigest()}.pdf"
+    storage.put(key, pdf)
+    return key
 
 
 def code_from_text(text: str) -> str | None:

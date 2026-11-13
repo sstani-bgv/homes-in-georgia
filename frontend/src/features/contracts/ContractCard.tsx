@@ -252,6 +252,19 @@ export function ContractView({ id, base }: { id: number; base: string }) {
     if (w) w.location.href = url; else window.location.href = url;
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
+  const extractUrl = String(c.data?.extract_url || '');
+  if (extractUrl || c.data?.extract_file) items.push(['Выписка из реестра', (
+    <span className="row row-wrap gap-sm">
+      {/^https:\/\//.test(extractUrl) && <a href={extractUrl} target="_blank" rel="noopener noreferrer">ссылка NAPR</a>}
+      {c.data?.extract_file && <a href="#" onClick={async (e) => {
+        e.preventDefault();
+        const w = window.open('', '_blank');
+        const url = URL.createObjectURL(await api.contracts.extract(c.id));
+        if (w) w.location.href = url; else window.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }}>сохранённый PDF</a>}
+    </span>
+  )]);
   if (c.signed_at) items.push(['Подписан', `${fmtDateTime(c.signed_at)}${c.signed_by ? ` · ${c.signed_by.name}` : ''}${c.has_signed_pdf ? ' · скан приложен' : ''}${c.in_drive ? ' · в Google Drive' : ''}`]);
   if (c.status === 'closed_no_deal') items.push(['Причина', `${c.close_reason_label}${c.close_comment ? `: ${c.close_comment}` : ''}`],
     ['Закрыл', `${c.closed_by?.name || '—'} · ${fmtDateTime(c.closed_at)}`]);
