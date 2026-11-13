@@ -5,18 +5,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Download, FileText } from 'lucide-react';
-import { http } from '../api/client';
+import { ApiError, http } from '../api/client';
 import type { ESignView } from '../api/types';
-import { errText } from '../components/toast';
-import { Badge, Button, ErrorBox, Field, Input, Loading, Seg } from '../components/ui';
+import { Badge, Button, Field, Input, Loading, Seg } from '../components/ui';
 import { SignaturePad, signaturePng } from '../components/SignaturePad';
-import { LANG_LABEL, type Lang } from '../lib/exclusivePdf';
+import type { Lang } from '../lib/exclusivePdf';
 import { fmtDateTime, phoneInput } from '../lib/format';
 
 const UI: Record<Lang, {
   intro: string; read: string; name: string; pid: string; phone: string; sign: string; clear: string; agree: string;
   send: string; done: string; waiting: string; complete: string; download: string; parties: string; signed: string; pending: string;
-  as: string; toSign: string;
+  as: string; toSign: string; docLang: Record<ESignView['lang'], string>; err: Record<string, string>; errDefault: string;
 }> = {
   ka: {
     intro: 'ხელშეკრულების ელექტრონული ხელმოწერა', read: 'გთხოვთ, ყურადღებით წაიკითხოთ ხელშეკრულება', name: 'სახელი და გვარი',
@@ -25,6 +24,17 @@ const UI: Record<Lang, {
     waiting: 'ველოდებით მეორე მხარის ხელმოწერას. ხელმოწერილ PDF-ს ამავე ბმულზე ნახავთ.',
     complete: 'ხელშეკრულება ხელმოწერილია ორივე მხარის მიერ.', download: 'PDF-ის ჩამოტვირთვა', parties: 'მხარეები',
     signed: 'ხელმოწერილია', pending: 'ელოდება', as: 'თქვენ აწერთ ხელს, როგორც', toSign: 'ხელმოწერაზე გადასვლა ↓',
+    docLang: { GEO: 'ხელშეკრულების ენა: ქართული', RU: 'ხელშეკრულების ენა: ქართული და რუსული', EN: 'ხელშეკრულების ენა: ქართული და ინგლისური' },
+    err: {
+      not_found: 'ბმული აღარ მოქმედებს. სთხოვეთ აგენტს ახალი ბმული.',
+      already_signed: 'თქვენ უკვე მოაწერეთ ხელი ამ ხელშეკრულებას.',
+      bad_status: 'ხელშეკრულება უკვე გაფორმებულია.',
+      doc_changed: 'ხელშეკრულების ტექსტი შეიცვალა: განაახლეთ გვერდი.',
+      missing_fields: 'შეავსეთ სახელი და გვარი, პირადი ნომერი და ტელეფონი.',
+      consent_required: 'საჭიროა თანხმობა ხელშეკრულების პირობებზე.',
+      bad_signature: 'ხელმოწერა ვერ მივიღეთ, მოაწერეთ ხელი თავიდან.',
+    },
+    errDefault: 'რაღაც შეცდომა მოხდა. სცადეთ თავიდან.',
   },
   ru: {
     intro: 'Электронное подписание договора', read: 'Пожалуйста, внимательно прочитайте договор', name: 'ФИО',
@@ -33,6 +43,17 @@ const UI: Record<Lang, {
     waiting: 'Ждём подпись второй стороны. Подписанный PDF появится по этой же ссылке.',
     complete: 'Договор подписан обеими сторонами.', download: 'Скачать PDF', parties: 'Стороны',
     signed: 'подписал(а)', pending: 'ожидает', as: 'Вы подписываете как', toSign: 'К подписи ↓',
+    docLang: { GEO: 'Язык договора: грузинский', RU: 'Язык договора: грузинский и русский', EN: 'Язык договора: грузинский и английский' },
+    err: {
+      not_found: 'Ссылка недействительна. Попросите агента прислать новую.',
+      already_signed: 'Вы уже подписали этот договор.',
+      bad_status: 'Договор уже оформлен.',
+      doc_changed: 'Текст договора изменился: обновите страницу.',
+      missing_fields: 'Заполните ФИО, личный номер и телефон.',
+      consent_required: 'Нужно согласие с условиями договора.',
+      bad_signature: 'Подпись не получена, распишитесь ещё раз.',
+    },
+    errDefault: 'Что-то пошло не так. Попробуйте ещё раз.',
   },
   en: {
     intro: 'Electronic contract signing', read: 'Please read the contract carefully', name: 'Full name',
@@ -41,10 +62,25 @@ const UI: Record<Lang, {
     waiting: 'Waiting for the other party to sign. The signed PDF will be available at this same link.',
     complete: 'The contract is signed by both parties.', download: 'Download PDF', parties: 'Parties',
     signed: 'signed', pending: 'pending', as: 'You are signing as', toSign: 'Go to signing ↓',
+    docLang: { GEO: 'Contract language: Georgian', RU: 'Contract language: Georgian and Russian', EN: 'Contract language: Georgian and English' },
+    err: {
+      not_found: 'This link is no longer valid. Please ask the agent for a new one.',
+      already_signed: 'You have already signed this contract.',
+      bad_status: 'The contract has already been finalised.',
+      doc_changed: 'The contract text has changed: please reload the page.',
+      missing_fields: 'Please fill in your full name, personal ID number and phone.',
+      consent_required: 'Please confirm that you agree to the terms of the contract.',
+      bad_signature: 'We did not receive your signature, please sign again.',
+    },
+    errDefault: 'Something went wrong. Please try again.',
   },
 };
 
-const DEFAULT_LANG: Record<ESignView['lang'], Lang> = { GEO: 'ka', RU: 'ru', EN: 'en' };
+/** The page opens in the signer's language (11-13): owners are mostly Georgian, tenants mostly foreigners. */
+const ROLE_LANG: Record<ESignView['role'], Lang> = { owner: 'ka', tenant: 'en' };
+const SWITCH: { value: Lang; label: string }[] = [{ value: 'ka', label: 'ქართ' }, { value: 'en', label: 'ENG' }, { value: 'ru', label: 'РУС' }];
+/** Server errors come in Russian (the CRM's language): show the party the text for its code in the page language. */
+const errIn = (t: (typeof UI)[Lang], e: unknown) => t.err[(e instanceof ApiError && e.code) || ''] || t.errDefault;
 
 /** The contract as stored (cleaned server-side), in a sandboxed frame — no scripts; sized once to its content.
  *  (Measured from the body, not the frame's own viewport: that grows with the frame and never settles.) */
@@ -79,7 +115,7 @@ export function ESignPage() {
   useEffect(() => {
     if (v) setF((x) => ({ ...x, full_name: x.full_name || v.prefill.full_name, personal_id: x.personal_id || v.prefill.personal_id }));
   }, [v]);
-  const l: Lang = lang || (v ? DEFAULT_LANG[v.lang] : 'ka');
+  const l: Lang = lang || (v ? ROLE_LANG[v.role] : 'en');
   const t = UI[l];
   const sign = useMutation({
     mutationFn: () => http.post<ESignView>(`/public/esign/${token}`, {
@@ -91,13 +127,14 @@ export function ESignPage() {
 
   const wrap = (body: React.ReactNode) => <div style={{ maxWidth: 820, margin: '0 auto', padding: '24px 16px' }}><div className="card card-pad col gap-lg">{body}</div></div>;
   if (q.isLoading) return wrap(<Loading />);
-  if (q.error || !v) return wrap(<ErrorBox error={q.error} />);
+  const langSwitch = <Seg value={l} onChange={setLang} options={SWITCH} />;
+  if (q.error || !v) return wrap(<><div className="row" style={{ justifyContent: 'flex-end' }}>{langSwitch}</div><div className="alert alert-warn">{errIn(t, q.error)}</div></>);
 
   const head = (
     <>
       <div className="row row-between row-wrap gap-sm">
         <b style={{ color: '#1D3560' }}>Homes in Georgia · Rent in Tbilisi</b>
-        <Seg value={l} onChange={setLang} options={(Object.keys(LANG_LABEL) as Lang[]).map((x) => ({ value: x, label: LANG_LABEL[x] }))} />
+        {langSwitch}
       </div>
       <div className="col gap-sm">
         <h2 style={{ fontSize: 20 }}><FileText size={20} style={{ verticalAlign: -3, marginRight: 6 }} />{t.intro}</h2>
@@ -133,6 +170,7 @@ export function ESignPage() {
         <span className="label">{t.read}</span>
         <Button size="sm" variant="secondary" onClick={() => document.getElementById('esign-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{t.toSign}</Button>
       </div>
+      <span className="muted" style={{ fontSize: 13 }}>{t.docLang[v.lang]}</span>
       {v.html && <ContractFrame html={v.html} />}
     </div>
     <div className="col gap-sm" id="esign-form">
@@ -145,7 +183,7 @@ export function ESignPage() {
     </div>
     <div className="col gap-sm"><span className="label">{t.sign}</span><SignaturePad padRef={pad} onInk={setInk} clearLabel={t.clear} /></div>
     <label className="row gap-sm" style={{ cursor: 'pointer' }}><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />{t.agree}</label>
-    {sign.error && <div className="alert alert-warn">{errText(sign.error)}</div>}
+    {sign.error && <div className="alert alert-warn">{errIn(t, sign.error)}</div>}
     <Button size="lg" variant="ok" disabled={!ready} loading={sign.isPending} onClick={() => sign.mutate()}>{t.send}</Button>
   </>);
 }

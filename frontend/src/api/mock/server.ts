@@ -579,6 +579,38 @@ on('POST', '/contracts/:id/send-client', (m, b) => {
     extract: !!(c.data as Record<string, unknown> | undefined)?.extract_file };
   return cxOut(c);
 });
+// electronic signing (services/esign.py): a token per party, the public page /esign/<token>; 11-13
+const ES_LABEL = { owner: { ka: 'გამქირავებელი', ru: 'Арендодатель', en: 'Owner' }, tenant: { ka: 'დამქირავებელი', ru: 'Арендатор', en: 'Tenant' } };
+type MockSigner = { role: 'owner' | 'tenant'; label: string; path: string | null; signed_at: string | null; full_name: string | null };
+on('POST', '/contracts/:id/esign', (m) => {
+  const c = contracts.find((x) => x.id === Number(m[1]))!;
+  c.esign = { complete: false, doc_sha256: 'mock', signers: (['owner', 'tenant'] as const).map((role) => ({
+    role, label: role === 'owner' ? 'Собственник' : 'Арендатор', path: `/esign/mock-${role}-${c.id}-xxxxxxxxxxxxxxxx`, signed_at: null, full_name: null })) };
+  return cxOut(c);
+});
+on('POST', '/contracts/:id/esign/cancel', (m) => { const c = contracts.find((x) => x.id === Number(m[1]))!; c.esign = null; return cxOut(c); });
+const esFind = (token: string) => {
+  const [, role, id] = token.split('-');
+  const c = contracts.find((x) => x.id === Number(id)) || { id: Number(id) || 1, lang: 'EN', address: 'Тбилиси, ул. Демо, 1' };
+  const signers = ((c.esign as { signers: MockSigner[] } | undefined)?.signers) || [];
+  if (!ES_LABEL[role as 'owner']) throw new ApiError(404, 'Ссылка недействительна. Попросите агента прислать новую', 'not_found');
+  return { c, s: signers.find((x) => x.role === role), role: role as 'owner' | 'tenant', signers };
+};
+const esView = (token: string) => {
+  const { c, s, role, signers } = esFind(token);
+  return { role, role_label: ES_LABEL[role], contract_id: c.id, kind: 'rent', lang: c.lang || 'EN', address: c.address || 'Тбилиси, ул. Демо, 1', cadastral: null,
+    doc_sha256: 'mock', prefill: { full_name: '', personal_id: '' }, signed_at: s?.signed_at || null, full_name: s?.full_name || null,
+    parties: (['owner', 'tenant'] as const).map((r) => ({ role: r, label: ES_LABEL[r], signed: !!signers.find((x) => x.role === r)?.signed_at })),
+    complete: false, html: s?.signed_at ? null : '<html><head></head><body><p>ხელშეკრულება / Lease agreement (mock)</p><p>________________________</p></body></html>' };
+};
+on('GET', '/public/esign/:token', (m) => esView(m[1]));
+on('POST', '/public/esign/:token', (m, b) => {
+  const { s } = esFind(m[1]);
+  if (!String(b.full_name || '').trim()) throw new ApiError(422, 'Заполните ФИО, личный номер и телефон', 'missing_fields');
+  if (s) Object.assign(s, { signed_at: new Date().toISOString(), full_name: b.full_name });
+  return esView(m[1]);
+});
+
 // the registry (services/registry.py): one NAPR application for any owner ID; an extract link fills demo fields
 on('GET', '/registry/known', () => ({ items: [] }));
 on('GET', '/registry/applications', () => ({ total: 1, page: 1, lastpage: 1, items: [{ app_id: '1', reg_number: '892026010466', date: new Date().toISOString(),
