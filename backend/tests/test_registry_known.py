@@ -42,15 +42,6 @@ def test_known_by_personal_id(db, client):
     assert client.get("/api/registry/known?personal_id=01001012345").status_code == 401
 
 
-def test_extract_upload(db, client, monkeypatch):
-    from app.services import registry
-    ag = make_user(db, "agent")
-    monkeypatch.setattr(registry, "text_of_pdf", lambda pdf: FLAT_PAGE)
-    r = client.post("/api/registry/extract-code", files={"file": ("e.pdf", b"%PDF-1.4 x", "application/pdf")}, headers=auth(ag))
-    assert r.json()["cadastral_code"] == "01.14.12.003.045.01.512" and r.json()["fields"]["floor"] == "4"
-    assert client.post("/api/registry/extract-code", files={"file": ("e.pdf", b"nope", "application/pdf")}, headers=auth(ag)).status_code == 400
-
-
 def test_code_from_pasted_registry_page(db, client):
     ag = make_user(db, "agent")
     page = ("საჯარო რეესტრის ეროვნული სააგენტო\\nგანცხადება № 882013116537\\nნაკვეთის საკადასტრო კოდი: 01.14.12.003.045\\n"
@@ -95,7 +86,8 @@ def test_parse_extract_fields():
     assert flat == {
         "cadastral_code": "01.14.12.003.045.01.512",
         "address": "ქალაქი თბილისი, ვაკის რაიონი, ჭავჭავაძის გამზირი, N 5, სართული 4, ბინა N 12",
-        "street_house": "ჭავჭავაძის გამზირი, N 5", "floor": "4", "apartment_number": "12", "apartment_area": "65.30",
+        "street_house": "ჭავჭავაძის გამზირი, N 5", "street_house_en": "Chavchavadze Ave, 5", "floor": "4", "apartment_number": "12",
+        "apartment_area": "65",
         "owner_full_name": "ანა ტესტი", "owner_personal_number": "01001088888",
     }
 
@@ -124,8 +116,9 @@ def test_parse_new_extract():
     assert R.parse_extract(NEW_EXTRACT) == {
         "cadastral_code": "05.36.24.120.02.01.510",
         "address": "ქალაქი ბათუმი , წმინდა ანდრია პირველწოდებულის III ჩიხი N12",
-        "street_house": "წმინდა ანდრია პირველწოდებულის III ჩიხი N12", "floor": "11", "apartment_number": "76",
-        "apartment_area": "30.40", "owner_full_name": "ნინო ტესტი", "owner_personal_number": "01001077777",
+        "street_house": "წმინდა ანდრია პირველწოდებულის III ჩიხი N12",
+        "street_house_en": "Tsminda Andria Pirveltsodebuli III Dead-end, 12", "floor": "11", "apartment_number": "76",
+        "apartment_area": "30", "owner_full_name": "ნინო ტესტი", "owner_personal_number": "01001077777",
     }
 
 
@@ -166,3 +159,22 @@ def test_extract_from_url_saved_with_contract(db, client, monkeypatch):
                         headers=auth(ag2)).json()
     assert client.get(f"/api/contracts/{other['id']}/extract", headers=auth(ag2)).status_code == 404
     assert client.post("/api/registry/extract-from-url", json={"url": url}).status_code == 401
+
+
+def test_address_en_and_area_rounding():
+    """11-13: the English address for the RU / ENG contracts (national romanization, street type after the name) and
+    whole m². Made-up streets and numbers."""
+    from app.services import registry as R
+    for geo, en in (("ამბერკი ტაბიძის ქუჩა, N 43", "Amberki Tabidze St, 43"),
+                    ("ქალაქი თბილისი , ქუჩა ადამ მიცკევიჩი , N 54", "Adam Mitskevichi St, 54, Tbilisi"),
+                    ("რუსთაველის გამზირი, N 7ა", "Rustaveli Ave, 7a"),
+                    ("კოსტავას ქუჩა N12", "Kostava St, 12"),
+                    ("ბახტრიონის II შესახვევი, N 3", "Bakhtrioni II Lane, 3"),
+                    ("ვაჟა-ფშაველას ჩიხი, N 1", "Vazha-Pshavela Dead-end, 1"),
+                    ("თავისუფლების მოედანი, N 2", "Tavisupleba Sq, 2"),
+                    ("ჟღენტის ქუჩა, N 9", "Zhghenti St, 9"),
+                    ("Demo St, 1", "Demo St, 1"), ("ул. Демо, 1", "ул. Демо, 1")):
+        assert R.address_en(geo) == en, geo
+    flat = "საკადასტრო კოდი 01.14.12.003.045.01.512\nუძრავი ნივთის ფართი {} კვ.მ."
+    for area, whole in (("30.40", "30"), ("52.5", "53"), ("52.4", "52"), ("45", "45")):
+        assert R.parse_extract(flat.format(area))["apartment_area"] == whole

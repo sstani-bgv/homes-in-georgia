@@ -586,7 +586,7 @@ on('GET', '/registry/applications', () => ({ total: 1, page: 1, lastpage: 1, ite
 on('POST', '/registry/extract-from-url', (_m, b) => {
   if (!/napr\.gov\.ge|reestri\.gov\.ge/.test(String(b.url))) throw new ApiError(422, 'Ссылка не на выписку NAPR: нужна ссылка вида https://bs.napr.gov.ge/GetBlob?…');
   return { url: b.url, file: 'private/registry-extracts/mock.pdf', cadastral_code: '01.10.14.016.017.01.001',
-    fields: { cadastral_code: '01.10.14.016.017.01.001', street_house: 'ул. Демо, 1', apartment_number: '7', apartment_area: '50', owner_full_name: 'Демо Собственник', owner_personal_number: '01001000001' } };
+    fields: { cadastral_code: '01.10.14.016.017.01.001', street_house: 'ამბერკი ტაბიძის ქუჩა, N 43', street_house_en: 'Amberki Tabidze St, 43', apartment_number: '7', apartment_area: '52', owner_full_name: 'Демо Собственник', owner_personal_number: '01001000001' } };
 });
 
 async function formToBody(fd: FormData): Promise<Record<string, unknown>> {

@@ -1,15 +1,15 @@
 // The contract wizard, «Объект» tab: the cadastral code by the owner's personal ID.
 //  1. The CRM's own records (backend registry.known: earlier contracts, e-signatures, exclusive confirmations) — the
 //     code fills in by itself, no registry, no CAPTCHA.
-//  2. Otherwise the owner's applications in the Public Registry (NAPR): open one, tick its CAPTCHA, copy the whole page
-//     and press «Вставить из реестра» — the code is found in the text (backend registry.code_from_text); or upload the
-//     extract (PDF). The CRM can't read the NAPR page itself (another site, behind NAPR's own CAPTCHA).
-import { useRef, useState } from 'react';
+//  2. Otherwise the owner's applications in the Public Registry (NAPR): open one, tick its CAPTCHA, copy the extract's
+//     link and come back — «Вставить ссылку на выписку» (or the link field) downloads it and fills the fields.
+//     11-13: only the link — the «Вставить из реестра» (page text) and «Загрузить выписку (PDF)» buttons are gone.
+import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, ClipboardPaste, Database, Link2, Upload } from 'lucide-react';
+import { CheckCircle2, Database, Link2 } from 'lucide-react';
 import { http } from '../../api/client';
-import { errText, useToast } from '../../components/toast';
-import { Button, Input, Modal, Textarea } from '../../components/ui';
+import { errText } from '../../components/toast';
+import { Button, Input } from '../../components/ui';
 import { REG_RU, RegistryApps, day } from '../../components/RegistryApps';
 
 export interface KnownObject {
@@ -18,7 +18,7 @@ export interface KnownObject {
 }
 
 /** What a registry extract / the pasted NAPR page gave (backend registry.parse_extract): only the keys found. */
-export type ExtractFields = Partial<Record<'cadastral_code' | 'street_house' | 'floor' | 'apartment_number' | 'apartment_area'
+export type ExtractFields = Partial<Record<'cadastral_code' | 'street_house' | 'street_house_en' | 'floor' | 'apartment_number' | 'apartment_area'
   | 'owner_full_name' | 'owner_personal_number' | 'address', string>>;
 interface ExtractOut { cadastral_code: string | null; fields: ExtractFields }
 export const parseRegistryText = (text: string) => http.post<ExtractOut>('/registry/parse-text', { text: text.slice(0, 500_000) });
@@ -83,39 +83,7 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, ex
   personalId: string; current: string; onKnown: (o: KnownObject) => void; onFields: (f: ExtractFields) => string[]; onCode?: (code: string) => void;
   extractUrl?: string; onExtract: (url: string, file: string) => void;
 }) {
-  const toast = useToast();
   const known = useKnownObjects(personalId);
-  const file = useRef<HTMLInputElement>(null);
-  const [pasteOpen, setPasteOpen] = useState(false);
-  const [pasted, setPasted] = useState('');
-  const parse = useMutation({
-    mutationFn: parseRegistryText,
-    onSuccess: (r) => {
-      if (Object.keys(r.fields).length) { onFields(r.fields); setPasteOpen(false); setPasted(''); }
-      else { setPasteOpen(true); toast('В тексте не нашлось данных реестра. Скопируйте всю страницу заявки после «Я не робот» или текст выписки', true); }
-    },
-    onError: (e) => toast(errText(e), true),
-  });
-  // the clipboard straight away where the browser allows it (Safari asks «Вставить»); else a box to paste into
-  const pasteFromRegistry = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text.trim()) { parse.mutate(text); return; }
-    } catch { /* not allowed here (Telegram, an older browser): paste by hand */ }
-    setPasteOpen(true);
-  };
-  const read = useMutation({
-    mutationFn: (f: File) => {
-      const fd = new FormData();
-      fd.append('file', f);
-      return http.post<ExtractOut>('/registry/extract-code', fd);
-    },
-    onSuccess: (r) => {
-      if (Object.keys(r.fields).length) onFields(r.fields);
-      else toast('В выписке не нашлось данных (возможно, это скан) — впишите их вручную', true);
-    },
-    onError: (e) => toast(errText(e), true),
-  });
   const x = useExtractLink(extractUrl, onFields, onExtract);
   const link = <ExtractLink x={x} />;
   if (!personalId) {
@@ -151,20 +119,7 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, ex
         </div>
       )}
       <RegistryApps base="/registry/applications" personalId={personalId} onCode={onCode} onLink={x.go} t={{ ...REG_RU, listTitle: items.length ? 'Другие объекты — заявки в Публичном реестре' : REG_RU.listTitle,
-        listHint: 'Откройте заявку по этому объекту и на сайте реестра отметьте «Я не робот». Скопируйте ссылку на выписку (кнопка скачивания: долгое нажатие → «Скопировать ссылку») и вернитесь сюда — выписка загрузится сама, или нажмите «Вставить ссылку на выписку». Если ссылки нет — выделите всю страницу и скопируйте (телефон: долгое нажатие → «Выбрать всё» → «Скопировать»; компьютер: Cmd/Ctrl+A, Cmd/Ctrl+C) и нажмите «Вставить из реестра». Или загрузите выписку (PDF), сохранённую в телефоне. Подставятся код, адрес, этаж, квартира, площадь и собственник.' }} />
-      <input ref={file} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read.mutate(f); }} />
-      <div className="row row-wrap gap-sm">
-        <Button loading={parse.isPending} onClick={pasteFromRegistry}><ClipboardPaste size={16} />Вставить из реестра</Button>
-        <Button variant="secondary" loading={read.isPending} onClick={() => file.current?.click()}><Upload size={16} />Загрузить выписку (PDF)</Button>
-      </div>
-      <Modal open={pasteOpen} onClose={() => setPasteOpen(false)} title="Вставить из реестра">
-        <div className="col gap">
-          <span className="muted" style={{ fontSize: 13 }}>Вставьте сюда текст страницы заявки из реестра (долгое нажатие → «Вставить»). Кадастровый код найдётся сам.</span>
-          <Textarea rows={6} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="Текст страницы реестра"
-            onPaste={(e) => { const t = e.clipboardData.getData('text'); if (t.trim()) { e.preventDefault(); setPasted(t); parse.mutate(t); } }} />
-          <Button disabled={!pasted.trim()} loading={parse.isPending} onClick={() => parse.mutate(pasted)}>Найти код</Button>
-        </div>
-      </Modal>
+        listHint: 'Откройте заявку по этому объекту и на сайте реестра отметьте «Я не робот». Скопируйте ссылку на выписку (кнопка скачивания: долгое нажатие → «Скопировать ссылку») и вернитесь сюда — выписка загрузится сама, или нажмите «Вставить ссылку на выписку». Подставятся код, адрес, этаж, квартира, площадь и собственник.' }} />
     </div>
   );
 }
