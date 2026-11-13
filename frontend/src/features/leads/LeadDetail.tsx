@@ -109,7 +109,6 @@ export function AssignModal({ lead, open, onClose }: { lead: Lead; open: boolean
               <Avatar name={r.agent.name} src={r.agent.photo_url} />
               <div className="grow">
                 <div className="row gap-sm row-wrap"><b>{r.agent.name}</b>{(r.recommended ?? i === 0) && <Badge tone="red">рекомендуем</Badge>}{r.agent.level ? <Badge>{r.agent.level}%</Badge> : null}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{(r.agent.districts || []).join(', ') || 'районы не указаны'}</div>
                 <div className="row row-wrap gap-sm mt" style={{ marginTop: 6 }}>{r.reasons.map((x) => <Badge key={x} tone="grey">{x}</Badge>)}</div>
               </div>
               <Button size="sm" variant={i === 0 ? 'primary' : 'secondary'} loading={assign.isPending && assign.variables === r.agent.id} onClick={() => assign.mutate(r.agent.id)}>Назначить</Button>

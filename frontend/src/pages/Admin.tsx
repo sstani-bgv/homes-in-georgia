@@ -8,7 +8,7 @@ import { ADMIN_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Input, Loading, Modal, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
-import { DISTRICTS, ROLE_LABEL, ago, fmtDateTime, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
+import { ROLE_LABEL, ago, fmtDateTime, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
 import { EMAIL_RE, birthdayLabel } from './Cabinet';
 import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
@@ -35,7 +35,6 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   });
   const promote = useMutation({ mutationFn: () => api.users.promote(user!.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast('Рекрут переведён в агенты'); onDone(); } });
   const suggest = useMutation({ mutationFn: () => api.users.suggestTag(`${f.first_name || ''} ${f.last_name || ''}`.trim(), user?.id), onSuccess: (r) => set('agent_tag', r.tag), onError: (e) => toast(errText(e), true) });
-  const toggleDistrict = (d: string) => set('districts', (f.districts || []).includes(d) ? (f.districts || []).filter((x) => x !== d) : [...(f.districts || []), d]);
   const plans = f.plans || { photo: 15, showing: 15, stickers: 15, rental: 15 };
   // required for every employee (Irakli 11-12); the backend checks the same
   const gaps = [!f.first_name?.trim() && 'имя', !f.last_name?.trim() && 'фамилия', !f.birth_date && 'дата рождения',
@@ -61,10 +60,6 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         {f.role === 'recruit' ? (
           <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.works_as_agent).map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
-      </div>
-      <div>
-        <span className="label">Районы</span>
-        <div className="row row-wrap gap-sm mt">{DISTRICTS.map((d) => <button key={d} type="button" className={`chip ${(f.districts || []).includes(d) ? 'active' : ''}`} onClick={() => toggleDistrict(d)}>{d}</button>)}</div>
       </div>
       {f.role === 'recruit' && (
         <div>
@@ -122,7 +117,6 @@ function InviteForm({ onDone }: { onDone: () => void }) {
     onError: (e) => toast(errText(e), true),
   });
   if (made) return <div className="col gap-lg"><InviteLinks inv={made} /><div><Button variant="secondary" onClick={onDone}>Готово</Button></div></div>;
-  const toggle = (d: string) => setF((x) => ({ ...x, districts: x.districts.includes(d) ? x.districts.filter((y) => y !== d) : [...x.districts, d] }));
   return (
     <div className="col gap-lg">
       <div className="form-grid">
@@ -130,10 +124,6 @@ function InviteForm({ onDone }: { onDone: () => void }) {
         <Field label="Роль"><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r)).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
         <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => setF({ ...f, level: v || null })} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
         <Field label="Хэштег агента" hint="Можно задать позже"><Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => setF({ ...f, agent_tag: e.target.value.replace(/^#+/, '') })} /></Field>
-      </div>
-      <div>
-        <span className="label">Районы</span>
-        <div className="row row-wrap gap-sm mt">{DISTRICTS.map((d) => <button key={d} type="button" className={`chip ${f.districts.includes(d) ? 'active' : ''}`} onClick={() => toggle(d)}>{d}</button>)}</div>
       </div>
       {atLeast({ role: f.role }, 'operator') && <Switch checked={f.works_as_agent} onChange={(v) => setF({ ...f, works_as_agent: v })} label="Работает как агент" />}
       <div><Button loading={create.isPending} onClick={() => create.mutate()}><UserPlus size={16} />Создать приглашение</Button></div>
@@ -200,7 +190,6 @@ function Users() {
                   <td><Badge tone={ADMIN_ROLES.includes(u.role) ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
                   <td className="num">{u.level ? `${u.level}%` : '—'}</td>
                   <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
-                  <td className="hide-mobile muted">{u.districts?.join(', ') || '—'}</td>
                   <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
                   <td onClick={(e) => e.stopPropagation()}><Switch checked={u.is_active} onChange={() => toggle.mutate(u)} /></td>
                 </tr>);
@@ -217,7 +206,7 @@ function Users() {
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
         <div className="card table-wrap">
           <table className="table table-stack">
-            <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th>Хэштег</th><th className="hide-mobile">Районы</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
+            <thead><tr><th>Имя</th><th>Роль</th><th>Уровень</th><th>Хэштег</th><th className="hide-mobile">Telegram</th><th>Активен</th></tr></thead>
             <tbody>
               {active.map(row)}
               {inactive.length > 0 && (

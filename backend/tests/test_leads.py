@@ -38,7 +38,7 @@ def test_lead_journey_end_to_end(db, client, sent):
     r = client.post(f"/api/leads/{lead.id}/take", headers=auth(other_op))
     assert r.status_code == 409 and r.json()["code"] == "already_taken"
 
-    # B3: recommendation (district match) + assign
+    # B3: recommendation (least loaded agent; no district bonus since 11-13) + assign
     rec = client.get(f"/api/leads/{lead.id}/recommend-agents", headers=auth(nino)).json()
     assert rec[0]["agent"]["id"] == georgiy.id and rec[0]["recommended"]
     r = client.post(f"/api/leads/{lead.id}/assign", json={"agent_id": georgiy.id}, headers=auth(nino))
