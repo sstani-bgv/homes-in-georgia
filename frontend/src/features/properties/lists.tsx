@@ -1,5 +1,5 @@
 // Funnel 1 lists: new listings (C1), kanban (by status), my objects. Shared by desktop and /m.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArrowRightLeft, DollarSign, ExternalLink, List, Map as MapIcon, Search, Users } from 'lucide-react';
@@ -7,7 +7,7 @@ import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
 import { FIELD_FILTER } from '../../api/types';
-import { dragBoardProps } from '../leads/LeadBoard';
+import { StatusBar, dragBoardProps } from '../leads/LeadBoard';
 import { pageScroller, useAuth } from '../../auth/AuthContext';
 import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard, ListingSide, PropertyStatusBadge, Place } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
@@ -291,12 +291,13 @@ const WHO: PropertyStatus[] = ['owner_confirmed', 'agent_marked'];
  * Drag a card to a column = the backend step for that move (services/properties.py); steps that need input (contact,
  * shoot date, photos, operator's review) open the object card; any other move is refused with a toast.
  * Agents: «Опубликован» is collapsed until «Показать» (it only grows and clutters the working columns). */
-export function PropertyBoard({ base = '' }: { base?: string }) {
+export function PropertyBoard({ base = '', statusBar }: { base?: string; statusBar?: boolean }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['properties', 'board'], queryFn: api.properties.board, refetchInterval: 30_000 });
   const { isStaff } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
+  const boardRef = useRef<HTMLDivElement>(null);
   const [over, setOver] = useState<PropertyStatus | null>(null);
   const [moving, setMoving] = useState<Property | null>(null);
   const [showPublished, setShowPublished] = useState(isStaff);
@@ -319,6 +320,7 @@ export function PropertyBoard({ base = '' }: { base?: string }) {
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
   const all = Object.values(data || {}).flat();
+  const cols = PROPERTY_BOARD.filter((s) => !base || (data?.[s] || []).length);
   const drop = (to: PropertyStatus, id: number) => {
     setOver(null);
     const p = all.find((x) => x.id === id);
@@ -343,12 +345,12 @@ export function PropertyBoard({ base = '' }: { base?: string }) {
   };
   return (
     <>
-      <div className="kanban" {...dragBoardProps}>
-        {PROPERTY_BOARD.filter((s) => !base || (data?.[s] || []).length).map((s) => {
+      <div className="kanban" ref={boardRef} {...dragBoardProps}>
+        {cols.map((s) => {
           const items = data?.[s] || [];
           const collapsed = s === 'published' && !showPublished && items.length > 0;
           return (
-            <div className={`kanban-col ${over === s ? 'drop-over' : ''}`} key={s} id={`col-${s}`}
+            <div className={`kanban-col ${over === s ? 'drop-over' : ''}`} key={s} id={`col-${s}`} data-stage={s}
               onDragOver={(e) => { e.preventDefault(); setOver(s); }} onDragLeave={() => setOver(null)}
               onDrop={(e) => { e.preventDefault(); drop(s, Number(e.dataTransfer.getData('text/property'))); }}>
               <div className="kanban-col-head"><span className="label">{PROPERTY_STATUS[s]}</span><span className="tab-count">{items.length}</span></div>
@@ -369,6 +371,7 @@ export function PropertyBoard({ base = '' }: { base?: string }) {
           );
         })}
       </div>
+      {statusBar && <StatusBar board={boardRef} stages={cols} labels={PROPERTY_STATUS} count={(s) => data?.[s]?.length ?? 0} />}
       {/* touch (Mini App) has no HTML drag & drop: the same moves from a menu, like the lead board */}
       <Modal open={!!moving} onClose={() => setMoving(null)} title={`Перенести объект #${moving?.id}`}>
         <div className="col">
@@ -395,27 +398,20 @@ export function MyProperties({ base = '' }: { base?: string }) {
 const WORK = PROPERTY_BOARD.filter((s) => s !== 'published' && s !== 'rented');
 
 /** «В работе»: the board, or the same objects as a table (Stanislav 11-11); published / rented live in «База объектов».
- * Stage chips with counts (from the board query): board = scroll to that column, list = filter to it (again = all). */
+ * Board: the «СТАТУСЫ» panel (tap = scroll to that column); list: stage chips with counts filter it (again = all). */
 export function WorkProperties() {
   const [view, setView] = useState<'board' | 'list'>('board');
   const [stage, setStage] = useState<PropertyStatus | ''>('');
   const { data } = useQuery({ queryKey: ['properties', 'board'], queryFn: api.properties.board, refetchInterval: 30_000 });
-  const jump = (s: PropertyStatus) => {
-    if (view === 'list') return setStage(stage === s ? '' : s);
-    const el = document.getElementById(`col-${s}`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-    el.classList.add('drop-over');
-    setTimeout(() => el.classList.remove('drop-over'), 1200);
-  };
   return (
     <div className="col">
       <div className="row row-wrap">
         <Seg value={view} onChange={setView} options={[{ value: 'board', label: 'Доска' }, { value: 'list', label: 'Списком' }]} />
-        <Seg value={(view === 'list' ? stage : '') as PropertyStatus} onChange={jump}
-          options={(view === 'list' ? WORK : PROPERTY_BOARD).map((s) => ({ value: s, label: <>{PROPERTY_STATUS[s]} <span className="tab-count">{data?.[s]?.length ?? 0}</span></> }))} />
+        {/* the board has the «СТАТУСЫ» panel instead of the chips (Stanislav 11-13) */}
+        {view === 'list' && <Seg value={stage} onChange={(s) => setStage(stage === s ? '' : s)}
+          options={WORK.map((s) => ({ value: s, label: <>{PROPERTY_STATUS[s]} <span className="tab-count">{data?.[s]?.length ?? 0}</span></> }))} />}
       </div>
-      {view === 'board' ? <PropertyBoard /> : <PropertyList key="work" status={stage || WORK.join(',')} />}
+      {view === 'board' ? <PropertyBoard statusBar /> : <PropertyList key="work" status={stage || WORK.join(',')} />}
     </div>
   );
 }

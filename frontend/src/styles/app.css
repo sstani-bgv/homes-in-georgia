@@ -779,3 +779,24 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 .act-tile b { font-size: 15px; font-weight: 900; }
 .act-formula { margin-top: 8px; padding: 8px 10px; border-radius: 12px; background: var(--surface); color: var(--ink-2); font-size: 11px; line-height: 1.5; }
 .act-pill { display: inline-block; padding: 0 8px; border-radius: 99px; background: var(--brand-soft); color: var(--brand); font-weight: 900; }
+
+/* «СТАТУСЫ» panel under the object / lead boards (Stanislav 11-13, phone mock-up): sticky at the bottom of the screen,
+   above the bottom nav on a phone; it sits after the board in the flow, so the board's end is never hidden under it */
+.status-bar { position: sticky; bottom: 0; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; box-shadow: 0 -8px 24px rgba(2,31,74,.08); }
+.status-bar-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 10px; font-size: 12px; font-weight: 800; color: var(--ink); }
+.status-bar-head span:first-child { letter-spacing: .1em; text-transform: uppercase; }
+.status-bar-grid { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
+.status-tile { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 8px 2px 7px; border: 0; border-radius: 10px; background: var(--brand-tint); color: var(--ink); cursor: pointer; font: inherit; min-width: 0; }
+.status-tile b { font-size: 18px; font-weight: 800; line-height: 1.1; }
+.status-tile span { font-size: 11px; font-weight: 600; line-height: 1.15; text-align: center; color: var(--ink-2); hyphens: auto; -webkit-hyphens: auto; overflow-wrap: normal; word-break: normal; }
+.status-tile:hover { background: var(--brand-soft); }
+.status-tile.active { background: var(--brand); color: #fff; }
+.status-tile.active span { color: rgba(255,255,255,.85); }
+@media (min-width: 768px) { .kanban:has(+ .status-bar) .kanban-col { max-height: calc(100vh - 330px); } }
+@media (max-width: 767px) {
+  .status-bar { bottom: calc(61px + env(safe-area-inset-bottom)); margin: 0 calc(-1 * var(--gutter)); border-radius: 16px 16px 0 0; border-width: 1px 0 0; padding: 12px 10px 10px; }
+  .status-bar-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .status-tile { padding: 7px 1px 6px; }
+  .status-tile b { font-size: 17px; }
+  .status-tile span { font-size: 10px; }
+}

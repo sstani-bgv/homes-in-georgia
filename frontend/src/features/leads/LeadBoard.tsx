@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type RefObject } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRightLeft, CalendarClock } from 'lucide-react';
@@ -64,8 +64,48 @@ export const dragBoardProps = {
   onDropCapture: (e: DragEvent<HTMLElement>) => { e.currentTarget.style.scrollSnapType = ''; },
 };
 
+/** «СТАТУСЫ» under a board (Stanislav 11-13, phone mock-up): a tile per column with its count. Tap = scroll the board to
+ * that column (one column per screen on a phone), scrolling the board moves the highlight. Sticky at the bottom of the
+ * screen (above the bottom nav on a phone), so it never covers the end of the board. Columns carry data-stage. */
+export function StatusBar<S extends string>({ board, stages, labels, count }: { board: RefObject<HTMLDivElement | null>; stages: S[]; labels: Record<S, string>; count: (s: S) => number }) {
+  const [active, setActive] = useState<S | undefined>(stages[0]);
+  const lock = useRef(0); // a tap's smooth scroll passes other columns: don't let them flicker the highlight
+  useEffect(() => {
+    const el = board.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (Date.now() < lock.current) return;
+      const cols = [...el.querySelectorAll<HTMLElement>('[data-stage]')];
+      if (!cols.length) return;
+      const left = el.getBoundingClientRect().left;
+      const end = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4; // the last columns can't reach the left edge
+      const col = end ? cols[cols.length - 1] : cols.reduce((a, c) => Math.abs(c.getBoundingClientRect().left - left) < Math.abs(a.getBoundingClientRect().left - left) ? c : a);
+      setActive(col.dataset.stage as S);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [board]);
+  const jump = (s: S) => {
+    setActive(s);
+    lock.current = Date.now() + 800;
+    board.current?.querySelector(`[data-stage="${s}"]`)?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+  };
+  return (
+    <div className="status-bar">
+      <div className="status-bar-head"><span>Статусы</span><span>Всего {stages.reduce((a, s) => a + count(s), 0)}</span></div>
+      <div className="status-bar-grid" style={{ '--n': stages.length } as CSSProperties}>
+        {stages.map((s) => (
+          <button type="button" key={s} className={`status-tile ${s === active ? 'active' : ''}`} onClick={() => jump(s)}>
+            <b>{count(s)}</b><span>{labels[s]}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Drag a card to a column = do that step. Steps that need input open a dialog; the rest open the lead page. */
-export function LeadBoard({ base = '' }: { base?: string }) {
+export function LeadBoard({ base = '', statusBar }: { base?: string; statusBar?: boolean }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['leads', 'board'], queryFn: api.leads.board, refetchInterval: 15_000 });
   const qc = useQueryClient();
   const toast = useToast();
@@ -73,6 +113,7 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   const { isStaff } = useAuth();
   // an agent works from «Агент назначен» to the end: the operator columns are neither shown nor a drop target
   const stages = isStaff ? LEAD_BOARD : LEAD_BOARD.filter((s) => !OPERATOR_STAGES.includes(s));
+  const boardRef = useRef<HTMLDivElement>(null);
   const [over, setOver] = useState<LeadStatus | null>(null);
   const [assign, setAssign] = useState<Lead | null>(null);
   const [refuse, setRefuse] = useState<Lead | null>(null);
@@ -109,13 +150,13 @@ export function LeadBoard({ base = '' }: { base?: string }) {
   };
   return (
     <>
-      <div className="kanban" {...dragBoardProps}>
+      <div className="kanban" ref={boardRef} {...dragBoardProps}>
         {/* Mini App: only non-empty stages (the «Перенести» menu still lists them all) */}
         {stages.filter((s) => !base || (data?.[s] || []).length).map((s) => {
           const items = data?.[s] || [];
           const overdue = items.filter((l) => l.sla_due_at && new Date(l.sla_due_at).getTime() < Date.now()).length;
           return (
-            <div className={`kanban-col ${over === s ? 'drop-over' : ''}`} key={s}
+            <div className={`kanban-col ${over === s ? 'drop-over' : ''}`} key={s} data-stage={s}
               onDragOver={(e) => { e.preventDefault(); setOver(s); }} onDragLeave={() => setOver(null)}
               onDrop={(e) => { e.preventDefault(); drop(s, Number(e.dataTransfer.getData('text/lead'))); }}>
               <div className="kanban-col-head">
@@ -129,6 +170,7 @@ export function LeadBoard({ base = '' }: { base?: string }) {
           );
         })}
       </div>
+      {statusBar && <StatusBar board={boardRef} stages={stages} labels={LEAD_STATUS} count={(s) => data?.[s]?.length ?? 0} />}
       <Modal open={!!moving} onClose={() => setMoving(null)} title={`Перенести заявку #${moving?.id}`}>
         <div className="col">
           {stages.filter((st) => st !== moving?.status).map((st) => (
@@ -159,9 +201,10 @@ export function LeadStages({ base = '', list }: { base?: string; list?: boolean 
   const label = (t: string, n: number) => <>{t} <span className="tab-count">{n}</span></>;
   return (
     <div className="col">
-      <Seg value={stage} onChange={(s) => setStage(s === stage ? '' : s)}
-        options={[{ value: '' as const, label: label('Все', total) }, ...stages.map((s) => ({ value: s, label: label(LEAD_STATUS[s], c[s] || 0) }))]} />
-      {stage ? <StageLeads key={stage} stage={stage} base={base} /> : list ? <div style={{ maxWidth: 640 }}><MyLeadsList base={base} /></div> : <LeadBoard base={base} />}
+      {/* the board has the «СТАТУСЫ» panel instead of the chips (Stanislav 11-13) */}
+      {list && <Seg value={stage} onChange={(s) => setStage(s === stage ? '' : s)}
+        options={[{ value: '' as const, label: label('Все', total) }, ...stages.map((s) => ({ value: s, label: label(LEAD_STATUS[s], c[s] || 0) }))]} />}
+      {stage ? <StageLeads key={stage} stage={stage} base={base} /> : list ? <div style={{ maxWidth: 640 }}><MyLeadsList base={base} /></div> : <LeadBoard base={base} statusBar />}
     </div>
   );
 }
