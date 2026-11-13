@@ -43,7 +43,8 @@ const clusterIcon = (c: L.MarkerCluster) => {
   return L.divIcon({ className: 'dc', iconSize: [46, 46], html: `<div style="--g:conic-gradient(${seg.join(',')})"><span>${ms.length}</span></div>` });
 };
 
-export function ListingsMap<T extends Pin>({ items, card }: { items: T[]; card: (l: T) => ReactNode }) {
+/** onPick: a tap on a pin opens the full ad window / object card at once (11-13), instead of the small preview card. */
+export function ListingsMap<T extends Pin>({ items, card, onPick }: { items: T[]; card: (l: T) => ReactNode; onPick?: (l: T) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.MarkerClusterGroup | null>(null);
@@ -79,7 +80,7 @@ export function ListingsMap<T extends Pin>({ items, card }: { items: T[]; card: 
     g.clearLayers();
     markers.current.clear();
     const ms = pinned.map((l) => {
-      const mk: M = L.marker([l.lat!, l.lng!], { icon: pinIcon(l, false) }).on('click', () => setSel(l));
+      const mk: M = L.marker([l.lat!, l.lng!], { icon: pinIcon(l, false) }).on('click', () => { setSel(l); onPick?.(l); });
       mk.fresh = fresh(l);
       markers.current.set(l.id, mk);
       return mk;
@@ -121,7 +122,7 @@ export function ListingsMap<T extends Pin>({ items, card }: { items: T[]; card: 
       </div>
       {me && <div className="muted" style={{ fontSize: 12 }}>{me}</div>}
       <div ref={box} style={{ height: '60vh', minHeight: 320, borderRadius: 12, overflow: 'hidden', zIndex: 0 }} />
-      <Modal open={!!sel} onClose={() => setSel(null)} title={sel ? `${price(sel)} · ${sel.district || sel.address || 'Объявление'}` : ''}>
+      <Modal open={!!sel && !onPick} onClose={() => setSel(null)} title={sel ? `${price(sel)} · ${sel.district || sel.address || 'Объявление'}` : ''}>
         {sel && card(sel)}
       </Modal>
     </div>

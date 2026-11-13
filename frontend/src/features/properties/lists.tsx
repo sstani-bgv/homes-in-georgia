@@ -91,6 +91,9 @@ export function NewListings({ base = '' }: { base?: string }) {
   const [f, setF0] = usePageState<ListingFilter>('feed-filter', { q: '', flag: '' });
   const [limit, setLimit] = usePageState('feed-limit', PAGE);
   const [view, setView] = usePageState<'list' | 'map'>('feed-view', 'list');
+  // the map's pin opens the full ad window (?ad=<id>, as a card does), not a small preview (11-13)
+  const [params, setParams] = useSearchParams();
+  const openAd = (id: string) => setParams((p) => { const n = new URLSearchParams(p); n.set('ad', id); return n; }, { replace: true });
   const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const { user } = useAuth();
@@ -190,7 +193,11 @@ export function NewListings({ base = '' }: { base?: string }) {
         {f.known && <div className="muted" style={{ fontSize: 12 }}>{KNOWN_HINT}</div>}
       </FeedFilters>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : view === 'map' ? (
-        <ListingsMap items={items} card={card} />
+        <>
+          <ListingsMap items={items} card={card} onPick={(l) => openAd(l.id)} />
+          {/* the picked ad's card stays hidden: it renders its full window (with its buttons) from ?ad= */}
+          {items.filter((l) => l.id === params.get('ad')).map((l) => <div key={l.id} hidden>{card(l)}</div>)}
+        </>
       ) : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {items.map(card)}
@@ -521,7 +528,7 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
         </div>
       )}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={filtered ? 'Ничего не найдено' : archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : view === 'map' ? (
-        <ListingsMap items={items} card={(p) => <PropertyCard key={p.id} p={p} to={link(p.id)} />} />
+        <ListingsMap items={items} card={(p) => <PropertyCard key={p.id} p={p} to={link(p.id)} />} onPick={(p) => navigate(link(p.id))} />
       ) : scope === 'all' ? (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {items.map((p) => <PropertyCard key={p.id} p={p} to={link(p.id)} />)}
