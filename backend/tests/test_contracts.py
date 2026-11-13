@@ -173,9 +173,7 @@ def test_bad_inputs(db):
     ag = make_user(db, "agent")
     with pytest.raises(DomainError):
         C.create(db, {"kind": "x", "lang": "GEO", "html": PAGE}, ag)
-    with pytest.raises(DomainError) as e:  # a contract belongs to a deal (lead / deal), always
-        C.create(db, {"kind": "rent", "lang": "GEO", "html": PAGE}, ag)
-    assert e.value.code == "no_deal"
+    assert C.create(db, {"kind": "rent", "lang": "GEO", "html": PAGE}, ag).lead_id is None  # standalone is fine (11-13)
     other_lead = _lead(db, make_user(db, "agent"))
     with pytest.raises(DomainError) as e:
         C.create(db, {"kind": "rent", "lang": "GEO", "html": PAGE, "lead_id": other_lead.id}, ag)
@@ -188,7 +186,6 @@ def test_autosave_draft_generate_regenerate_keeps_versions(db, client, fake_chro
     ag = make_user(db, "agent")
     lead = _lead(db, ag)
     h = auth(ag)
-    assert client.post("/api/contracts/draft", json={"data": {"owner_full_name": "Нино"}}, headers=h).status_code == 400
     d = client.post("/api/contracts/draft", json={"lead_id": lead.id, "kind": "rent", "data": {"owner_full_name": "Нино", "_step": 3}},
                     headers=h).json()
     assert (d["status"], d["status_label"], d["has_pdf"], d["lang"], d["owner_name"]) == ("draft", "Черновик", False, None, "Нино")
@@ -233,3 +230,29 @@ def test_autosave_draft_generate_regenerate_keeps_versions(db, client, fake_chro
     op = make_user(db, "operator")
     assert client.get(f"/api/contracts?agent_id={ag.id}&status=all", headers=auth(op)).json()["total"] == 2
     assert client.get(f"/api/contracts?agent_id={op.id}&status=all", headers=auth(op)).json()["total"] == 0
+
+
+def test_standalone_contract_visibility_and_link_later(db, client):
+    """11-13: a contract without a lead / deal — autosaved, generated, seen by its creator and staff only, linked to a
+    lead later from the card (then the lead shows it)."""
+    ag, other, op = make_user(db, "agent"), make_user(db, "agent"), make_user(db, "operator")
+    h = auth(ag)
+    d = client.post("/api/contracts/draft", json={"kind": "rent", "data": {"owner_full_name": "Нино"}}, headers=h).json()
+    assert (d["status"], d["lead_id"], d["deal_id"]) == ("draft", None, None)
+    # no lead to continue a draft in: a new form is a new contract, the open one continues by id
+    assert client.post("/api/contracts/draft", json={"kind": "rent", "data": {"x": "1"}}, headers=h).json()["id"] != d["id"]
+    g = client.put(f"/api/contracts/{d['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE}, headers=h).json()
+    assert g["has_pdf"] and g["lead_id"] is None
+    assert client.get(f"/api/contracts/{d['id']}", headers=auth(other)).status_code == 404
+    assert client.get("/api/contracts", headers=auth(other)).json()["total"] == 0
+    assert client.get("/api/contracts", headers=h).json()["total"] == 2
+    assert client.get(f"/api/contracts/{d['id']}", headers=auth(op)).status_code == 200
+    # link: not to someone else's lead; then the lead carries it, a regeneration without lead_id keeps the link
+    assert client.post(f"/api/contracts/{d['id']}/link", json={"lead_id": _lead(db, other).id}, headers=h).status_code == 404
+    lead = _lead(db, ag)
+    assert client.post(f"/api/contracts/{d['id']}/link", json={}, headers=h).status_code == 400
+    r = client.post(f"/api/contracts/{d['id']}/link", json={"lead_id": lead.id}, headers=h).json()
+    assert r["lead_id"] == lead.id
+    assert client.post(f"/api/contracts/{d['id']}/link", json={"lead_id": lead.id}, headers=h).status_code == 409
+    assert client.put(f"/api/contracts/{d['id']}", json={"kind": "rent", "lang": "RU", "html": PAGE}, headers=h).json()["lead_id"] == lead.id
+    assert client.get(f"/api/leads/{lead.id}/contract", headers=h).json()["contract"]["id"] == d["id"]

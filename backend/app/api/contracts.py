@@ -64,6 +64,11 @@ class ContractIn(BaseModel):
     data: dict | None = None  # the wizard's CxData (deal prefill); omitted = kept
 
 
+class LinkIn(BaseModel):
+    lead_id: int | None = None
+    deal_id: int | None = None
+
+
 class CloseIn(BaseModel):
     reason: str
     comment: str | None = Field(None, max_length=2000)
@@ -118,6 +123,12 @@ async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Ses
                          user: User = Depends(current_user)):
     """«Договор подписан»: multipart with an optional `file` (the signed scan, PDF)."""
     return C.out(db, C.sign(db, cid, user, await file.read() if file else None), full=True)
+
+
+@router.post("/contracts/{cid}/link")
+def contracts_link(cid: int, body: LinkIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Привязать к заявке»: a contract created without a lead / deal (11-13)."""
+    return C.out(db, C.link(db, cid, body.model_dump(), user), full=True)
 
 
 @router.post("/contracts/{cid}/close")

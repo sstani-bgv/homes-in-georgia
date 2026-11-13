@@ -247,13 +247,12 @@ DATA_META = ("_step", "_dep", "_end")  # the wizard's own state kept with CxData
 
 
 def _link(db: Session, body: dict, user: User) -> dict:
-    """The deal a contract belongs to (required): the lead («сделка» at the contract stage, the Deal row comes after
-    signing) or the Deal itself; the other ids follow from it."""
+    """The deal a contract belongs to: the lead («сделка» at the contract stage, the Deal row comes after signing) or
+    the Deal itself; the other ids follow from it. Optional since 11-13 (Stanislav): a contract without a lead / deal
+    (the parties came directly, the deal isn't in the CRM yet) belongs to its creator; «Привязать к заявке» later."""
     lead_id = body.get("lead_id") or None
     deal_id = body.get("deal_id") or None
     prop_id = body.get("property_id") or None
-    if not lead_id and not deal_id:
-        raise DomainError("no_deal", "Договор привязывается к сделке: выберите заявку или сделку")
     if lead_id:
         lead = get_or_404(db, Lead, int(lead_id), "lead")
         if not at_least(user, "operator") and lead.agent_id != user.id:
@@ -301,7 +300,10 @@ def _store_pdf(c: Contract, data: bytes, signed: bool = False) -> str:
 
 
 def _draft_for(db: Session, link: dict, user: User) -> Contract | None:
-    """The deal's draft being filled (no PDF yet): one per lead / deal, so a reopened form continues it."""
+    """The deal's draft being filled (no PDF yet): one per lead / deal, so a reopened form continues it. A standalone
+    contract has none to continue: the wizard keeps its id after the first autosave (11-13)."""
+    if not link["lead_id"] and not link["deal_id"]:
+        return None
     col, v = (Contract.lead_id, link["lead_id"]) if link["lead_id"] else (Contract.deal_id, link["deal_id"])
     return db.scalar(select(Contract).where(col == v, Contract.status == "draft", Contract.pdf_path.is_(None))
                      .order_by(Contract.id.desc()).with_for_update())
@@ -358,6 +360,8 @@ def update(db: Session, cid: int, body: dict, user: User) -> Contract:
     c = get(db, cid, user, lock=True)
     if c.status != "draft":
         raise DomainError("bad_status", "Подписанный или закрытый договор не меняется", 409)
+    if not body.get("lead_id") and not body.get("deal_id"):  # a form without a link keeps the contract's own (11-13)
+        body = {**body, "lead_id": c.lead_id, "deal_id": c.deal_id, "property_id": body.get("property_id") or c.property_id}
     f = _fields(db, body, user)
     pdf = render_pdf(f["html"])
     if c.pdf_path:
@@ -367,6 +371,25 @@ def update(db: Session, cid: int, body: dict, user: User) -> Contract:
     t = now()
     c.pdf_path, c.generated_at, c.updated_at = _store_pdf(c, pdf), t, t
     log_event(db, "contract", c.id, "regenerated" if c.versions else "generated", user)
+    db.commit()
+    return c
+
+
+def link(db: Session, cid: int, body: dict, user: User) -> Contract:
+    """«Привязать к заявке»: a standalone contract joins a lead / deal later (11-13); a linked one keeps its link."""
+    c = get(db, cid, user, lock=True)
+    if c.lead_id or c.deal_id:
+        raise DomainError("already_linked", "Договор уже привязан к заявке или сделке", 409)
+    if c.status == "closed_no_deal":
+        raise DomainError("bad_status", "Закрытый договор не меняется", 409)
+    ids = _link(db, body, user)
+    if not ids["lead_id"] and not ids["deal_id"]:
+        raise DomainError("bad_input", "Выберите заявку или сделку")
+    c.lead_id, c.deal_id, c.property_id = ids["lead_id"], ids["deal_id"], c.property_id or ids["property_id"]
+    if c.deal_id and c.status == "signed":  # as mark_deal: the deal is already there
+        c.status = "deal"
+    c.updated_at = now()
+    log_event(db, "contract", c.id, "linked", user, lead_id=c.lead_id, deal_id=c.deal_id)
     db.commit()
     return c
 
