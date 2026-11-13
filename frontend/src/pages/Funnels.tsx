@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Briefcase, Database, Inbox, Plus } from 'lucide-react';
 import { BackLink } from '../layout/back';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
@@ -9,6 +9,7 @@ import { useAuth } from '../auth/AuthContext';
 import { AddressField, type Point, type PointFacts } from '../components/AddressField';
 import { errText, useToast } from '../components/toast';
 import { Button, Field, Input, Modal, PageHead, Tabs, DistrictSelect } from '../components/ui';
+import type { ReactNode } from 'react';
 import { ArchivedLeads, LeadStages } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { MyProperties, NewListings, PropertyList, WorkProperties } from '../features/properties/lists';
@@ -49,26 +50,63 @@ export function ManualProperty({ open, onClose, base = '' }: { open: boolean; on
   );
 }
 
+/** «Объекты» tabs in three groups (Stanislav 11-13 mock-up): Входящие (new ads, operators' requests), Работа (the board,
+ * the publication queue), База (mine, the whole base, the archive). The other groups' tabs stay one tap away below. */
+const OBJ_GROUPS: { key: string; label: string; icon: ReactNode; tabs: ObjTab[] }[] = [
+  { key: 'in', label: 'Входящие', icon: <Inbox size={20} />, tabs: ['new', 'requests'] },
+  { key: 'work', label: 'Работа', icon: <Briefcase size={20} />, tabs: ['board', 'review'] },
+  { key: 'base', label: 'База', icon: <Database size={20} />, tabs: ['mine', 'all', 'archive'] },
+];
+const OBJ_TAB: Record<ObjTab, string> = { new: 'Новые объявления', requests: 'Запросы', board: 'В работе', review: 'На публикацию', mine: 'Мои объекты', all: 'База объектов', archive: 'Архив' };
+
 export function ObjectsPage() {
   const { isStaff } = useAuth();
   const [params, setParams] = useSearchParams();
   const asked = params.get('tab') as ObjTab | null;
   // «На публикацию» / «Запросы» are the operators' queues: an agent's ?tab=requests falls back to his default tab
-  const tab = asked && (isStaff || !['review', 'requests'].includes(asked)) ? asked : isStaff ? 'board' : 'new';
+  const allowed = (t: ObjTab) => isStaff || !['review', 'requests'].includes(t);
+  const tab = asked && OBJ_TAB[asked] && allowed(asked) ? asked : isStaff ? 'board' : 'new';
   const setTab = (t: ObjTab) => setParams({ tab: t }, { replace: true });
   const [manual, setManual] = useState(params.get('new') === '1');
   // «На публикацию»: objects the agents sent («Готово — отправить оператору»); same query as the dashboard's tasks
   const queue = useQuery({ queryKey: ['properties', 'list', 'review'], queryFn: () => api.properties.list({ status: 'review' }), enabled: isStaff });
   const requests = useQuery({ queryKey: ['change-requests', 'pending'], queryFn: () => api.changeRequests.list('pending'), enabled: isStaff });
+  const fresh = useQuery({ queryKey: ['listings', 'new', 'count'], queryFn: () => api.listings.new({}, 1), staleTime: 60_000 });
+  const count: Partial<Record<ObjTab, number | undefined>> = {
+    new: fresh.data?.total, review: queue.data ? itemsOf(queue.data).length : undefined, requests: requests.data?.total,
+  };
+  const groups = OBJ_GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter(allowed) }));
+  const group = groups.find((g) => g.tabs.includes(tab))!;
+  const badge = (t: ObjTab) => count[t] !== undefined && <span className={`tab-count${t === 'new' && count[t] ? ' hot' : ''}`}>{count[t]}</span>;
   return (
     <>
-      <PageHead title="Объекты" actions={<Button variant="secondary" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</Button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'new', label: 'Новые объявления' }, { value: 'board', label: 'В работе' },
-        ...(isStaff ? [{ value: 'review' as const, label: 'На публикацию', count: queue.data ? itemsOf(queue.data).length : undefined },
-          { value: 'requests' as const, label: 'Запросы', count: requests.data?.total }] : []),
-        { value: 'mine', label: 'Мои объекты' }, { value: 'all', label: 'База объектов' }, { value: 'archive', label: 'Архив' },
-      ]} />
+      <div className="obj-head">
+        <div className="row row-between">
+          <h1>Объекты</h1>
+          <button type="button" className="btn obj-head-btn" onClick={() => setManual(true)}><Plus size={16} />Объект вручную</button>
+        </div>
+        <div className="obj-groups" role="tablist">
+          {groups.map((g) => (
+            <button key={g.key} type="button" role="tab" aria-selected={g === group} className={g === group ? 'active' : ''} onClick={() => setTab(g.tabs[0])}>
+              {g.icon}<span>{g.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="obj-sub">
+        <div className="subtabs" role="tablist">
+          {group.tabs.map((t) => (
+            <button key={t} type="button" role="tab" aria-selected={t === tab} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>{OBJ_TAB[t]}{badge(t)}</button>
+          ))}
+        </div>
+        <div className="obj-jump">
+          {groups.filter((g) => g !== group).map((g) => (
+            <div key={g.key}><b>{g.label}:</b> {g.tabs.map((t, i) => (
+              <span key={t}>{i > 0 && ' · '}<button type="button" className="link-btn" onClick={() => setTab(t)}>{OBJ_TAB[t]}</button>{badge(t)}</span>
+            ))}</div>
+          ))}
+        </div>
+      </div>
       {tab === 'new' && <NewListings />}
       {tab === 'board' && <WorkProperties />}
       {tab === 'review' && <PropertyList key="review" status="review" />}

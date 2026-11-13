@@ -162,6 +162,22 @@ def weekly_listings(db: Session, at: datetime | None = None) -> dict:
     return {"current": build(mon, nxt), "last_week": build(last, mon), "week_start": mon.strftime("%d.%m")}
 
 
+def channel_posts(db: Session, start: date, end: date) -> dict:
+    """«Посты в канал» (Stanislav 11-13): posts per agent in [start, end] (Tbilisi days), with exclusives. The agent is
+    the user the post's hashtag resolved to, else the hashtag itself (an agent the CRM doesn't know yet)."""
+    a = datetime.combine(start, datetime.min.time(), tzinfo=TZ)
+    b = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=TZ)
+    who = func.coalesce(User.name, func.nullif(ChannelPost.agent_name, ""), "без хэштега")
+    rows = db.execute(select(ChannelPost.agent_id, who, func.count(), func.count().filter(ChannelPost.is_exclusive),
+                             func.max(ChannelPost.date))
+                      .outerjoin(User, User.id == ChannelPost.agent_id)
+                      .where(ChannelPost.date >= a, ChannelPost.date < b)
+                      .group_by(ChannelPost.agent_id, who).order_by(func.count().desc())).all()
+    items = [{"agent_id": i, "name": n, "posts": c, "exclusive": ex, "last": last.isoformat() if last else None}
+             for i, n, c, ex, last in rows]
+    return {"from": start.isoformat(), "to": end.isoformat(), "total": sum(x["posts"] for x in items), "items": items}
+
+
 # «В работе» tab = the board without its done columns (frontend lists.tsx WORK)
 WORK_STATUSES = ("taken", "call_failed", "owner_confirmed", "agent_marked", "shoot_scheduled", "media_uploaded",
                  "review", "returned")

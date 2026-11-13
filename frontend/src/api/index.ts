@@ -209,6 +209,8 @@ export const api = {
     funnel: (from?: string, to?: string) => http.get<Record<string, unknown>>('/analytics/funnel', { from, to }),
     listings: () => http.get<ListingsStats>('/analytics/listings'),
     agents: () => then(http.get<L<AgentStat>>('/analytics/agents'), (d) => normPage(d, normAgentStat)),
+    /** «Посты в канал»: posts per agent over [from, to] (YYYY-MM-DD, Tbilisi days) */
+    channelPosts: (from: string, to: string) => http.get<{ total: number; items: { agent_id: number | null; name: string; posts: number; exclusive: number; last: string | null }[] }>('/analytics/channel-posts', { from, to }),
   },
 
   ticker: {

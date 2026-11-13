@@ -185,6 +185,12 @@ def analytics_listings(db: Session = Depends(get_db, scope="function"), user: Us
     return {**analytics.listings_stats(db), "weekly": analytics.weekly_listings(db)}
 
 
+@router.get("/analytics/channel-posts")
+def analytics_channel_posts(date_from: date = Query(alias="from"), date_to: date = Query(alias="to"),
+                            db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return analytics.channel_posts(db, date_from, date_to)
+
+
 @router.get("/analytics/agents")
 def analytics_agents(month: str | None = None, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return analytics.agents(db, month)

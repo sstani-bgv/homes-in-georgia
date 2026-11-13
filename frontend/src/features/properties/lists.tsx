@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, ExternalLink, Search, Users } from 'lucide-react';
+import { Archive, ArrowRightLeft, DollarSign, ExternalLink, List, Map as MapIcon, Search, Users } from 'lucide-react';
 import { api, type ListingFilter } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
@@ -121,36 +121,52 @@ export function NewListings({ base = '' }: { base?: string }) {
           <Button type="submit" block loading={markAgent.isPending} disabled={!agentC.owner_name.trim() && !agentC.owner_phone.trim()}>Сохранить</Button>
         </form>
       </Modal>
-      <div className="row row-wrap" style={{ marginBottom: 14 }}>
-        <div className="input-icon grow" style={{ minWidth: 200, maxWidth: 380 }}>
-          <Search size={16} />
-          <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
+      {/* the mock-up of 11-13: search + list/map, the flag, a 2-column grid of labelled filters, bedrooms, «Найдено · Сбросить» */}
+      <div className="feed-filters">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="input-icon grow">
+            <Search size={16} />
+            <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
+          </div>
+          <Seg value={view} onChange={(v) => setView(v as 'list' | 'map')} options={[
+            { value: 'list', label: <List size={18} aria-label="Список" /> }, { value: 'map', label: <MapIcon size={18} aria-label="Карта" /> }]} />
         </div>
-        <Seg value={view} onChange={(v) => setView(v as 'list' | 'map')} options={[{ value: 'list', label: 'Список' }, { value: 'map', label: 'Карта' }]} />
-        <Seg value={f.flag || ''} onChange={set('flag')} options={[
-          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
-        ]} />
-      </div>
-      <div className="row row-wrap gap-sm" style={{ marginBottom: 14 }}>
-        <MultiSelect label="Источник" value={f.source || []} onChange={(v) => setF((o) => ({ ...o, source: v }))} placeholder="Все источники"
-          options={(facets?.sources || []).map((x) => ({ value: x.value, label: sourceName(x.value, x.label), count: x.count }))} style={{ width: 240, maxWidth: '100%' }} />
-        <MultiSelect label="Район" value={f.district || []} onChange={(v) => setF((o) => ({ ...o, district: v }))} placeholder="Все районы" many={['район', 'района', 'районов']}
-          options={(facets?.districts || []).map((x) => ({ value: x.value, label: x.value, count: x.count }))} style={{ width: 200, maxWidth: '100%' }} />
-        <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое метро" options={opts(facets?.metros)} style={{ maxWidth: 200 }} />
-        <input className="input" type="number" inputMode="numeric" min={0} placeholder="Цена от $" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} style={{ width: 110 }} />
-        <input className="input" type="number" inputMode="numeric" min={0} placeholder="до $" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} style={{ width: 90 }} />
-        <div className="row gap-sm" role="group" aria-label="Спальни">
-          {BEDS.map((b) => <Button key={b.value} size="sm" variant={beds.has(b.value) ? 'primary' : 'secondary'} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</Button>)}
+        <div className="seg-full">
+          <Seg value={f.flag || ''} onChange={set('flag')} options={[
+            { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
+          ]} />
         </div>
-        {filtered && <Button size="sm" variant="ghost" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить</Button>}
-        {(!!data?.known_total || f.known) && (
-          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
-            Уже в базе ({data?.known_total ?? 0})
-          </Button>
-        )}
+        <div className="filter-grid">
+          <div className="fbox"><span className="flabel">Источник</span>
+            <MultiSelect label="Источник" value={f.source || []} onChange={(v) => setF((o) => ({ ...o, source: v }))} placeholder="Все"
+              options={(facets?.sources || []).map((x) => ({ value: x.value, label: sourceName(x.value, x.label), count: x.count }))} /></div>
+          <div className="fbox"><span className="flabel">Район</span>
+            <MultiSelect label="Район" value={f.district || []} onChange={(v) => setF((o) => ({ ...o, district: v }))} placeholder="Все" many={['район', 'района', 'районов']}
+              options={(facets?.districts || []).map((x) => ({ value: x.value, label: x.value, count: x.count }))} /></div>
+          <div className="fbox"><span className="flabel">Метро</span>
+            <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое" options={opts(facets?.metros)} /></div>
+          <div className="fbox fbox-price"><span className="flabel">Цена, $</span>
+            <input className="input" type="number" inputMode="numeric" min={0} placeholder="от" aria-label="Цена от" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} />
+            <span className="faint">—</span>
+            <input className="input" type="number" inputMode="numeric" min={0} placeholder="до" aria-label="Цена до" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} />
+            <DollarSign size={16} className="faint" /></div>
+        </div>
+        <div className="beds-row" role="group" aria-label="Спальни">
+          {BEDS.map((b) => <button key={b.value} type="button" className={beds.has(b.value) ? 'active' : ''} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</button>)}
+        </div>
+        <div className="row row-between row-wrap" style={{ gap: 8 }}>
+          <span className="faint" style={{ fontSize: 13 }}>{data ? `Найдено: ${data.total ?? itemsOf(data).length}` : ''}</span>
+          <div className="row gap-sm">
+            {(!!data?.known_total || f.known) && (
+              <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
+                Уже в базе ({data?.known_total ?? 0})
+              </Button>
+            )}
+            {filtered && <button type="button" className="link-btn link-red" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить фильтры</button>}
+          </div>
+        </div>
+        {f.known && <div className="muted" style={{ fontSize: 12 }}>{KNOWN_HINT}</div>}
       </div>
-      {f.known && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{KNOWN_HINT}</div>}
-      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {data.total ?? itemsOf(data).length}</div>}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : view === 'map' ? (
         <ListingsMap items={items} card={card} />
       ) : (

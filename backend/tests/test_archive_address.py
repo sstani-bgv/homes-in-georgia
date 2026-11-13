@@ -69,3 +69,18 @@ def test_similar_text_alone_is_no_match():
     assert not same_flat_possible(ad, N(address="Vera barnovi st. 71", floor=1, bedrooms=1, area=38))  # another house
     assert same_flat_possible(ad, N(address="22 Tsurtaveli St", floor=1, bedrooms=1, area=38))
     assert same_flat_possible(ad, N(address=None, floor=None, bedrooms=1, area=38))
+
+
+def test_channel_posts_per_agent(db, client):
+    from datetime import date, datetime, timedelta
+    from app.models import ChannelPost
+    from app.services.common import TZ
+    zaza = make_user(db, "agent", "Zaza")
+    day = datetime(2026, 11, 10, 15, tzinfo=TZ)
+    db.add_all([ChannelPost(message_id="1", date=day, agent_id=zaza.id, agent_name="Zaza", is_exclusive=True),
+                ChannelPost(message_id="2", date=day, agent_id=zaza.id, agent_name="Zaza"),
+                ChannelPost(message_id="3", date=day, agent_name="GiorgiSV"),
+                ChannelPost(message_id="4", date=day - timedelta(days=30), agent_id=zaza.id)])
+    db.commit()
+    r = client.get("/api/analytics/channel-posts", params={"from": "2026-11-01", "to": "2026-11-13"}, headers=auth(zaza)).json()
+    assert r["total"] == 3 and [(x["name"], x["posts"], x["exclusive"]) for x in r["items"]] == [("Zaza", 2, 1), ("GiorgiSV", 1, 0)]

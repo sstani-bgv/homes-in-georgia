@@ -712,3 +712,49 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
   .step { min-width: 0; }
   .step .step-label { font-size: 9px; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 }
+
+/* ---------- «Объекты»: header with groups, sub-tabs, feed filters (Stanislav's mock-up 11-13) ---------- */
+.obj-head { background: var(--brand); color: #fff; border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 16px; margin-bottom: 0; }
+.obj-head h1 { color: #fff; margin: 0; }
+.obj-head-btn { background: #fff; color: var(--brand); border: 0; border-radius: 99px; padding: 10px 16px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+.obj-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; background: rgba(255,255,255,.12); border-radius: 18px; padding: 5px; }
+.obj-groups button { border: 0; background: transparent; color: rgba(255,255,255,.8); border-radius: 14px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 600; font-size: 15px; cursor: pointer; }
+.obj-groups button.active { background: #fff; color: var(--brand); box-shadow: var(--shadow-sm); }
+.obj-sub { background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg); margin: -12px 0 16px; padding: 12px 18px 12px; border: 1px solid var(--line); border-top: 0; }
+.subtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.subtabs button { border: 0; background: none; padding: 12px 0 10px; font-weight: 600; font-size: 15px; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.subtabs button.active { color: var(--brand); border-bottom-color: var(--brand); }
+.tab-count.hot { background: var(--accent); color: #fff; }
+.obj-jump { font-size: 13px; color: var(--muted); padding-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.obj-jump b { color: var(--ink); font-weight: 600; }
+.obj-jump .tab-count { margin-left: 4px; }
+.link-btn { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.link-btn:hover { color: var(--brand); text-decoration: underline; }
+.link-red { color: var(--accent); font-size: 13px; }
+.feed-filters { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.feed-filters .seg { flex-wrap: nowrap; }
+.feed-filters .seg button { display: inline-flex; align-items: center; justify-content: center; }
+.seg-full .seg { display: flex; width: 100%; }
+.seg-full .seg button { flex: 1 1 auto; font-size: 13px; padding: 9px 6px; white-space: nowrap; }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.fbox { position: relative; min-width: 0; }
+.fbox .flabel { position: absolute; top: 8px; left: 12px; font-size: 12px; color: var(--muted); pointer-events: none; z-index: 1; }
+.fbox .input, .fbox .select, .fbox .dp-trigger { width: 100%; height: 58px; padding: 22px 12px 4px; font-size: 16px; font-weight: 600; }
+.fbox .dp-trigger.dp-empty span { color: var(--ink); }
+/* the native select's arrow sits on the value line, like MultiSelect's chevron */
+.fbox .select { -webkit-appearance: none; appearance: none; padding-right: 34px; background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234A5A75' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px top 30px; }
+.fbox-price { display: flex; align-items: center; gap: 4px; height: 58px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); padding: 22px 12px 4px 12px; }
+.fbox-price .input { height: auto; padding: 0; border: 0; background: transparent; min-width: 0; flex: 1; box-shadow: none; }
+.beds-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; max-width: 520px; }
+.beds-row button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 12px; padding: 10px 2px; font-weight: 600; font-size: 14px; cursor: pointer; color: var(--ink); white-space: nowrap; }
+.beds-row button.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+@media (max-width: 767px) {
+  .obj-head { margin: -4px -4px 0; }
+  .obj-head h1 { font-size: 26px; }
+  /* «Мои объекты · База объектов · Архив» fit a 375px phone without a clipped «Архив» */
+  .obj-sub { padding: 12px 16px; }
+  .subtabs { gap: 16px; }
+}
+.fbox-price .input::placeholder { color: var(--faint); font-weight: 500; }
+/* desktop: the flag switch and the filter boxes keep a phone-like width instead of stretching across the page */
+.seg-full, .filter-grid { max-width: 640px; }

@@ -494,6 +494,9 @@ on('GET', '/analytics/dashboard', () => {
   };
 });
 on('GET', '/analytics/agents', () => page(agentStats()));
+on('GET', '/analytics/channel-posts', () => ({ total: 9, items: [
+  { agent_id: 2, name: 'Георгий', posts: 5, exclusive: 2, last: new Date().toISOString() },
+  { agent_id: null, name: 'GiorgiSV', posts: 4, exclusive: 0, last: new Date().toISOString() }] }));
 on('GET', '/analytics/funnel', () => ({}));
 
 // ---------- content / admin ----------
