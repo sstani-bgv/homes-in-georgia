@@ -750,7 +750,7 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
   .obj-head { margin: -4px -4px 0; }
   .obj-head h1 { font-size: 26px; }
   /* «Мои объекты · База объектов · Архив» fit a 375px phone without a clipped «Архив» */
-  .obj-sub { padding: 12px 16px; }
+  .obj-sub { padding: 12px 16px 0; }
   .subtabs { gap: 16px; }
 }
 .fbox-price .input::placeholder { color: var(--faint); font-weight: 500; }
