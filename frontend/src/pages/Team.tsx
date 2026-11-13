@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, Target } from 'lucide-react';
+import { BarChart3, Handshake, Info, Layers, Search, SquarePlus, Target } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { AgentStat, CounterPair } from '../api/types';
+import type { AgentActivity, AgentStat, CounterPair } from '../api/types';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Input, KV, Loading, PageHead, Progress, Seg, Tabs } from '../components/ui';
 import { GROWTH_LADDER, KNOWLEDGE_ITEMS, LADDER_VIEWS, PRINCIPLES, QUIZ_ALL } from '../features/team/content';
 import { ROLE_LABEL, fmtDate, lastMonths, monthKey, monthLabel, nextLevelAt } from '../lib/format';
@@ -23,6 +23,44 @@ export function LevelProgress({ deals, level }: { deals: number; level?: number 
   );
 }
 
+const ACT_PARTS = [
+  { k: 'new', label: 'Новые объекты', Icon: SquarePlus },
+  { k: 'active', label: 'Активные объекты', Icon: Layers },
+  { k: 'deals', label: 'Закрытые сделки', Icon: Handshake },
+] as const;
+
+const actHelp = (d: number) => `Новые объекты — посты агента в канале за ${d} дней + объекты, взятые в CRM за ${d} дней без поста. `
+  + 'Активные объекты — объекты агента сейчас, кроме архива и сданных. '
+  + `Закрытые сделки — подтверждённые сделки за ${d} дней. Каждая часть ограничена целью (не больше 100%).`;
+
+export function AgentActivityBlock({ act, full }: { act: AgentActivity; full?: boolean }) {
+  const formula = ACT_PARTS.map(({ k }) => `(${act[k]}/${act.targets[k]} × ${act.weights[k]}%)`).join(' + ');
+  return (
+    <div className="act">
+      <div className="row row-between">
+        <span className="act-title"><BarChart3 size={15} />Активность агента<span title={actHelp(act.days)}><Info size={14} className="act-info" /></span></span>
+        <span className="act-sub">Расчёт за {act.days} дней</span>
+      </div>
+      <div className="row act-main">
+        <div className="act-bar grow"><div className="ok" style={{ width: `${act.score}%` }} /></div>
+        <b className="num">{act.score}%</b>
+      </div>
+      <div className="act-tiles">
+        {ACT_PARTS.map(({ k, label, Icon }) => (
+          <div key={k} className="act-tile">
+            <div className="act-tile-head"><Icon size={16} /><span>{label}</span></div>
+            <b className="num">{act[k]} / {act.targets[k]}</b>
+            <div className="act-bar thin"><div style={{ width: `${Math.min(100, (act[k] / act.targets[k]) * 100)}%` }} /></div>
+            <span className="act-sub">{act.weights[k]}% веса</span>
+          </div>
+        ))}
+      </div>
+      <div className="act-formula"><b>Как считается:</b> <span>{formula} = <span className="act-pill">{act.score}%</span></span></div>
+      {full && <div className="act-sub" style={{ marginTop: 8, whiteSpace: 'normal' }}>{actHelp(act.days)}</div>}
+    </div>
+  );
+}
+
 function Leaderboard({ onOpen }: { onOpen: (a: AgentStat) => void }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['analytics', 'agents'], queryFn: api.analytics.agents });
   const items = itemsOf(data).sort((a, b) => b.exclusive_deals - a.exclusive_deals);
@@ -30,16 +68,17 @@ function Leaderboard({ onOpen }: { onOpen: (a: AgentStat) => void }) {
   if (error) return <ErrorBox error={error} />;
   if (!items.length) return <Empty />;
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 330px), 1fr))' }}>
       {items.map((a, i) => (
         <button key={a.id} className={`card card-pad ${i === 0 ? 'card-blue' : ''}`} style={{ textAlign: 'left', cursor: 'pointer', color: i === 0 ? '#fff' : undefined }} onClick={() => onOpen(a)}>
           <div className="row">
             <span className={`rank ${i < 3 ? 'top' : ''}`} style={i === 0 ? { background: '#fff', color: 'var(--brand)' } : undefined}>{i + 1}</span>
             <Avatar name={a.name} />
-            <div className="grow">
-              <div style={{ fontWeight: 800 }}>{a.name}</div>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
               <div className="label">{a.role ? ROLE_LABEL[a.role] : 'Агент'}</div>
             </div>
+            {a.activity && <span className="act-badge"><small>Активность</small>{a.activity.score}%</span>}
             <span className="badge" style={i === 0 ? { background: 'var(--accent)', color: '#fff' } : undefined}>{a.level || 50}%</span>
           </div>
           <div className="row row-between mt" style={{ fontSize: 13 }}>
@@ -51,6 +90,7 @@ function Leaderboard({ onOpen }: { onOpen: (a: AgentStat) => void }) {
             {a.active_leads !== undefined && <Badge tone="grey">заявок: {a.active_leads}</Badge>}
             {a.active_properties !== undefined && <Badge tone="grey">объектов: {a.active_properties}</Badge>}
           </div>
+          {a.activity && <AgentActivityBlock act={a.activity} />}
         </button>
       ))}
     </div>
@@ -248,6 +288,7 @@ function UserCard({ a }: { a: AgentStat }) {
     <div className="col gap-lg">
       <div className="row"><Avatar size="lg" name={a.name} /><div><h2>{[a.first_name, a.last_name].filter(Boolean).join(' ') || a.name}</h2><div className="label">{a.role ? ROLE_LABEL[a.role] : ''} · {a.level || 50}%</div></div></div>
       <Card label="Уровень"><LevelProgress deals={a.exclusive_deals} level={a.level} /></Card>
+      {a.activity && <AgentActivityBlock act={a.activity} full />}
       <KV items={[
         ['Эксклюзивов', a.exclusive_deals], ['Сделок за месяц', a.deals_month ?? '—'], ['Заявок в работе', a.active_leads ?? '—'], ['Объектов в работе', a.active_properties ?? '—'],
         ...Object.entries(s).filter(([, v]) => typeof v === 'number' || typeof v === 'string').slice(0, 8).map(([k, v]) => [k, String(v)] as [string, string]),

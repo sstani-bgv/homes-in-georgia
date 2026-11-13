@@ -758,3 +758,24 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 .fbox-price .input::placeholder { color: var(--faint); font-weight: 500; }
 /* desktop: the flag switch and the filter boxes keep a phone-like width instead of stretching across the page */
 .seg-full, .filter-grid { max-width: 640px; }
+
+/* ---------- «Активность агента» on Команда cards (11-13) ---------- */
+.act-badge { display: inline-flex; flex-direction: column; align-items: center; padding: 4px 10px; border-radius: 12px; background: var(--ok-soft); color: var(--ok); font-weight: 900; font-size: 15px; line-height: 1.1; }
+.act-badge small { font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.act { margin-top: 12px; padding: 12px; border-radius: 16px; background: var(--brand-tint); border: 1px solid var(--line); color: var(--ink); font-size: 12px; }
+.act-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; font-size: 12px; color: var(--brand); }
+.act-info { color: var(--faint); cursor: help; }
+.act-sub { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.act-main { margin: 10px 0; gap: 10px; align-items: center; }
+.act-main b { font-size: 20px; font-weight: 900; color: var(--ink); }
+.act-bar { height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.act-bar > div { height: 100%; border-radius: 99px; background: var(--brand-600); }
+.act-bar > div.ok { background: var(--ok); }
+.act-bar.thin { height: 5px; margin: 4px 0 3px; }
+.act-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.act-tile { display: flex; flex-direction: column; padding: 8px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.act-tile-head { display: flex; flex-direction: column; gap: 4px; font-size: 11px; line-height: 1.2; color: var(--ink-2); min-height: 44px; margin-bottom: 2px; }
+.act-tile-head svg { flex: none; color: var(--brand); }
+.act-tile b { font-size: 15px; font-weight: 900; }
+.act-formula { margin-top: 8px; padding: 8px 10px; border-radius: 12px; background: var(--surface); color: var(--ink-2); font-size: 11px; line-height: 1.5; }
+.act-pill { display: inline-block; padding: 0 8px; border-radius: 99px; background: var(--brand-soft); color: var(--brand); font-weight: 900; }

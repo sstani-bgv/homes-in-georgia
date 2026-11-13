@@ -101,6 +101,12 @@ function counters(month?: string) {
     };
   });
 }
+function mockActivity(n: number, active: number, deals: number) {
+  const targets = { new: 60, active: 60, deals: 5 }, weights = { new: 40, active: 30, deals: 30 };
+  const score = Math.round(Math.min(n / 60, 1) * 40 + Math.min(active / 60, 1) * 30 + Math.min(deals / 5, 1) * 30);
+  return { score, new: n, active, deals, targets, weights, days: 30 };
+}
+
 function agentStats() {
   return F.users.filter((u) => (u.role === 'agent' || u.role === 'recruit') && u.is_active).map((u) => ({
     id: u.id, name: u.name, role: u.role, photo_url: u.photo_url, level: u.level ?? levelFor(u.exclusive_deals),
@@ -109,6 +115,7 @@ function agentStats() {
     active_leads: F.leads.filter((l) => l.agent_id === u.id && !['rented', 'refused'].includes(l.status)).length,
     active_properties: F.properties.filter((p) => p.agent_id === u.id && !['published', 'rented', 'archived'].includes(p.status)).length,
     avg_response_min: 8 + (u.id * 7) % 25,
+    activity: mockActivity((u.id * 17) % 70, F.properties.filter((p) => p.agent_id === u.id && !['rented', 'archived'].includes(p.status)).length, u.id % 7),
   })).sort((a, b) => b.exclusive_deals - a.exclusive_deals);
 }
 

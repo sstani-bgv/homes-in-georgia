@@ -607,6 +607,18 @@ export interface AgentStat {
   active_leads?: number;
   active_properties?: number;
   mentor_id?: number | null;
+  activity?: AgentActivity;
+}
+
+/** «Активность агента», rolling `days`: score = Σ min(value/target, 1) × weight (backend analytics.ACTIVITY_*) */
+export interface AgentActivity {
+  score: number;
+  new: number;
+  active: number;
+  deals: number;
+  targets: { new: number; active: number; deals: number };
+  weights: { new: number; active: number; deals: number };
+  days: number;
 }
 
 export interface Dashboard {
