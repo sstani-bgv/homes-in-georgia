@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { http } from '../api/client';
+import { errText } from './toast';
 import { insideTelegram, tgWebApp } from '../auth/AuthContext';
 import { Button, Loading } from './ui';
 
@@ -30,23 +31,37 @@ interface RegPage { total: number; page: number; lastpage: number; items: RegApp
 // one wins: an extract or a copied page also names the land plot's shorter code
 const CODE_RE = /(?<![\d.])\d{1,3}(?:\.\d{1,6}){3,8}\p{L}?(?:\/\d{1,4}\p{L}?)?(?!\d)/gu;
 export const findCadastral = (text: string) => (text.match(CODE_RE) || []).sort((a, b) => b.length - a.length)[0] || '';
+// the extract's «download» link on NAPR (https://bs.napr.gov.ge/GetBlob?pid=…&bid=…; backend registry.EXTRACT_HOSTS)
+export const findExtractLink = (text: string) => text.match(/https?:\/\/(?:[\w-]+\.)*(?:napr|reestri)\.gov\.ge\/\S+/i)?.[0] || '';
 
 /** onCode: after the agent opened an application on NAPR and comes back to this tab, the clipboard is read and a
  * cadastral code in it is handed over by itself. Where the browser wants a tap first (iOS Safari, Telegram), one big
- * button does the same. The CAPTCHA on NAPR stays the person's own job. */
-function useClipboardCode(onCode?: (code: string) => void) {
+ * button does the same. The CAPTCHA on NAPR stays the person's own job.
+ * onLink (the contract wizard): a copied extract link wins over a code — the server downloads and parses the extract;
+ * it resolves to the note shown under the button. */
+function useClipboardCode(onCode?: (code: string) => void, onLink?: (url: string) => Promise<string>) {
   const [armed, setArmed] = useState(false);  // an application was opened, nothing pasted yet
   const [note, setNote] = useState('');
   const busy = useRef(false);  // focus and visibilitychange come together on return
+  const lastLink = useRef('');  // on return the same link isn't loaded twice; a tap reloads it
   const read = async (byTap: boolean) => {
     if (busy.current) return;
     busy.current = true;
     try {
-      const code = findCadastral(await navigator.clipboard.readText());
+      const text = await navigator.clipboard.readText();
+      const link = onLink && findExtractLink(text);
+      if (link && (byTap || link !== lastLink.current)) {
+        lastLink.current = link;
+        setNote('Загружаю выписку…');
+        setNote(await onLink(link).catch((e) => errText(e)));
+        return;
+      }
+      if (link) return;
+      const code = findCadastral(text);
       if (code) { onCode?.(code); setArmed(false); setNote(''); return; }
-      if (byTap) setNote('В буфере нет кадастрового кода: скопируйте его на странице реестра.');
+      if (byTap) setNote(onLink ? 'В буфере нет ссылки на выписку: на сайте реестра скопируйте ссылку кнопки скачивания выписки.' : 'В буфере нет кадастрового кода: скопируйте его на странице реестра.');
     } catch {
-      if (byTap) setNote('Браузер не дал прочитать буфер: вставьте код в поле вручную.');
+      if (byTap) setNote(onLink ? 'Браузер не дал прочитать буфер: вставьте ссылку в поле «Ссылка на выписку».' : 'Браузер не дал прочитать буфер: вставьте код в поле вручную.');
     } finally {
       busy.current = false;
     }
@@ -58,11 +73,11 @@ function useClipboardCode(onCode?: (code: string) => void) {
     window.addEventListener('focus', back);
     return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back); };
   }, [armed, onCode]);  // eslint-disable-line react-hooks/exhaustive-deps
-  return { armed: armed && !!onCode, arm: () => { setArmed(true); setNote(''); }, read, note };
+  return { armed: armed && !!onCode, busy: note === 'Загружаю выписку…', arm: () => { setArmed(true); setNote(''); }, read, note };
 }
 
-export function RegistryApps({ base, personalId, picked, onPick, onCode, t }: { base: string; personalId: string; picked?: RegApp | null; onPick?: (a: RegApp) => void; onCode?: (code: string) => void; t: RegTexts }) {
-  const clip = useClipboardCode(onCode);
+export function RegistryApps({ base, personalId, picked, onPick, onCode, onLink, t }: { base: string; personalId: string; picked?: RegApp | null; onPick?: (a: RegApp) => void; onCode?: (code: string) => void; onLink?: (url: string) => Promise<string>; t: RegTexts }) {
+  const clip = useClipboardCode(onCode, onLink);
   const q = useInfiniteQuery({
     queryKey: ['napr', base, personalId], enabled: !!personalId, retry: false, staleTime: 3600_000, initialPageParam: 1,
     queryFn: ({ pageParam }) => http.get<RegPage>(`${base}?personal_id=${personalId}&page=${pageParam}`),
@@ -78,8 +93,8 @@ export function RegistryApps({ base, personalId, picked, onPick, onCode, t }: { 
       <span className="faint" style={{ fontSize: 12 }}>{t.listHint}</span>
       {clip.armed && (
         <div className="col gap-sm">
-          <Button onClick={() => void clip.read(true)}>Вставить кадастровый код из реестра</Button>
-          <span className="faint" style={{ fontSize: 12 }}>{clip.note || 'Скопируйте код на странице реестра и вернитесь сюда — он подставится сам.'}</span>
+          <Button loading={clip.busy} onClick={() => void clip.read(true)}>{onLink ? 'Вставить ссылку на выписку' : 'Вставить кадастровый код из реестра'}</Button>
+          <span className="faint" style={{ fontSize: 12 }}>{clip.note || (onLink ? 'Скопируйте на сайте реестра ссылку на выписку и вернитесь сюда — выписка загрузится и заполнит поля сама.' : 'Скопируйте код на странице реестра и вернитесь сюда — он подставится сам.')}</span>
         </div>
       )}
       {items.map((a) => {

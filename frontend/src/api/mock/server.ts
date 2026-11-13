@@ -561,6 +561,15 @@ on('POST', '/contracts/draft', (_m, b) => {
 });
 on('GET', '/contracts/:id', (m) => { const c = contracts.find((x) => x.id === Number(m[1])); if (!c) throw new ApiError(404, 'Не найдено'); return cxOut(c); });
 on('POST', '/contracts/:id/link', (m, b) => { const c = contracts.find((x) => x.id === Number(m[1]))!; c.lead_id = b.lead_id; return cxOut(c); });
+// the registry (services/registry.py): one NAPR application for any owner ID; an extract link fills demo fields
+on('GET', '/registry/known', () => ({ items: [] }));
+on('GET', '/registry/applications', () => ({ total: 1, page: 1, lastpage: 1, items: [{ app_id: '1', reg_number: '892026010466', date: new Date().toISOString(),
+  type: 'ამონაწერის მომზადება უძრავ ნივთზე', address: 'ქალაქი თბილისი', status: 'სარეგისტრაციო წარმოება დასრულებულია', done: true, applicants: [], url: 'https://napr.gov.ge' }] }));
+on('POST', '/registry/extract-from-url', (_m, b) => {
+  if (!/napr\.gov\.ge|reestri\.gov\.ge/.test(String(b.url))) throw new ApiError(422, 'Ссылка не на выписку NAPR: нужна ссылка вида https://bs.napr.gov.ge/GetBlob?…');
+  return { url: b.url, file: 'private/registry-extracts/mock.pdf', cadastral_code: '01.10.14.016.017.01.001',
+    fields: { cadastral_code: '01.10.14.016.017.01.001', street_house: 'ул. Демо, 1', apartment_number: '7', apartment_area: '50', owner_full_name: 'Демо Собственник', owner_personal_number: '01001000001' } };
+});
 
 async function formToBody(fd: FormData): Promise<Record<string, unknown>> {
   const files: { name: string; url: string }[] = [];

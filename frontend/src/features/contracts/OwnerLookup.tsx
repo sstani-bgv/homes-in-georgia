@@ -32,33 +32,45 @@ export function useKnownObjects(personalId: string) {
 
 interface UrlOut extends ExtractOut { file: string; url: string }
 
-/** The extract by its link (NAPR's «download» PDF, https://bs.napr.gov.ge/GetBlob?…): pasted → the server downloads it,
- * fills the empty fields and keeps the PDF; the link and the file go into the contract's data (onSaved). */
-function ExtractLink({ saved, onFields, onSaved }: {
-  saved?: string; onFields: (f: ExtractFields) => string[]; onSaved: (url: string, file: string) => void;
-}) {
+/** The extract by its link (NAPR's «download» PDF, https://bs.napr.gov.ge/GetBlob?…): pasted here or by the big
+ * button under the registry applications (go) → the server downloads it, fills the empty fields and keeps the PDF;
+ * the link and the file go into the contract's data (onSaved). go resolves to the note, rejects with the error. */
+function useExtractLink(saved: string | undefined, onFields: (f: ExtractFields) => string[], onSaved: (url: string, file: string) => void) {
   const [url, setUrl] = useState(saved || '');
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(saved ? { text: 'Выписка сохранена с договором' } : null);
-  const load = useMutation({
-    mutationFn: (u: string) => http.post<UrlOut>('/registry/extract-from-url', { url: u }),
-    onMutate: () => setNote(null),
-    onSuccess: (r) => {
+  const load = useMutation({ mutationFn: (u: string) => http.post<UrlOut>('/registry/extract-from-url', { url: u }) });
+  const go = async (u: string) => {
+    const t = u.trim();
+    if (!t) return '';
+    setUrl(t);
+    setNote(null);
+    let text: string;
+    try {
+      const r = await load.mutateAsync(t);
       onSaved(r.url, r.file);
-      if (!Object.keys(r.fields).length) { setNote({ text: 'Скан без текста — выписка сохранена, заполните поля вручную', bad: true }); return; }
-      const names = onFields(r.fields);
-      setNote({ text: names.length ? `Заполнено из выписки: ${names.join(', ')}` : 'Выписка сохранена; поля уже были заполнены — ничего не изменено' });
-    },
-    onError: (e) => setNote({ text: errText(e), bad: true }),
-  });
-  const go = (u: string) => { const t = u.trim(); if (t) load.mutate(t); };
+      const names = Object.keys(r.fields).length ? onFields(r.fields) : null;
+      text = !names ? 'Скан без текста — выписка сохранена, заполните поля вручную'
+        : names.length ? `Заполнено из выписки: ${names.join(', ')}` : 'Выписка сохранена; поля уже были заполнены — ничего не изменено';
+      setNote({ text, bad: !names });
+    } catch (e) {
+      setNote({ text: errText(e), bad: true });
+      throw e;
+    }
+    return text;
+  };
+  return { url, setUrl, note, load, go };
+}
+
+function ExtractLink({ x: { url, setUrl, note, load, go } }: { x: ReturnType<typeof useExtractLink> }) {
+  const run = (u: string) => void go(u).catch(() => undefined);  // the error is in note
   return (
     <div className="col gap-sm">
       <span className="label"><Link2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />Ссылка на выписку</span>
       <div className="row gap-sm">
         <Input style={{ flex: 1, minWidth: 0 }} inputMode="url" value={url} placeholder="https://bs.napr.gov.ge/GetBlob?…" onChange={(e) => setUrl(e.target.value)}
-          onPaste={(e) => { const t = e.clipboardData.getData('text').trim(); if (t) { e.preventDefault(); setUrl(t); go(t); } }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); go(url); } }} />
-        <Button loading={load.isPending} disabled={!url.trim()} onClick={() => go(url)}>Загрузить</Button>
+          onPaste={(e) => { const t = e.clipboardData.getData('text').trim(); if (t) { e.preventDefault(); run(t); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); run(url); } }} />
+        <Button loading={load.isPending} disabled={!url.trim()} onClick={() => run(url)}>Загрузить</Button>
       </div>
       {note && <span style={{ fontSize: 13, color: note.bad ? 'var(--danger, #c0392b)' : 'var(--ok, #1a7f4b)' }}>{note.text}</span>}
     </div>
@@ -104,7 +116,8 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, ex
     },
     onError: (e) => toast(errText(e), true),
   });
-  const link = <ExtractLink saved={extractUrl} onFields={onFields} onSaved={onExtract} />;
+  const x = useExtractLink(extractUrl, onFields, onExtract);
+  const link = <ExtractLink x={x} />;
   if (!personalId) {
     return (
       <div className="col gap">
@@ -137,8 +150,8 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, ex
           })}
         </div>
       )}
-      <RegistryApps base="/registry/applications" personalId={personalId} onCode={onCode} t={{ ...REG_RU, listTitle: items.length ? 'Другие объекты — заявки в Публичном реестре' : REG_RU.listTitle,
-        listHint: 'Откройте заявку по этому объекту и на сайте реестра отметьте «Я не робот». Затем выделите всю страницу и скопируйте (телефон: долгое нажатие → «Выбрать всё» → «Скопировать»; компьютер: Cmd/Ctrl+A, Cmd/Ctrl+C) и нажмите «Вставить из реестра». Или загрузите выписку (PDF), сохранённую в телефоне. Подставятся код, адрес, этаж, квартира, площадь и собственник.' }} />
+      <RegistryApps base="/registry/applications" personalId={personalId} onCode={onCode} onLink={x.go} t={{ ...REG_RU, listTitle: items.length ? 'Другие объекты — заявки в Публичном реестре' : REG_RU.listTitle,
+        listHint: 'Откройте заявку по этому объекту и на сайте реестра отметьте «Я не робот». Скопируйте ссылку на выписку (кнопка скачивания: долгое нажатие → «Скопировать ссылку») и вернитесь сюда — выписка загрузится сама, или нажмите «Вставить ссылку на выписку». Если ссылки нет — выделите всю страницу и скопируйте (телефон: долгое нажатие → «Выбрать всё» → «Скопировать»; компьютер: Cmd/Ctrl+A, Cmd/Ctrl+C) и нажмите «Вставить из реестра». Или загрузите выписку (PDF), сохранённую в телефоне. Подставятся код, адрес, этаж, квартира, площадь и собственник.' }} />
       <input ref={file} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read.mutate(f); }} />
       <div className="row row-wrap gap-sm">
         <Button loading={parse.isPending} onClick={pasteFromRegistry}><ClipboardPaste size={16} />Вставить из реестра</Button>
