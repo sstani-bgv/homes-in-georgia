@@ -186,6 +186,7 @@ export const api = {
     esign: (id: number) => http.post<Contract>(`/contracts/${id}/esign`),
     esignCancel: (id: number) => http.post<Contract>(`/contracts/${id}/esign/cancel`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
+    sendClient: (id: number, to?: string) => http.post<Contract>(`/contracts/${id}/send-client`, { to: to || null }),
     pdf: (id: number, signed = false, version?: number) => fetchBlob(`/contracts/${id}/pdf${version != null ? `?version=${version}` : signed ? '?signed=1' : ''}`),
     extract: (id: number) => fetchBlob(`/contracts/${id}/extract`),
   },

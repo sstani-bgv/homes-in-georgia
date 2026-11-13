@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.config import REPO_ROOT, settings as env
-from app.models import CONTRACT_CLOSE_REASONS, Contract, Deal, Lead, User, at_least
+from app.models import CONTRACT_CLOSE_REASONS, Client, Contract, Deal, Event, Lead, User, at_least
 from app.services import jobs
 from app.services.common import get_or_404, log_event, now
 from app.services.errors import DomainError
@@ -190,6 +190,10 @@ def out(db: Session, c: Contract, full: bool = False) -> dict:
     if full:
         d["html"], d["data"] = c.html, c.data
         d["versions"] = [{"n": i, "at": v.get("at"), "by": _name(db, v.get("by"))} for i, v in enumerate(c.versions or [])]
+        d["client_tg"] = (r := recipient(db, c)) and {"label": r["label"]}
+        ev = db.scalar(select(Event).where(Event.entity == "contract", Event.entity_id == str(c.id), Event.action == "sent_to_client")
+                       .order_by(Event.id.desc()).limit(1))
+        d["sent_to_client"] = ev and {"at": _iso(ev.at), "by": ev.actor_label, **ev.data}
     return d
 
 
@@ -493,6 +497,80 @@ def by_share_token(db: Session, token: str) -> Contract:
     c = db.scalar(select(Contract).where(Contract.share_token == token)) if token and len(token) >= 20 else None
     if not c or not c.share_expires_at or c.share_expires_at < now() or c.status == "closed_no_deal":
         raise DomainError("not_found", "Ссылка недействительна или истекла")
+    return c
+
+
+# ---------------------------------------------------------------- to the client from the operator's Telegram (11-13)
+
+KIND_TEXT = {"rent": "аренды", "comm": "аренды", "sale": "купли-продажи"}
+TG_NAME = re.compile(r"^(?:@|(?:https?://)?t\.me/)?([A-Za-z][A-Za-z0-9_]{3,31})/?$")
+
+
+def tg_peer(to: str) -> str | None:
+    """What the agent typed as the recipient: «@name» / «t.me/name» / «name» -> «@name»; a phone -> «+995…»."""
+    to = (to or "").strip()
+    if m := TG_NAME.match(to):
+        return "@" + m[1]
+    d = re.sub(r"\D", "", to) if re.fullmatch(r"[+\d\s()-]{9,20}", to) else ""
+    d = "995" + d if len(d) == 9 else d  # a Georgian mobile without the code (as notify.intl_phone)
+    return "+" + d if len(d) >= 10 else None
+
+
+def recipient(db: Session, c: Contract) -> dict | None:
+    """The tenant / buyer = the linked lead's client: a Telegram client row (the userbot knows it by id), else his
+    phone -> {client_id | peer, label}; None = the agent types it («@username» / phone)."""
+    lead = db.get(Lead, c.lead_id) if c.lead_id else None
+    if not lead and c.deal_id and (deal := db.get(Deal, c.deal_id)) and deal.lead_id:
+        lead = db.get(Lead, deal.lead_id)
+    cl = db.get(Client, lead.client_id) if lead and lead.client_id else None
+    if not cl:
+        return None
+    who = cl.name or f"клиент #{cl.id}"
+    if cl.channel == "tg":
+        return {"client_id": cl.id, "label": f"{who} (@{cl.username})" if cl.username else f"{who} (Telegram)"}
+    peer = tg_peer(cl.phone or "")
+    return {"peer": peer, "label": f"{who} ({peer})"} if peer and peer.startswith("+") else None
+
+
+def send_to_client(db: Session, cid: int, user: User, to: str | None = None) -> Contract:
+    """«Отправить клиенту в Telegram»: the current PDF (the signed scan once there is one) + the registry extract as
+    documents from the operator's account (userbot). Only on the agent's click, never on regeneration: an outward send.
+    to: the agent's recipient (contracts without a lead / without the client's Telegram) over the lead's client."""
+    from app.services import registry
+    from app.telegram import notify, userbot
+    c = get(db, cid, user)
+    if c.status == "closed_no_deal":
+        raise DomainError("bad_status", "Договор закрыт", 409)
+    if not c.pdf_path:
+        raise DomainError("not_generated", "Сначала сгенерируйте договор (PDF)", 409)
+    if c.status == "draft" and stale(c):
+        raise DomainError("pdf_stale", "Данные изменены после генерации: обновите PDF перед отправкой", 409)
+    if to and (to or "").strip():
+        peer = tg_peer(to)
+        if not peer:
+            raise DomainError("bad_input", "Получатель: @username в Telegram или телефон")
+        r = {"peer": peer, "label": peer}
+    else:
+        r = recipient(db, c)
+    if not r:
+        raise DomainError("no_recipient", "У клиента нет Telegram: укажите @username или телефон получателя", 409)
+    from app.telegram.client import conf
+    if not conf("USERBOT_URL").strip():
+        raise DomainError("userbot_off", notify.USERBOT_OFF, 409)
+    signed = bool(c.signed_pdf_path)
+    files = [(filename(c, signed), pdf_bytes(c, signed))]
+    key = str((c.data or {}).get("extract_file") or "")
+    if registry.EXTRACT_KEY_RE.match(key) and (ex := storage.read(key)):
+        files.append((f"Выписка из реестра {c.cadastral or c.id}.pdf", ex))
+    where = c.address or (f"кад. код {c.cadastral}" if c.cadastral else "")
+    what = " ".join(x for x in ("Договор", KIND_TEXT.get(c.kind or ""), where and f"— {where}") if x)
+    text = (f"Здравствуйте! {what} во вложении{', вместе с выпиской из публичного реестра' if len(files) > 1 else ''}. "
+            "Посмотрите, пожалуйста; если будут вопросы — напишите сюда.")
+    if not userbot.send_files(text, files, r.get("client_id"), r.get("peer")):
+        raise DomainError("send_failed", f"{notify.USERBOT_FAILED}: проверьте получателя ({r['label']})", 502)
+    log_event(db, "contract", c.id, "sent_to_client", user, to=r["label"], extract=len(files) > 1,
+              version="подписанный" if signed else len(c.versions or []) + 1)
+    db.commit()
     return c
 
 

@@ -79,6 +79,10 @@ class ESignIn(BaseModel):
     lang: str | None = Field(None, max_length=5)
 
 
+class SendClientIn(BaseModel):
+    to: str | None = Field(None, max_length=100)  # «@username» / phone; empty = the lead's client
+
+
 class CloseIn(BaseModel):
     reason: str
     comment: str | None = Field(None, max_length=2000)
@@ -186,6 +190,13 @@ def contracts_send_pdf(cid: int, db: Session = Depends(get_db, scope="function")
                chat_id=user.tg_id, caption=f"Договор #{c.id}: {C.label(c)}") is None:
         raise DomainError("send_failed", "Telegram не принял файл, попробуйте ещё раз", 502)
     return {"ok": True}
+
+
+@router.post("/contracts/{cid}/send-client")
+def contracts_send_client(cid: int, body: SendClientIn, db: Session = Depends(get_db, scope="function"),
+                          user: User = Depends(current_user)):
+    """«Отправить клиенту в Telegram»: PDF + the registry extract from the operator's account (11-13)."""
+    return C.out(db, C.send_to_client(db, cid, user, body.to), full=True)
 
 
 # the «Поделиться» link: no login, the unguessable token is the access; expires (CONTRACT_SHARE_DAYS), read-only

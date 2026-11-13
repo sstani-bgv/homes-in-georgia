@@ -8,7 +8,8 @@ and is used only while no QR login is saved.
 
 Run: `cd backend && python -m app.telegram.userbot` (compose: the commented `userbot` service). One process owns the
 session (two clients on one session get it revoked), so the CRM/bot reach it over HTTP: USERBOT_URL (e.g.
-http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id, text, options?, choice?, inline?}.
+http://userbot:8091), header X-Userbot-Token = SECRET_KEY, POST /send {client_id, text, options?, choice?, inline?}; a
+contract to its client: {client_id | peer (@username / +phone), text, files: [{name, b64}]} (send_files).
 
 - incoming «…вариант #<obj>…» (LIKE_CODE) -> leads.create_from_like for that object + message_from_client in it;
 - any other incoming private message -> the client (clients.external_id = sender id, else the @username) and its latest open lead
@@ -152,6 +153,25 @@ def forget_choice(client_id, data):
     store.q("UPDATE clients SET state = (COALESCE(NULLIF(state, ''), '{}')::jsonb - 'dm_choice')::text WHERE id = %s AND "
             "(COALESCE(NULLIF(state, ''), '{}')::jsonb->'dm_choice'->'options' ? %s "
             "OR COALESCE(NULLIF(state, ''), '{}')::jsonb->'dm_choice'->>'kind' = %s)", (client_id, data, data))
+
+
+def send_files(text, files, client_id=None, peer=None):
+    """Documents with `text` as the first one's caption (the contract + registry extract, 11-13) to a client row or a
+    peer «@username» / «+995…» -> {"message_id": …} or None. files: [(name, bytes)]."""
+    url = conf("USERBOT_URL").strip().rstrip("/")
+    if not url or not (client_id or peer):
+        return None
+    try:
+        import base64
+        import httpx
+        r = httpx.post(f"{url}/send", json={"client_id": client_id, "peer": peer, "text": text,
+                                            "files": [{"name": n, "b64": base64.b64encode(b).decode()} for n, b in files]},
+                       headers={"X-Userbot-Token": conf("SECRET_KEY")}, timeout=90)
+        body = r.json()
+        return body if r.status_code == 200 and body.get("ok") else None
+    except Exception as e:  # noqa: BLE001 — the caller reports it
+        log.warning("userbot files to %s failed: %r", client_id or peer, e)
+        return None
 
 
 def send_to_client(cl, text, options=None, choice=None, inline=None):
@@ -304,21 +324,55 @@ def on_outgoing(peer_id, text, me_id=None):
     return "logged" if not err else err
 
 
-async def send(client, client_id, text, options=None, choice=None, inline=None):
+async def _peer_entity(client, peer):
+    """«@name» / «+995…» -> an input entity; a phone not in the operator's contacts is imported as a contact first
+    (Telegram finds users by phone only that way, and only if their privacy allows it)."""
+    if not peer.startswith("+"):
+        return await client.get_input_entity(peer.lstrip("@"))
+    try:
+        return await client.get_input_entity(peer)
+    except ValueError:
+        from telethon.tl import functions, types
+        res = await client(functions.contacts.ImportContactsRequest([types.InputPhoneContact(0, peer, peer, "")]))
+        if not res.users:
+            raise LookupError(f"no Telegram account for {peer}") from None
+        return await client.get_input_entity(res.users[0])
+
+
+async def send(client, client_id, text, options=None, choice=None, inline=None, peer=None, files=None):
     """Telethon send to a client -> message id. StringSession keeps no access hashes across restarts: a user not in the
     cache is found by @username (or after get_dialogs at start). inline: the bot's inline query whose first result is
-    sent (its buttons come with it); any failure there -> `text` + numbered `options`."""
-    cl = match_client_by_id(client_id)
-    if not cl:
-        raise LookupError("no such client")
+    sent (its buttons come with it); any failure there -> `text` + numbered `options`. peer: «@username» / «+phone»
+    instead of a client row; files: [{name, b64}] documents, `text` as the first one's caption."""
+    if peer and not client_id:
+        entity = await _peer_entity(client, peer)
+    else:
+        cl = match_client_by_id(client_id)
+        if not cl:
+            raise LookupError("no such client")
+        try:
+            entity = await client.get_input_entity(int(cl["external_id"]))
+        except ValueError:
+            if not cl.get("username"):
+                raise
+            entity = cl["username"]
+    await _check_free_dm(client, entity, client_id or peer)
+    if files:
+        import base64
+        import io
+
+        from telethon import utils
+        SENT.add((utils.get_peer_id(await client.get_input_entity(entity)), text))  # the caption: not a typed operator DM
+        first = None
+        for i, f in enumerate(files):
+            doc = io.BytesIO(base64.b64decode(f["b64"]))
+            doc.name = f["name"]  # Telethon's file name
+            m = await client.send_file(entity, doc, caption=text if i == 0 else None, force_document=True)
+            first = first or m
+        return first.id
+    if not client_id:
+        raise ValueError("a peer without a client row: files only")
     peer = int(cl["external_id"])
-    try:
-        entity = await client.get_input_entity(peer)
-    except ValueError:
-        if not cl.get("username"):
-            raise
-        entity = cl["username"]
-    await _check_free_dm(client, entity, client_id)
     if inline:
         try:
             res = await client.inline_query(conf("BOT_USERNAME").strip().lstrip("@"), inline)
@@ -409,8 +463,9 @@ def serve_http(client, loop, port):
             if not STATE["me"] and client is None:
                 return reply(503, {"ok": False, "error": "operator account is not logged in"})
             try:
-                mid = asyncio.run_coroutine_threadsafe(send(c, int(p["client_id"]), p["text"], p.get("options"), p.get("choice"),
-                                                            p.get("inline")), loop).result(30)
+                cid = int(p["client_id"]) if p.get("client_id") else None
+                mid = asyncio.run_coroutine_threadsafe(send(c, cid, p["text"], p.get("options"), p.get("choice"), p.get("inline"),
+                                                            p.get("peer"), p.get("files")), loop).result(80)
                 reply(200, {"ok": True, "message_id": mid})
             except Exception as e:  # noqa: BLE001
                 log.warning("userbot /send failed: %r", e)

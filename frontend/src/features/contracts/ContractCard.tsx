@@ -104,9 +104,48 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
           <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(link)}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>
         </div>
       )}
+      {!closed && <SendToClient c={c} onChange={onChange} />}
       <ESignBlock c={c} onChange={(x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); }} />
       <SignModal c={c} open={signOpen} onClose={() => setSignOpen(false)} onDone={(x) => { setSignOpen(false); done(x, 'Отмечено: договор подписан'); }} />
       <CloseModal c={c} open={closeOpen} onClose={() => setCloseOpen(false)} onDone={(x) => { setCloseOpen(false); done(x, 'Договор закрыт: сделка не состоялась'); }} />
+    </div>
+  );
+}
+
+/** «Отправить клиенту в Telegram» (11-13): the PDF + the registry extract from the operator's account (userbot), only on
+ *  this click; to the lead's client, or to the @username / phone the agent types. A re-send asks first. */
+function SendToClient({ c, onChange }: { c: Contract; onChange: (c: Contract) => void }) {
+  const toast = useToast();
+  const [edit, setEdit] = useState(false);
+  const [to, setTo] = useState('');
+  const manual = edit || !c.client_tg;
+  const sent = c.sent_to_client;
+  const m = useMutation({
+    mutationFn: () => api.contracts.sendClient(c.id, manual ? to.trim() : undefined),
+    onSuccess: (x) => { onChange(x); setEdit(false); toast(`Договор отправлен клиенту: ${x.sent_to_client?.to ?? ''}`); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const go = () => {
+    if (manual && !to.trim()) { toast('Укажите @username в Telegram или телефон клиента', true); return; }
+    if (sent && !window.confirm(`Договор уже отправлен клиенту ${fmtDateTime(sent.at)} (${sent.to}). Отправить ещё раз?`)) return;
+    m.mutate();
+  };
+  return (
+    <div className="col gap-sm">
+      <div className="row row-wrap gap-sm" style={{ alignItems: 'center' }}>
+        <Button variant="secondary" loading={m.isPending} disabled={c.pdf_stale} onClick={go}
+          title={c.pdf_stale ? 'Сначала обновите PDF' : undefined}><Send size={16} />Отправить клиенту в Telegram</Button>
+        {manual
+          ? <Input style={{ maxWidth: 240 }} value={to} placeholder="@username или +995…" aria-label="Получатель в Telegram"
+              onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') go(); }} />
+          : <span className="muted" style={{ fontSize: 13 }}>кому: {c.client_tg!.label}</span>}
+        {c.client_tg && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEdit(!edit)}>{edit ? 'Клиенту из заявки' : 'Другой получатель'}</button>}
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>
+        {sent ? <Badge tone="ok">Отправлено клиенту {fmtDateTime(sent.at)} · {sent.to} · {typeof sent.version === 'number' ? `версия ${sent.version}` : sent.version}{sent.extract ? ' + выписка' : ''}</Badge>
+          : manual && !c.client_tg ? `${c.lead_id || c.deal_id ? 'У клиента из заявки нет Telegram' : 'Договор без заявки'}: укажите @username или телефон получателя. ` : null}
+        {' '}PDF{c.data?.extract_file ? ' и выписка из реестра уйдут' : ' уйдёт'} с аккаунта оператора.
+      </div>
     </div>
   );
 }

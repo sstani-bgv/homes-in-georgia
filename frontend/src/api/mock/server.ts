@@ -561,6 +561,24 @@ on('POST', '/contracts/draft', (_m, b) => {
 });
 on('GET', '/contracts/:id', (m) => { const c = contracts.find((x) => x.id === Number(m[1])); if (!c) throw new ApiError(404, 'Не найдено'); return cxOut(c); });
 on('POST', '/contracts/:id/link', (m, b) => { const c = contracts.find((x) => x.id === Number(m[1]))!; c.lead_id = b.lead_id; return cxOut(c); });
+// «Сохранить PDF» / «Обновить PDF» and «Отправить клиенту в Telegram» (11-13): a lead's client is reachable, else the typed recipient
+const cxGen = (c: Record<string, unknown>, b: Record<string, unknown>) => Object.assign(c, { ...b, html: undefined, has_pdf: true, status_label: 'Сгенерирован',
+  generated_at: new Date().toISOString(), filename: 'contract.pdf', client_tg: b.lead_id ? { label: 'Анна (@anna_demo)' } : null });
+on('POST', '/contracts', (_m, b) => { const c = cxGen({ id: nextId(), created_at: new Date().toISOString() }, b); contracts.push(c); return cxOut(c); });
+on('PUT', '/contracts/:id', (m, b) => {
+  const c = contracts.find((x) => x.id === Number(m[1]))!;
+  const vs = (c.versions as unknown[] | undefined) || [];
+  cxGen(c, { ...b, versions: c.has_pdf ? [...vs, { n: vs.length, at: c.generated_at, by: null }] : vs });
+  return cxOut(c);
+});
+on('POST', '/contracts/:id/send-client', (m, b) => {
+  const c = contracts.find((x) => x.id === Number(m[1]))!;
+  const to = String(b.to || '').trim() || (c.client_tg as { label: string } | null)?.label;
+  if (!to) throw new ApiError(409, 'У клиента нет Telegram: укажите @username или телефон получателя');
+  c.sent_to_client = { at: new Date().toISOString(), by: 'Демо', to, version: ((c.versions as unknown[]) || []).length + 1,
+    extract: !!(c.data as Record<string, unknown> | undefined)?.extract_file };
+  return cxOut(c);
+});
 // the registry (services/registry.py): one NAPR application for any owner ID; an extract link fills demo fields
 on('GET', '/registry/known', () => ({ items: [] }));
 on('GET', '/registry/applications', () => ({ total: 1, page: 1, lastpage: 1, items: [{ app_id: '1', reg_number: '892026010466', date: new Date().toISOString(),

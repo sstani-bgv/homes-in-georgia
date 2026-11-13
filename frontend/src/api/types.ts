@@ -389,6 +389,9 @@ export interface Contract extends ContractSummary {
   /** electronic signing (backend services/esign.py): null until «Подписать электронно» */
   esign?: ContractESign | null;
   html?: string;
+  /** «Отправить клиенту в Telegram» (11-13): the lead's client the userbot can reach; null = the agent types the recipient */
+  client_tg?: { label: string } | null;
+  sent_to_client?: { at: string; by: string; to: string; version: number | string; extract: boolean } | null;
 }
 export interface ContractDraftIn {
   id?: number | null; kind?: Contract['kind'] | ''; lang?: Contract['lang'] | ''; lead_id?: number | null; deal_id?: number | null;
