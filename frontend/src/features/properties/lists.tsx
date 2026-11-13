@@ -259,10 +259,10 @@ export function PropertyModal({ id, listing, reasons, base = '', onClose }: { id
   );
 }
 
-/** «База объектов»: the same card as «Новые объявления»; click opens PropertyModal. */
-function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
+/** «База объектов»: the same card as «Новые объявления»; a tap opens the full object (Stanislav 11-13: no modal step). */
+function PropertyCard({ p, to }: { p: Property; to: string }) {
   return (
-    <article className="card lcard" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} style={{ cursor: 'pointer' }}>
+    <Link to={to} className="card lcard" style={{ color: 'inherit', textDecoration: 'none' }}>
       <div className="lcard-photo">
         {p.photo ? <img src={thumbUrl(p.photo)} alt="" loading="lazy" /> : null}
         <div className="badges"><PropertyStatusBadge status={p.status} />{p.is_exclusive && <Badge tone="solid">эксклюзив</Badge>}<ExclusiveConflictBadge p={p} /></div>
@@ -276,7 +276,7 @@ function PropertyCard({ p, onOpen }: { p: Property; onOpen: () => void }) {
           <span style={{ flex: 'none' }}>{ago(p.updated_at || p.created_at)}</span>
         </div>
       </div>
-    </article>
+    </Link>
   );
 }
 
@@ -488,7 +488,6 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
   const items = itemsOf(data);
   const navigate = useNavigate();
   const link = (id: number) => propLink(base, id);
-  const [peek, setPeek] = useState<number | null>(null);
   const filtered = !!(f.source.length || f.district.length || f.metro || f.bedrooms || f.price_min || f.price_max || status || (agent && !fixedAgent) || reason);
   const segOpts = scope === 'all' ? ['', ...BASE] : scope === 'mine' ? ['', 'work', 'published', 'rented'] : null;
   return (
@@ -521,12 +520,11 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
           {' · '}{(['published', 'rented', 'archived'] as PS[]).map((k) => `${PROPERTY_STATUS[k]}: ${(counts.data[k] || 0).toLocaleString('ru')}`).join(' · ')}
         </div>
       )}
-      {peek !== null && <PropertyModal id={peek} base={base} onClose={() => setPeek(null)} />}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={filtered ? 'Ничего не найдено' : archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : view === 'map' ? (
-        <ListingsMap items={items} card={(p) => <PropertyCard key={p.id} p={p} onOpen={() => setPeek(p.id)} />} />
+        <ListingsMap items={items} card={(p) => <PropertyCard key={p.id} p={p} to={link(p.id)} />} />
       ) : scope === 'all' ? (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {items.map((p) => <PropertyCard key={p.id} p={p} onOpen={() => setPeek(p.id)} />)}
+          {items.map((p) => <PropertyCard key={p.id} p={p} to={link(p.id)} />)}
         </div>
       ) : (
         <>
