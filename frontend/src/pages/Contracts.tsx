@@ -256,7 +256,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   // ---- autosave: debounced, from a partly filled form; the wizard's step / sync flags go along (_step, _dep, _end)
   const payloadData = () => ({ ...d, _step: step, _dep: depTouched, _end: endTouched });
   useEffect(() => {
-    if (!touched.current || locked || !(linkLead || linkDeal || cidRef.current)) return;
+    if (!touched.current || locked) return;  // a standalone contract (no lead / deal) autosaves too (11-13)
     const t = setTimeout(() => {
       const body = { id: cidRef.current || null, kind: type, lang, lead_id: linkLead || null, deal_id: linkDeal || null, data: payloadData() };
       chain.current = chain.current.then(() => api.contracts.autosave(body).then((c) => {
@@ -315,27 +315,37 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   function next() {
     setErr('');
     if (step === 1) {
-      if (!linkLead && !linkDeal) { setErr('Договор привязывается к сделке: выберите заявку выше'); return; }
       if (!type) { setErr('Выберите тип договора'); return; }
       setStep(2); return;
     }
     if (step === 2) { if (!lang) { setErr('Выберите язык договора'); return; } setStep(3); return; }
     if (step === 3) {
+      // «Далее» walks the sub-tabs first, validation only from the last one (11-13: it jumped straight to step 4)
+      if (tab !== 'money') { goTab(tab === 'parties' ? 'property' : 'money'); return; }
       const miss = requiredFields(type as CxType).filter((k) => !String(d[k] ?? '').trim());
       if (miss.length) {
         setMissing(new Set(miss));
         setErr('Заполните все обязательные поля');
         const parties: (keyof CxData)[] = ['timestamp', 'owner_full_name', 'owner_personal_number', 'owner_birth_day', 'client_full_name', 'client_personal_number', 'client_birth_day'];
         const property: (keyof CxData)[] = ['cadastral_code', 'street_house', 'apartment_area'];
-        setTab(miss.some((k) => parties.includes(k)) ? 'parties' : miss.some((k) => property.includes(k)) ? 'property' : 'money');
+        goTab(miss.some((k) => parties.includes(k)) ? 'parties' : miss.some((k) => property.includes(k)) ? 'property' : 'money');
         return;
       }
-      if (cadastralError(d.cadastral_code)) { setErr('Проверьте кадастровый код'); setTab('property'); return; }
+      if (cadastralError(d.cadastral_code)) { setErr('Проверьте кадастровый код'); goTab('property'); return; }
       setStep(4); return;
     }
     if (step === 4) { setStep(5); return; }
   }
-  function back() { setErr(''); setStep((s) => Math.max(1, s - 1)); }
+  function back() {
+    setErr('');
+    if (step === 3 && tab !== 'parties') { goTab(tab === 'money' ? 'property' : 'parties'); return; }  // mirrors «Далее»
+    setStep((s) => Math.max(1, s - 1));
+  }
+  // a sub-tab switch scrolls to the card's top: on a phone «Далее» is at the bottom of a long form
+  function goTab(t: typeof tab) {
+    setTab(t);
+    requestAnimationFrame(() => document.querySelector('.cx-data')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
   function reset() {
     // the current draft stays in its deal (Кабинет → Договоры); the form starts a new one
     cidRef.current = 0; restored.current = 0; touched.current = false; setContract(null); setAutoState({});
@@ -433,11 +443,11 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
         {leadC.error && <div className="alert alert-warn mt">Не удалось загрузить заявку #{leadId}: {errText(leadC.error)}</div>}
         {prefilled && step < 4 && !prefilled.key.startsWith('contract') && <Button size="sm" variant="ghost" className="no-print" onClick={() => setPrefilled(null)}>Подставить из другой заявки</Button>}
         {step < 4 && !prefilled && (
-          <Card label="Сделка" title="Заявка договора" className="mt">
+          <Card label="Сделка · необязательно" title="Заявка договора" className="mt">
             {itemsOf(pickable.data).length === 0 ? (
-              <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра: договор оформляется из заявки или сделки.'}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{pickable.isLoading ? 'Загрузка…' : 'Нет заявок после просмотра: договор можно оформить и без заявки, привязать позже из карточки договора.'}</div>
             ) : (
-              <Select aria-label="Заявка" value={leadId || ''} onChange={(e) => e.target.value && pickLead(Number(e.target.value))} placeholder="Выберите заявку: договор сохранится в её сделке"
+              <Select aria-label="Заявка" value={leadId || ''} onChange={(e) => e.target.value && pickLead(Number(e.target.value))} placeholder="Без заявки (можно привязать позже) — или выберите заявку"
                 options={itemsOf(pickable.data).map((l) => ({ value: l.id, label: `#${l.id} · ${l.listing?.address || l.listing?.title || 'объект'} · ${l.client?.name || 'клиент'} · ${LEAD_STATUS[l.status]}${l.agent?.name ? ` · ${l.agent.name}` : ''}` }))} />
             )}
           </Card>
@@ -478,7 +488,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
       )}
 
       {step === 3 && type && (
-        <Card label={`Шаг 3 · ${CX_TYPES[type].title} · ${lang}`} title="Данные договора" className="no-print">
+        <Card label={`Шаг 3 · ${CX_TYPES[type].title} · ${lang}`} title="Данные договора" className="no-print cx-data">
           <Tabs value={tab} onChange={setTab} tabs={[{ value: 'parties', label: 'Стороны' }, { value: 'property', label: 'Объект' }, { value: 'money', label: sale ? 'Цена' : 'Финансы' }]} />
           {tab === 'parties' && (
             <div className="form-grid">

@@ -9,8 +9,8 @@ import { itemsOf } from '../../api/client';
 import type { Contract, ContractCloseReason, ContractStatus } from '../../api/types';
 import { insideTelegram, tgWebApp } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Modal, Tabs, Textarea } from '../../components/ui';
-import { fmtDate, fmtDateTime } from '../../lib/format';
+import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Modal, Select, Tabs, Textarea } from '../../components/ui';
+import { CONTRACT_STAGES, fmtDate, fmtDateTime } from '../../lib/format';
 
 export const CLOSE_REASONS: Record<ContractCloseReason, string> = {
   deal_failed: 'Сделка сорвалась', client_changed_mind: 'Клиент передумал', owner_refused: 'Собственник отказался', other: 'Другое',
@@ -160,6 +160,29 @@ function CloseModal({ c, open, onClose, onDone }: { c: Contract; open: boolean; 
   );
 }
 
+/** «Привязать к заявке»: a contract made without a lead / deal joins one later (11-13) */
+function LinkLead({ c, onChange }: { c: Contract; onChange: (c: Contract) => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const leads = useQuery({ queryKey: ['leads', 'list', 'contract'], queryFn: () => api.leads.list({ status: CONTRACT_STAGES.join(',') }) });
+  const m = useMutation({
+    mutationFn: (lead_id: number) => api.contracts.link(c.id, { lead_id }),
+    onSuccess: (x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); toast(`Договор привязан к заявке #${x.lead_id}`); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const items = itemsOf(leads.data);
+  if (!items.length) return <div className="muted mt" style={{ fontSize: 13 }}>Без заявки{leads.isLoading ? '' : ': нет заявок после просмотра, чтобы привязать'}.</div>;
+  return (
+    <div className="mt" style={{ maxWidth: 520 }}>
+      <Field label="Привязать к заявке">
+        <Select aria-label="Привязать к заявке" value="" disabled={m.isPending} placeholder="Договор без заявки — выберите заявку"
+          onChange={(e) => e.target.value && m.mutate(Number(e.target.value))}
+          options={items.map((l) => ({ value: l.id, label: `#${l.id} · ${l.listing?.address || l.listing?.title || 'объект'} · ${l.client?.name || 'клиент'}${l.agent?.name ? ` · ${l.agent.name}` : ''}` }))} />
+      </Field>
+    </div>
+  );
+}
+
 /** /contracts?id=N */
 export function ContractView({ id, base }: { id: number; base: string }) {
   const qc = useQueryClient();
@@ -204,6 +227,7 @@ export function ContractView({ id, base }: { id: number; base: string }) {
           {c.lead_id && <Link to={`${base.replace(/\/contracts$/, '')}/leads/${c.lead_id}`}>Заявка #{c.lead_id}</Link>}
           {c.deal_id && <Link to={`${base.replace(/\/contracts$/, '')}/deals/${c.deal_id}`}>Сделка #{c.deal_id}</Link>}
         </div>
+        {!c.lead_id && !c.deal_id && c.status !== 'closed_no_deal' && <LinkLead c={c} onChange={set} />}
         {c.status === 'draft' && (
           <div className="row row-wrap gap-sm mt">
             <Link className={`btn ${c.has_pdf ? 'btn-secondary' : ''}`} to={editLink(base, c)}><Pencil size={16} />{c.has_pdf ? 'Изменить данные и перегенерировать' : 'Продолжить заполнение'}</Link>

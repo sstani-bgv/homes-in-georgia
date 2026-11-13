@@ -179,6 +179,8 @@ export const api = {
       if (file) fd.append('file', file);
       return http.post<Contract>(`/contracts/${id}/sign`, fd);
     },
+    /** «Привязать к заявке»: a contract created without a lead / deal (11-13) */
+    link: (id: number, b: { lead_id?: number; deal_id?: number }) => http.post<Contract>(`/contracts/${id}/link`, b),
     close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
     share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),

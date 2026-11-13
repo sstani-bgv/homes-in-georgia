@@ -548,6 +548,20 @@ on('GET', '/moderation', () => page(F.moderation));
 on('POST', '/moderation/:id', (m) => { const i = F.moderation.findIndex((x) => x.id === m[1]); if (i >= 0) F.moderation.splice(i, 1); return { ok: true }; });
 on('GET', '/addresses', () => page([]));
 
+// ---------- contracts: just the wizard's autosave and the card (no PDF in the mock); 11-13
+const contracts: Record<string, unknown>[] = [];
+const cxOut = (c: Record<string, unknown>) => ({ status: 'draft', status_label: 'Черновик', has_pdf: false, versions: [], versions_count: 0, ...c });
+on('GET', '/contracts', (_m, _b, q) => page(contracts.filter((c) => (!q.get('lead_id') || c.lead_id === Number(q.get('lead_id')))
+  && (!q.get('deal_id') || c.deal_id === Number(q.get('deal_id')))).map(cxOut)));
+on('POST', '/contracts/draft', (_m, b) => {
+  let c = contracts.find((x) => x.id === b.id);
+  if (!c) { c = { id: nextId(), lead_id: b.lead_id || null, deal_id: b.deal_id || null, created_at: new Date().toISOString() }; contracts.push(c); }
+  Object.assign(c, { kind: b.kind || null, lang: b.lang || null, data: b.data, updated_at: new Date().toISOString() });
+  return cxOut(c);
+});
+on('GET', '/contracts/:id', (m) => { const c = contracts.find((x) => x.id === Number(m[1])); if (!c) throw new ApiError(404, 'Не найдено'); return cxOut(c); });
+on('POST', '/contracts/:id/link', (m, b) => { const c = contracts.find((x) => x.id === Number(m[1]))!; c.lead_id = b.lead_id; return cxOut(c); });
+
 async function formToBody(fd: FormData): Promise<Record<string, unknown>> {
   const files: { name: string; url: string }[] = [];
   let room: string | undefined;
