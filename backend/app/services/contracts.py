@@ -185,6 +185,8 @@ def out(db: Session, c: Contract, full: bool = False) -> dict:
          "in_drive": bool(c.drive_file_id), "filename": filename(c),
          "share": {"path": share_path(share), "url": env.PUBLIC_URL.rstrip("/") + share_path(share),
                    "expires_at": _iso(c.share_expires_at)} if share else None}
+    from app.services import esign  # esign imports this module
+    d["esign"] = esign.out(db, c)
     if full:
         d["html"], d["data"] = c.html, c.data
         d["versions"] = [{"n": i, "at": v.get("at"), "by": _name(db, v.get("by"))} for i, v in enumerate(c.versions or [])]
@@ -271,7 +273,7 @@ def _data(data) -> dict | None:
     """The wizard's CxData (scalars only), kept for the restore and the deal prefill; not a dict = left as is."""
     if not isinstance(data, dict):
         return None
-    return {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 500}
+    return {str(k)[:64]: v for k, v in data.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= (2000 if k == "extract_url" else 500)}
 
 
 def _fields(db: Session, body: dict, user: User) -> dict:
@@ -363,6 +365,9 @@ def update(db: Session, cid: int, body: dict, user: User) -> Contract:
     if not body.get("lead_id") and not body.get("deal_id"):  # a form without a link keeps the contract's own (11-13)
         body = {**body, "lead_id": c.lead_id, "deal_id": c.deal_id, "property_id": body.get("property_id") or c.property_id}
     f = _fields(db, body, user)
+    if f["html"] != c.html:
+        from app.services import esign
+        esign.before_edit(db, c)  # unsigned e-sign links die with the old text; a signed text is frozen
     pdf = render_pdf(f["html"])
     if c.pdf_path:
         c.versions = [*(c.versions or []), {"pdf_path": c.pdf_path, "at": _iso(c.generated_at or c.created_at), "by": c.created_by}]

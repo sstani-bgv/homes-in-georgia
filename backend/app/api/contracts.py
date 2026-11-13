@@ -3,14 +3,14 @@
 import re
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
 from app.models import User
-from app.services import contracts as C
+from app.services import contracts as C, esign as E
 from app.services.errors import DomainError
 from app.telegram import client as tg
 
@@ -69,6 +69,16 @@ class LinkIn(BaseModel):
     deal_id: int | None = None
 
 
+class ESignIn(BaseModel):
+    full_name: str = Field(max_length=200)
+    personal_id: str = Field(max_length=200)
+    phone: str = Field(max_length=200)
+    consent: bool = False
+    signature: str = Field(max_length=E.MAX_SIGNATURE)
+    doc_sha256: str = Field(max_length=64)
+    lang: str | None = Field(None, max_length=5)
+
+
 class CloseIn(BaseModel):
     reason: str
     comment: str | None = Field(None, max_length=2000)
@@ -118,6 +128,19 @@ def contracts_pdf(cid: int, signed: bool = False, download: bool = False, versio
     return _pdf(C.pdf_bytes(c, signed, version), name if version is None else name.replace(".pdf", f" v{version + 1}.pdf"), download)
 
 
+@router.get("/contracts/{cid}/extract")
+def contracts_extract(cid: int, download: bool = False, db: Session = Depends(get_db, scope="function"),
+                      user: User = Depends(current_user)):
+    """The registry extract saved with the contract (data.extract_file, registry.store_extract)."""
+    from app import storage
+    from app.services import registry
+    key = str((C.get(db, cid, user).data or {}).get("extract_file") or "")
+    data = storage.read(key) if registry.EXTRACT_KEY_RE.match(key) else None  # data is the wizard's: only our extracts
+    if not data:
+        raise DomainError("not_found", "Выписка не сохранена", 404)
+    return _pdf(data, f"Выписка из реестра, договор {cid}.pdf", download)
+
+
 @router.post("/contracts/{cid}/sign")
 async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Session = Depends(get_db, scope="function"),
                          user: User = Depends(current_user)):
@@ -129,6 +152,17 @@ async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Ses
 def contracts_link(cid: int, body: LinkIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """«Привязать к заявке»: a contract created without a lead / deal (11-13)."""
     return C.out(db, C.link(db, cid, body.model_dump(), user), full=True)
+
+
+@router.post("/contracts/{cid}/esign")
+def contracts_esign(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Подписать электронно»: a signing link for the owner and one for the tenant (services/esign.py)."""
+    return C.out(db, E.start(db, cid, user), full=True)
+
+
+@router.post("/contracts/{cid}/esign/cancel")
+def contracts_esign_cancel(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    return C.out(db, E.cancel(db, cid, user), full=True)
 
 
 @router.post("/contracts/{cid}/close")
@@ -160,3 +194,21 @@ def public_contract_pdf(token: str, download: bool = False, db: Session = Depend
     c = C.by_share_token(db, token)
     signed = bool(c.signed_pdf_path)
     return _pdf(C.pdf_bytes(c, signed), C.filename(c, signed), download)
+
+
+# a party's electronic signing page (frontend /esign/<token>): no login, the token is the access (services/esign.py)
+@public.get("/public/esign/{token}")
+def public_esign(token: str, db: Session = Depends(get_db, scope="function")):
+    return E.view(db, token)
+
+
+@public.post("/public/esign/{token}")
+def public_esign_sign(token: str, body: ESignIn, request: Request, db: Session = Depends(get_db, scope="function")):
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client and request.client.host)
+    return E.sign(db, token, body.model_dump(), ip, request.headers.get("user-agent"))
+
+
+@public.get("/public/esign/{token}/pdf")
+def public_esign_pdf(token: str, download: bool = False, db: Session = Depends(get_db, scope="function")):
+    c, data = E.signed_pdf(db, token)
+    return _pdf(data, C.filename(c, True), download)

@@ -183,8 +183,11 @@ export const api = {
     link: (id: number, b: { lead_id?: number; deal_id?: number }) => http.post<Contract>(`/contracts/${id}/link`, b),
     close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
     share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
+    esign: (id: number) => http.post<Contract>(`/contracts/${id}/esign`),
+    esignCancel: (id: number) => http.post<Contract>(`/contracts/${id}/esign/cancel`),
     sendPdf: (id: number) => http.post<{ ok: boolean }>(`/contracts/${id}/send`),
     pdf: (id: number, signed = false, version?: number) => fetchBlob(`/contracts/${id}/pdf${version != null ? `?version=${version}` : signed ? '?signed=1' : ''}`),
+    extract: (id: number) => fetchBlob(`/contracts/${id}/extract`),
   },
   deals: {
     calc: (b: DealCalcIn) => http.post<DealCalcOut>('/deals/calc', b),

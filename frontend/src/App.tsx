@@ -14,6 +14,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { DealsPage } from './pages/Deals';
 import { ExclusiveSignPage } from './pages/ExclusiveSign';
 import { InvitePage } from './pages/Invite';
+import { ESignPage } from './pages/ESign';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
 import { ClientPage, ClientsPage, OwnersPage } from './pages/People';
@@ -72,6 +73,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/sign/:token" element={<ExclusiveSignPage />} />
+      <Route path="/esign/:token" element={<ESignPage />} />
       <Route path="/invite/:token" element={<InvitePage />} />
       <Route path="/m/*" element={<MRedirect />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
