@@ -169,14 +169,20 @@ function ESignBlock({ c, onChange }: { c: Contract; onChange: (c: Contract) => v
       </div>
     );
   }
-  const text = (label: string) => `Договор ${c.address || c.cadastral || `#${c.id}`}: подпишите, пожалуйста (${label.toLowerCase()})`;
-  const send = async (url: string, label: string) => {
-    if (tg) { tgWebApp()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(label))}`); return; }
+  // the message goes in the signer's language, like the page it opens (11-13): the owner Georgian, the tenant English
+  const where = c.address || c.cadastral || `#${c.id}`;
+  const text = (role: 'owner' | 'tenant') => role === 'owner'
+    ? `ხელშეკრულება: ${where}. გთხოვთ, გახსნათ ბმული და ელექტრონულად მოაწეროთ ხელი (გამქირავებელი).`
+    : `Contract: ${where}. Please open the link and sign it electronically (tenant).`;
+  const copy = (url: string, role: 'owner' | 'tenant') =>
+    navigator.clipboard?.writeText(`${text(role)}\n${url}`).then(() => toast('Сообщение со ссылкой скопировано'), () => undefined);
+  const send = async (url: string, role: 'owner' | 'tenant') => {
+    if (tg) { tgWebApp()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(role))}`); return; }
     if (navigator.share && mobile()) {
-      try { await navigator.share({ url, title: text(label) }); } catch { /* closed */ }
+      try { await navigator.share({ url, text: text(role) }); } catch { /* closed */ }
       return;
     }
-    await navigator.clipboard?.writeText(url).then(() => toast('Ссылка скопирована'), () => undefined);
+    await copy(url, role);
   };
   return (
     <div className="col gap-sm" style={{ border: '1px solid var(--line, #dfe4ee)', borderRadius: 12, padding: 12 }}>
@@ -184,26 +190,30 @@ function ESignBlock({ c, onChange }: { c: Contract; onChange: (c: Contract) => v
       {es.signers.map((s) => {
         const url = s.path ? absolute(s.path) : '';
         return (
-          <div key={s.role} className="row row-wrap gap-sm" style={{ alignItems: 'center' }}>
-            <span style={{ minWidth: 110 }}>{s.label}</span>
-            {s.signed_at
-              ? <Badge tone="ok">подписал(а) · {s.full_name} · {fmtDateTime(s.signed_at)}</Badge>
-              : <Badge tone="grey">ожидает подписи</Badge>}
-            {url && !s.signed_at && <>
-              <Button size="sm" variant="secondary" onClick={() => send(url, s.label)}>{tg ? <><Send size={14} />Отправить</> : <><Share2 size={14} />Отправить ссылку</>}</Button>
-              {!tg && <Button size="sm" variant="ghost" onClick={() => navigator.clipboard?.writeText(url).then(() => toast('Ссылка скопирована'), () => undefined)}><Copy size={14} />Копировать</Button>}
-              {!tg && <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(s.label))}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>}
-            </>}
+          <div key={s.role} className="col gap-sm">
+            <div className="row row-wrap gap-sm" style={{ alignItems: 'center' }}>
+              <span>{s.label} —</span>
+              {s.signed_at
+                ? <Badge tone="ok">подписал(а) · {s.full_name} · {fmtDateTime(s.signed_at)}</Badge>
+                : <Badge tone="grey">ожидает подписи</Badge>}
+            </div>
+            {url && !s.signed_at && (
+              <div className="row row-wrap gap-sm">
+                <Button size="sm" variant="secondary" onClick={() => send(url, s.role)}>{tg ? <><Send size={14} />Отправить</> : <><Share2 size={14} />Отправить ссылку</>}</Button>
+                {!tg && <Button size="sm" variant="ghost" onClick={() => copy(url, s.role)}><Copy size={14} />Копировать</Button>}
+                {!tg && <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text(s.role))}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>}
+              </div>
+            )}
           </div>
         );
       })}
       {c.status === 'draft' && (
-        <div className="row row-wrap gap-sm">
-          <span className="muted grow" style={{ fontSize: 12 }}>Ссылки личные: каждая сторона видит договор, вводит ФИО, личный номер, телефон и расписывается. Правка текста отменяет неподписанные ссылки.</span>
-          <Button size="sm" variant="ghost" loading={m.isPending} onClick={() => {
+        <>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>Ссылки личные: каждая сторона видит договор, вводит ФИО, личный номер, телефон и расписывается. Собственник получает сообщение и страницу на грузинском, арендатор — на английском (язык на странице можно переключить). Правка текста отменяет неподписанные ссылки.</p>
+          <Button size="sm" variant="ghost" style={{ alignSelf: 'flex-start' }} loading={m.isPending} onClick={() => {
             if (window.confirm(es.signers.some((s) => s.signed_at) ? 'Отменить подписание? Уже данные подписи будут удалены.' : 'Отменить ссылки на подпись?')) m.mutate(() => api.contracts.esignCancel(c.id));
           }}><XCircle size={14} />Отменить подписание</Button>
-        </div>
+        </>
       )}
     </div>
   );
