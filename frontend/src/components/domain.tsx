@@ -111,7 +111,9 @@ export function SimilarInChannel({ listing, similar }: { listing: Listing & { fl
   );
 }
 
-export function ListingModal({ id, onClose }: { id: string; onClose: () => void }) {
+/** actions: the feed card's buttons (Беру в работу / Агент / Неактуально, «Уже в базе» / «Похож на»), so the ad is
+ * decided right from its window (11-13); they stay at the bottom while the window scrolls. */
+export function ListingModal({ id, onClose, actions }: { id: string; onClose: () => void; actions?: ReactNode }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['listing', id], queryFn: () => api.listings.get(id) });
   const loc = useLocation();
   const l = data as (Listing & { property?: { id: number; status?: string } | null; urls?: string[]; dup_sources?: string[]; phones?: string[]; telegram_contacts?: string[]; floor?: number | null; description?: string | null; contacts_visible?: boolean; owner?: { name?: string | null; phone?: string | null; is_agent?: boolean } }) | undefined;
@@ -169,6 +171,7 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
           )}
           {l.ai_flags?.reasons?.length ? <div className="muted" style={{ fontSize: 13 }}>{l.ai_flags.reasons.join(' · ')}</div> : null}
           {(l.description || l.text) && <div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{l.description || l.text}</div>}
+          {actions && <div className="modal-actions">{actions}</div>}
         </div>
       )}
     </Modal>
@@ -260,7 +263,7 @@ export function ListingCard({ listing, locked, footer, chips, onOpen }: { listin
   const similar = !listing.ai_flags?.duplicate ? listing.similar || [] : [];
   return (
     <article className={`card lcard ${locked ? 'locked' : ''}`}>
-      {open && <ListingModal id={listing.id} onClose={() => setOpen(false)} />}
+      {open && <ListingModal id={listing.id} onClose={() => setOpen(false)} actions={(chips || footer) && <>{chips && <div className="row row-wrap gap-sm">{chips}</div>}{footer}</>} />}
       {cmp && <ChannelCompare listing={listing} onClose={() => setCmp(false)} />}
       <div className="lcard-photo" onClick={show} style={{ cursor: 'pointer' }}>
         {ph ? <img src={thumbUrl(ph)} alt="" loading="lazy" /> : null}
