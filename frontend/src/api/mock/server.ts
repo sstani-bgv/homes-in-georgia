@@ -206,15 +206,31 @@ on('POST', '/properties/board/hide', (_m, b) => {
   ps.forEach((p) => { (p as { board_hidden?: boolean }).board_hidden = true; });
   return { hidden: ps.length };
 });
-on('GET', '/properties', (_m, _b, q) => {
+const propScope = (q: URLSearchParams) => {
   const u = currentUser();
   let ps = F.properties;
   if (q.get('mine')) ps = ps.filter((p) => p.agent_id === u.id);
   if (q.get('status')) ps = ps.filter((p) => q.get('status')!.split(',').includes(p.status));
   if (q.get('agent_id')) ps = ps.filter((p) => (p.agent_id ?? 0) === Number(q.get('agent_id')));
+  return ps;
+};
+const metroOf = (p: Property) => (p.post_fields as Record<string, string> | undefined)?.metro;
+on('GET', '/properties', (_m, _b, q) => {
+  let ps = propScope(q);
   const s = q.get('q')?.toLowerCase();
   if (s) ps = ps.filter((p) => `${p.address} ${p.district} ${p.id}`.toLowerCase().includes(s));
-  return page(ps.map((p) => propOut(p, u)));
+  const any = (k: string, v?: string | null) => !q.getAll(k).length || q.getAll(k).includes(v || '');
+  const beds = (q.get('bedrooms') || '').split(',').filter(Boolean).map(Number);
+  ps = ps.filter((p) => any('source', p.source_type) && any('district', p.district) && (!q.get('metro') || metroOf(p) === q.get('metro'))
+    && (!beds.length || beds.some((b) => (b === 4 ? (p.bedrooms ?? -1) >= 4 : p.bedrooms === b)))
+    && (!q.get('price_min') || (p.price ?? 0) >= Number(q.get('price_min'))) && (!q.get('price_max') || (p.price ?? 0) <= Number(q.get('price_max')))
+    && (!q.get('archive_reason') || p.archive_reason === q.get('archive_reason')));
+  return page(ps.map((p) => propOut(p, currentUser())));
+});
+on('GET', '/properties/facets', (_m, _b, q) => {
+  const count = (xs: (string | null | undefined)[]) => Object.entries(xs.filter(Boolean).reduce<Record<string, number>>((a, v) => ({ ...a, [v!]: (a[v!] || 0) + 1 }), {})).map(([value, n]) => ({ value, count: n }));
+  const ps = propScope(q);
+  return { sources: count(ps.map((p) => p.source_type)), districts: count(ps.map((p) => p.district)), metros: count(ps.map(metroOf)) };
 });
 on('POST', '/properties/check-duplicate', (_m, b) => {
   const phone = String(b.phone || '').replace(/\D/g, '').slice(-6);

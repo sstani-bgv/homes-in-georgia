@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArrowRightLeft, DollarSign, ExternalLink, List, Map as MapIcon, Search, Users } from 'lucide-react';
-import { api, type ListingFilter } from '../../api';
+import { api, type ListingFilter, type PropertyScope } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Listing, Property, PropertyStatus } from '../../api/types';
 import { FIELD_FILTER } from '../../api/types';
@@ -13,6 +13,7 @@ import { ChipButton, CompareSide, CopyPhone, ExclusiveConflictBadge, ListingCard
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Empty, ErrorBox, Field, Loading, Modal, MultiSelect, Select, Seg } from '../../components/ui';
 import { ListingsMap } from './ListingsMap';
+import { metroLabel } from './PropertyDetail';
 import { usePageState } from '../../layout/back';
 import { ARCHIVE_REASON, PLATFORM, PROPERTY_BOARD, PROPERTY_STATUS, SOURCE_LABEL, ago, bedroomsLabel, demandLabel, districtLabel, fmtDateTime, formatPhone, money, phoneBlur, phoneFocus, phoneInput } from '../../lib/format';
 
@@ -26,6 +27,63 @@ const sourceName = (s: string, label?: string) => {
 };
 const BEDS = [{ value: '0', label: 'Студия' }, { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4+' }];
 
+type Facet = { value: string; count: number; label?: string }[];
+/** the filter fields the feed and the base share (ListingFilter, PropertyList's URL) */
+type CommonFilter = { q?: string; source?: string[]; district?: string[]; metro?: string; bedrooms?: string; price_min?: string; price_max?: string };
+
+/** The mock-up of 11-13: search + list/map, a full-width segment, a 2-column grid of labelled filters (+ `boxes`),
+ * bedrooms, «Найдено · Сбросить». «Новые объявления» and the base tabs (Stanislav 11-13); children go under it. */
+function FeedFilters({ f, patch, view, onView, seg, facets, sourceLabel, metroLabel = (v) => v, boxes, found, filtered, onReset, actions, placeholder = 'Район, адрес', children }: {
+  f: CommonFilter; patch: (p: CommonFilter) => void; view?: 'list' | 'map'; onView?: (v: 'list' | 'map') => void;
+  seg?: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] };
+  facets?: { sources?: Facet; districts?: Facet; metros?: Facet }; sourceLabel: (v: string, label?: string) => string; metroLabel?: (v: string) => string;
+  boxes?: React.ReactNode; found: React.ReactNode; filtered: boolean; onReset: () => void; actions?: React.ReactNode; placeholder?: string; children?: React.ReactNode;
+}) {
+  const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
+  const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); patch({ bedrooms: [...beds].sort().join(',') }); };
+  return (
+    <div className="feed-filters">
+      <div className="row" style={{ gap: 10 }}>
+        <div className="input-icon grow">
+          <Search size={16} />
+          <input className="input" placeholder={placeholder} value={f.q || ''} onChange={(e) => patch({ q: e.target.value })} />
+        </div>
+        {view && onView && <Seg value={view} onChange={(v) => onView(v as 'list' | 'map')} options={[
+          { value: 'list', label: <List size={18} aria-label="Список" /> }, { value: 'map', label: <MapIcon size={18} aria-label="Карта" /> }]} />}
+      </div>
+      {seg && <div className="seg-full"><Seg value={seg.value} onChange={seg.onChange} options={seg.options} /></div>}
+      <div className="filter-grid">
+        <div className="fbox"><span className="flabel">Источник</span>
+          <MultiSelect label="Источник" value={f.source || []} onChange={(v) => patch({ source: v })} placeholder="Все"
+            options={(facets?.sources || []).map((x) => ({ value: x.value, label: sourceLabel(x.value, x.label), count: x.count }))} /></div>
+        <div className="fbox"><span className="flabel">Район</span>
+          <MultiSelect label="Район" value={f.district || []} onChange={(v) => patch({ district: v })} placeholder="Все" many={['район', 'района', 'районов']}
+            options={(facets?.districts || []).map((x) => ({ value: x.value, label: districtLabel(x.value), count: x.count }))} /></div>
+        <div className="fbox"><span className="flabel">Метро</span>
+          <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => patch({ metro: e.target.value })} placeholder="Любое"
+            options={(facets?.metros || []).map((x) => ({ value: x.value, label: `${metroLabel(x.value)} (${x.count})` }))} /></div>
+        <div className="fbox fbox-price"><span className="flabel">Цена, $</span>
+          <input className="input" type="number" inputMode="numeric" min={0} placeholder="от" aria-label="Цена от" value={f.price_min || ''} onChange={(e) => patch({ price_min: e.target.value })} />
+          <span className="faint">—</span>
+          <input className="input" type="number" inputMode="numeric" min={0} placeholder="до" aria-label="Цена до" value={f.price_max || ''} onChange={(e) => patch({ price_max: e.target.value })} />
+          <DollarSign size={16} className="faint" /></div>
+        {boxes}
+      </div>
+      <div className="beds-row" role="group" aria-label="Спальни">
+        {BEDS.map((b) => <button key={b.value} type="button" className={beds.has(b.value) ? 'active' : ''} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</button>)}
+      </div>
+      <div className="row row-between row-wrap" style={{ gap: 8 }}>
+        <span className="faint" style={{ fontSize: 13 }}>{found}</span>
+        <div className="row gap-sm">
+          {actions}
+          {filtered && <button type="button" className="link-btn link-red" onClick={onReset}>Сбросить фильтры</button>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 const PAGE = 50;
 const MAP_LIMIT = 500;  // ponytail: the map loads the first 500 filtered ads; a bbox query when the feed grows past it
 
@@ -35,8 +93,6 @@ export function NewListings({ base = '' }: { base?: string }) {
   const [view, setView] = usePageState<'list' | 'map'>('feed-view', 'list');
   const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
-  const beds = new Set((f.bedrooms || '').split(',').filter(Boolean));
-  const toggleBed = (b: string) => { beds.has(b) ? beds.delete(b) : beds.add(b); set('bedrooms')([...beds].sort().join(',')); };
   const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -44,7 +100,6 @@ export function NewListings({ base = '' }: { base?: string }) {
   const [peek, setPeek] = useState<{ id: number; listing: Listing; reasons?: string[] } | null>(null);
   const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', f, view === 'map' ? MAP_LIMIT : limit], queryFn: () => api.listings.new(f, view === 'map' ? MAP_LIMIT : limit), placeholderData: (p) => p });
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets'], queryFn: () => api.listings.facets(), staleTime: 60_000 });
-  const opts = (xs?: { value: string; count: number }[], label = (v: string) => v) => (xs || []).map((x) => ({ value: x.value, label: `${label(x.value)} (${x.count})` }));
   const filtered = Object.entries(f).some(([k, v]) => (Array.isArray(v) ? v.length : v) && k !== 'q' && k !== 'known');
   const take = useMutation({
     mutationFn: (id: string) => api.properties.take(id),
@@ -121,52 +176,17 @@ export function NewListings({ base = '' }: { base?: string }) {
           <Button type="submit" block loading={markAgent.isPending} disabled={!agentC.owner_name.trim() && !agentC.owner_phone.trim()}>Сохранить</Button>
         </form>
       </Modal>
-      {/* the mock-up of 11-13: search + list/map, the flag, a 2-column grid of labelled filters, bedrooms, «Найдено · Сбросить» */}
-      <div className="feed-filters">
-        <div className="row" style={{ gap: 10 }}>
-          <div className="input-icon grow">
-            <Search size={16} />
-            <input className="input" placeholder="Район, адрес" value={f.q || ''} onChange={(e) => set('q')(e.target.value)} />
-          </div>
-          <Seg value={view} onChange={(v) => setView(v as 'list' | 'map')} options={[
-            { value: 'list', label: <List size={18} aria-label="Список" /> }, { value: 'map', label: <MapIcon size={18} aria-label="Карта" /> }]} />
-        </div>
-        <div className="seg-full">
-          <Seg value={f.flag || ''} onChange={set('flag')} options={[
-            { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
-          ]} />
-        </div>
-        <div className="filter-grid">
-          <div className="fbox"><span className="flabel">Источник</span>
-            <MultiSelect label="Источник" value={f.source || []} onChange={(v) => setF((o) => ({ ...o, source: v }))} placeholder="Все"
-              options={(facets?.sources || []).map((x) => ({ value: x.value, label: sourceName(x.value, x.label), count: x.count }))} /></div>
-          <div className="fbox"><span className="flabel">Район</span>
-            <MultiSelect label="Район" value={f.district || []} onChange={(v) => setF((o) => ({ ...o, district: v }))} placeholder="Все" many={['район', 'района', 'районов']}
-              options={(facets?.districts || []).map((x) => ({ value: x.value, label: x.value, count: x.count }))} /></div>
-          <div className="fbox"><span className="flabel">Метро</span>
-            <Select aria-label="Метро" value={f.metro || ''} onChange={(e) => set('metro')(e.target.value)} placeholder="Любое" options={opts(facets?.metros)} /></div>
-          <div className="fbox fbox-price"><span className="flabel">Цена, $</span>
-            <input className="input" type="number" inputMode="numeric" min={0} placeholder="от" aria-label="Цена от" value={f.price_min || ''} onChange={(e) => set('price_min')(e.target.value)} />
-            <span className="faint">—</span>
-            <input className="input" type="number" inputMode="numeric" min={0} placeholder="до" aria-label="Цена до" value={f.price_max || ''} onChange={(e) => set('price_max')(e.target.value)} />
-            <DollarSign size={16} className="faint" /></div>
-        </div>
-        <div className="beds-row" role="group" aria-label="Спальни">
-          {BEDS.map((b) => <button key={b.value} type="button" className={beds.has(b.value) ? 'active' : ''} aria-pressed={beds.has(b.value)} onClick={() => toggleBed(b.value)}>{b.label}</button>)}
-        </div>
-        <div className="row row-between row-wrap" style={{ gap: 8 }}>
-          <span className="faint" style={{ fontSize: 13 }}>{data ? `Найдено: ${data.total ?? itemsOf(data).length}` : ''}</span>
-          <div className="row gap-sm">
-            {(!!data?.known_total || f.known) && (
-              <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
-                Уже в базе ({data?.known_total ?? 0})
-              </Button>
-            )}
-            {filtered && <button type="button" className="link-btn link-red" onClick={() => setF({ q: f.q, flag: '', known: f.known })}>Сбросить фильтры</button>}
-          </div>
-        </div>
+      <FeedFilters f={f} patch={(p) => setF((o) => ({ ...o, ...p }))} view={view} onView={setView} facets={facets} sourceLabel={sourceName}
+        seg={{ value: f.flag || '', onChange: set('flag'), options: [
+          { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' }] }}
+        found={data ? `Найдено: ${data.total ?? itemsOf(data).length}` : ''} filtered={filtered} onReset={() => setF({ q: f.q, flag: '', known: f.known })}
+        actions={(!!data?.known_total || f.known) && (
+          <Button size="sm" variant={f.known ? 'primary' : 'secondary'} aria-pressed={!!f.known} onClick={() => set('known')(f.known ? '' : '1')} title={KNOWN_HINT}>
+            Уже в базе ({data?.known_total ?? 0})
+          </Button>
+        )}>
         {f.known && <div className="muted" style={{ fontSize: 12 }}>{KNOWN_HINT}</div>}
-      </div>
+      </FeedFilters>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Новых объявлений нет" /> : view === 'map' ? (
         <ListingsMap items={items} card={card} />
       ) : (
@@ -419,6 +439,8 @@ export function WorkProperties() {
 type PS = keyof typeof PROPERTY_STATUS;
 /** «База объектов»: shot and verified by the operator (backend properties.BASE_STATUSES + published_at, ?base=1) */
 const BASE: PS[] = ['published', 'rented'];
+/** PropertyList's URL filter keys (`status` is kept apart: a dashboard link may bring it) */
+const FILTER_KEYS = ['q', 'agent', 'page', 'source', 'district', 'metro', 'bedrooms', 'price_min', 'price_max', 'reason', 'view'];
 
 /** mine: the agent's own objects; archived: «Архив»; only: one fixed status (operator queue «На публикацию» = review);
  * otherwise «База объектов» — published / rented objects: staff see all, an agent only his own (backend properties.query). */
@@ -430,65 +452,77 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
   const [params, setParams] = useSearchParams();
   const own = params.get('ls') === scope;
   const asked = params.get('status') as PS | null;  // «База объектов» opened from a dashboard number: ?tab=all&status=rented
-  const q = own ? params.get('q') || '' : '';
-  const status = !archived && !only && asked && (own || (scope === 'all' && BASE.includes(asked))) ? asked : '';
-  const agent = own ? params.get('agent') || '' : '';
-  const page = own ? Number(params.get('page')) || 0 : 0;
-  const set = (kv: Record<string, string | number>) => setParams((cur) => {
+  const get = (k: string) => (own ? params.get(k) || '' : '');
+  const f = { q: get('q'), source: own ? params.getAll('source') : [], district: own ? params.getAll('district') : [], metro: get('metro'),
+    bedrooms: get('bedrooms'), price_min: get('price_min'), price_max: get('price_max') };
+  const status = !archived && !only && asked && (own || (scope === 'all' && BASE.includes(asked))) ? asked as string : '';
+  const agent = get('agent'), reason = get('reason'), page = Number(get('page')) || 0;
+  const view = get('view') === 'map' && !only ? 'map' : 'list';
+  const set = (kv: Record<string, string | number | string[] | undefined>) => setParams((cur) => {
     const n = new URLSearchParams(cur);
-    if (!own) ['q', 'status', 'agent', 'page'].forEach((k) => n.delete(k));
+    if (!own) [...FILTER_KEYS, 'status'].forEach((k) => n.delete(k));
     n.set('ls', scope);
-    Object.entries(kv).forEach(([k, v]) => (v ? n.set(k, String(v)) : n.delete(k)));
+    Object.entries(kv).forEach(([k, v]) => { n.delete(k); (Array.isArray(v) ? v : v ? [String(v)] : []).forEach((x) => n.append(k, x)); });
     return n;
   }, { replace: true });
   const setPage = (n: number) => set({ page: n });
   const fixedAgent = agentId !== undefined;  // the cabinet: one agent's objects, no agent select
   // staff pick an agent instead of typing his #tag; agents only ever get their own objects (backend properties.query)
   const agents = useQuery({ queryKey: ['users', 'agents-all'], queryFn: () => api.users.list({ role: FIELD_FILTER }), enabled: isStaff && !mine && !fixedAgent });
+  // the tab's scope (what the segment narrows, what the facets count over); «В работе» in the segment = every work stage
+  const scoped: PropertyScope = { mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, agent_id: agentId ?? (agent ? Number(agent) : undefined),
+    status: archived ? 'archived' : only || (mine ? '' : BASE.join(',')) };
+  const statusQ = status === 'work' ? WORK.join(',') : status || scoped.status;
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ['properties', 'list', scope, q, status, agentId ?? agent, page],
-    queryFn: () => api.properties.list({ mine: mine ? 1 : undefined, base: scope === 'all' ? 1 : undefined, q, agent_id: agentId ?? (agent ? Number(agent) : undefined), status: archived ? 'archived' : only || status || (mine ? '' : BASE.join(',')), limit: PAGE, offset: page * PAGE }),
+    queryKey: ['properties', 'list', scope, f, statusQ, scoped.agent_id, reason, view === 'map' ? -1 : page],
+    queryFn: () => api.properties.list({ ...scoped, ...f, status: statusQ, archive_reason: reason || undefined,
+      limit: view === 'map' ? MAP_LIMIT : PAGE, offset: view === 'map' ? 0 : page * PAGE }),
     placeholderData: (p, prev) => (prev?.queryKey[2] === scope ? p : undefined), // keep the list while a filter reloads, never across tabs
   });
+  const facets = useQuery({ queryKey: ['properties', 'facets', scope, scoped], queryFn: () => api.properties.facets(scoped), staleTime: 60_000 });
   const counts = useQuery({ queryKey: ['properties', 'counts'], queryFn: api.properties.counts, enabled: isStaff && (scope === 'all' || scope === 'archive') }); // whole-base totals: staff only
   const total = data?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const pages = view === 'map' ? 1 : Math.max(1, Math.ceil(total / PAGE));
   const items = itemsOf(data);
   const navigate = useNavigate();
   const link = (id: number) => propLink(base, id);
   const [peek, setPeek] = useState<number | null>(null);
+  const filtered = !!(f.source.length || f.district.length || f.metro || f.bedrooms || f.price_min || f.price_max || status || (agent && !fixedAgent) || reason);
+  const segOpts = scope === 'all' ? ['', ...BASE] : scope === 'mine' ? ['', 'work', 'published', 'rented'] : null;
   return (
     <>
-      <div className="row row-wrap" style={{ marginBottom: 14 }}>
-        <div className="input-icon grow" style={{ minWidth: 180, maxWidth: 380 }}>
-          <Search size={16} />
-          <input className="input" placeholder="Адрес, район, агент, цена, #тег, телефон" value={q} onChange={(e) => set({ q: e.target.value, page: 0 })} />
-        </div>
-        {!archived && !only && (
-          <select className="select" style={{ width: 'auto' }} value={status} aria-label="Статус" onChange={(e) => set({ status: e.target.value, page: 0 })}>
-            <option value="">Все статусы</option>
-            {(mine ? Object.keys(PROPERTY_STATUS) as PS[] : BASE).map((k) => <option key={k} value={k}>{PROPERTY_STATUS[k]}</option>)}
-          </select>
-        )}
-        {isStaff && !mine && !fixedAgent && (
-          <select className="select" style={{ width: 'auto' }} value={agent} aria-label="Агент" onChange={(e) => set({ agent: e.target.value, page: 0 })}>
-            <option value="">Все агенты</option>
-            <option value="0">{PLATFORM} (без агента)</option>
-            {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
-              <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>
-            ))}
-          </select>
-        )}
-      </div>
+      <FeedFilters f={f} patch={(p) => set({ ...p, page: 0 })} view={only ? undefined : view} onView={(v) => set({ view: v === 'map' ? v : '', page: 0 })}
+        facets={facets.data} sourceLabel={(v) => SOURCE_LABEL[v] || v} metroLabel={metroLabel} placeholder="Адрес, агент, #тег"
+        seg={segOpts ? { value: status, onChange: (v) => set({ status: v, page: 0 }), options: segOpts.map((v) => ({ value: v, label: v === 'work' ? 'В работе' : v ? PROPERTY_STATUS[v as PS] : 'Все' })) } : undefined}
+        filtered={filtered} onReset={() => set({ ...Object.fromEntries(FILTER_KEYS.filter((k) => k !== 'q' && k !== 'view' && !(fixedAgent && k === 'agent')).map((k) => [k, ''])), status: '' })}
+        found={data ? `Найдено: ${total.toLocaleString('ru')}${view === 'list' && total > PAGE ? ` · показаны ${(page * PAGE + 1).toLocaleString('ru')}–${Math.min(total, (page + 1) * PAGE).toLocaleString('ru')}` : ''}` : ''}
+        boxes={<>
+          {isStaff && !mine && !fixedAgent && (
+            <div className="fbox"><span className="flabel">Агент</span>
+              <select className="select" value={agent} aria-label="Агент" onChange={(e) => set({ agent: e.target.value, page: 0 })}>
+                <option value="">Все</option>
+                <option value="0">{PLATFORM} (без агента)</option>
+                {itemsOf(agents.data).slice().sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false) || (a.name || '').localeCompare(b.name || '')).map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}{u.agent_tag ? ` · #${u.agent_tag}` : ''}{u.is_active === false ? ' (не работает)' : ''}</option>
+                ))}
+              </select></div>
+          )}
+          {archived && (
+            <div className="fbox"><span className="flabel">Причина</span>
+              <Select aria-label="Причина" value={reason} onChange={(e) => set({ reason: e.target.value, page: 0 })} placeholder="Любая"
+                options={Object.entries(ARCHIVE_REASON).map(([value, label]) => ({ value, label }))} /></div>
+          )}
+        </>} />
       {counts.data && (
         <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>
           Всего объектов: <b>{Object.values(counts.data).reduce((a, b) => a + b, 0).toLocaleString('ru')}</b>
           {' · '}{(['published', 'rented', 'archived'] as PS[]).map((k) => `${PROPERTY_STATUS[k]}: ${(counts.data[k] || 0).toLocaleString('ru')}`).join(' · ')}
         </div>
       )}
-      {data && <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>Найдено: {total.toLocaleString('ru')}{total > PAGE ? ` · показаны ${(page * PAGE + 1).toLocaleString('ru')}–${Math.min(total, (page + 1) * PAGE).toLocaleString('ru')}` : ''}</div>}
       {peek !== null && <PropertyModal id={peek} base={base} onClose={() => setPeek(null)} />}
-      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : scope === 'all' ? (
+      {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text={filtered ? 'Ничего не найдено' : archived ? 'Архив пуст' : only === 'review' ? 'Очередь пуста: всё опубликовано' : 'Объектов нет'} /> : view === 'map' ? (
+        <ListingsMap items={items} card={(p) => <PropertyCard key={p.id} p={p} onOpen={() => setPeek(p.id)} />} />
+      ) : scope === 'all' ? (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {items.map((p) => <PropertyCard key={p.id} p={p} onOpen={() => setPeek(p.id)} />)}
         </div>

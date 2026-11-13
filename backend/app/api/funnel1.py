@@ -145,13 +145,25 @@ class DupIn(BaseModel):
 
 @router.get("/properties")
 def properties_list(status: str | None = None, agent_id: int | None = None, q: str | None = None, mine: int = 0,
-                    base: int = 0, rented: int = 0, limit: int = 50, offset: int = 0, db: Session = Depends(get_db, scope="function"),
+                    base: int = 0, rented: int = 0, limit: int = 50, offset: int = 0,
+                    source: list[str] | None = Query(None), district: list[str] | None = Query(None), metro: str | None = None,
+                    bedrooms: str | None = None, price_min: int | None = Query(None, ge=0), price_max: int | None = Query(None, ge=0),
+                    archive_reason: str | None = None, db: Session = Depends(get_db, scope="function"),
                     user: User = Depends(current_user)):
     """base=1: «База объектов» — only objects shot and verified by the operator (P.BASE_STATUSES, published at least once)."""
-    stmt = P.query(db, user, status, agent_id, q, bool(mine), base=bool(base), rented=bool(rented))
+    stmt = P.query(db, user, status, agent_id, q, bool(mine), base=bool(base), rented=bool(rented), source=source,
+                   district=district, metro=metro, bedrooms=bedrooms, price_min=price_min, price_max=price_max,
+                   archive_reason=archive_reason)
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))
     return {"items": P.outs(db, rows, user), "total": total}
+
+
+@router.get("/properties/facets")
+def properties_facets(status: str | None = None, agent_id: int | None = None, mine: int = 0, base: int = 0,
+                      db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """the base tabs' filter options with counts (same scope params as /properties)"""
+    return P.facets(db, user, status=status, agent_id=agent_id, mine=bool(mine), base=bool(base))
 
 
 @router.get("/properties/counts")

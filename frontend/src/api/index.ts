@@ -65,7 +65,9 @@ export const api = {
   },
 
   properties: {
-    list: (q?: { status?: string; agent_id?: number; q?: string; mine?: number; base?: number; rented?: number; limit?: number; offset?: number }) => then(http.get<L<Property>>('/properties', { limit: LIMIT, ...q }), (d) => normPage(d, normProperty)),
+    list: (q?: PropertyScope & { q?: string; rented?: number; limit?: number; offset?: number; source?: string[]; district?: string[]; metro?: string; bedrooms?: string; price_min?: string; price_max?: string; archive_reason?: string }) => then(http.get<L<Property>>('/properties', { limit: LIMIT, ...q }), (d) => normPage(d, normProperty)),
+    /** the base tabs' filter options with counts (Stanislav 11-13) */
+    facets: (q: PropertyScope) => http.get<Record<'sources' | 'districts' | 'metros', { value: string; count: number }[]>>('/properties/facets', q),
     counts: () => http.get<Record<string, number>>('/properties/counts'),
     board: () => then(http.get<Record<string, Property[]>>('/properties/board'), (d) => normBoard(d, normProperty)),
     boardHide: (status: 'published' | 'rented') => http.post<{ hidden: number }>('/properties/board/hide', { status }),
@@ -247,4 +249,5 @@ export const api = {
   addresses: () => http.get<L<{ id: number; district: string; address: string; ad_link?: string }>>('/addresses'),
 };
 
+export type PropertyScope = { status?: string; agent_id?: number; mine?: number; base?: number };
 export type ListingFilter = { q?: string; source?: string[]; flag?: string; district?: string[]; metro?: string; bedrooms?: string; price_min?: string; price_max?: string; known?: string };

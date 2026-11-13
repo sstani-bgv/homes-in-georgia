@@ -6,17 +6,18 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { addBaseLayer } from '../../lib/mapTiles';
 import { LocateFixed } from 'lucide-react';
-import type { Listing } from '../../api/types';
 import { Button, Modal } from '../../components/ui';
 
 const TBILISI: L.LatLngTuple = [41.7151, 44.8271];
-const price = (l: Listing) => (l.price != null ? `$${Math.round(Number(l.price))}` : '?');
+/** an ad or an object (the base tabs' map, Stanislav 11-13) */
+type Pin = { id: string | number; lat?: number | null; lng?: number | null; price?: number | null; district?: string | null; address?: string | null };
+const price = (l: Pin) => (l.price != null ? `$${Math.round(Number(l.price))}` : '?');
 
-export function ListingsMap({ items, card }: { items: Listing[]; card: (l: Listing) => ReactNode }) {
+export function ListingsMap<T extends Pin>({ items, card }: { items: T[]; card: (l: T) => ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
-  const [sel, setSel] = useState<Listing | null>(null);
+  const [sel, setSel] = useState<T | null>(null);
   const [me, setMe] = useState<string>('');
   const fit = useRef<() => void>(() => {});  // pins → view, until the agent moves the map himself
   const moved = useRef(false);

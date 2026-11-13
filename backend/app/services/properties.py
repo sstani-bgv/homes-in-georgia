@@ -172,6 +172,12 @@ def _metro():
     return cast(Listing.details, JSONB)["metro_ru"].astext
 
 
+def _beds(col, bedrooms: str):
+    """"0,1,2,4": 0 = studio, 4 = 4 and more (the feed and the base share the «Студия 1 2 3 4+» row)"""
+    picked = {int(b) for b in bedrooms.split(",") if b.strip().isdigit()}
+    return or_(col.in_(picked - {4}), *([col >= 4] if 4 in picked else []))
+
+
 def _untaken():
     taken = select(Property.listing_id).where(Property.listing_id.isnot(None), Property.status != "archived")
     return (Listing.status.in_(("published", "pending_review")), Listing.source.not_in(("agency", "object")), Listing.id.not_in(taken))
@@ -202,10 +208,8 @@ def new_listings(db: Session, q: str | None = None, source: str | list[str] | No
         stmt = stmt.where(Listing.price_usd >= price_min)
     if price_max is not None:
         stmt = stmt.where(Listing.price_usd <= price_max)
-    if bedrooms:  # "0,1,2,4": 0 = studio, 4 = 4 and more
-        picked = {int(b) for b in bedrooms.split(",") if b.strip().isdigit()}
-        conds = [Listing.bedrooms.in_(picked - {4})] + ([Listing.bedrooms >= 4] if 4 in picked else [])
-        stmt = stmt.where(or_(*conds))
+    if bedrooms:
+        stmt = stmt.where(_beds(Listing.bedrooms, bedrooms))
     if flag == "owner":
         stmt = stmt.where(Listing.agent_suspect == 0, Listing.agent_reasons == "[]")
     elif flag == "agent_suspect":
@@ -1952,8 +1956,27 @@ PLATFORM = "Платформа"  # an object with no agent (agent_id NULL, legac
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,
-          mine: bool = False, everyone: bool = False, base: bool = False, rented: bool = False):
+          mine: bool = False, everyone: bool = False, base: bool = False, rented: bool = False,
+          source: list[str] | None = None, district: list[str] | None = None, metro: str | None = None,
+          bedrooms: str | None = None, price_min: int | None = None, price_max: int | None = None,
+          archive_reason: str | None = None):
+    """source / district: any of the values; metro: the post's tag (post_fields.metro); the base's filter block (11-13)."""
     stmt = select(Property)
+    if source := [x for x in source or [] if x]:
+        stmt = stmt.where(Property.source_type.in_(source))
+    if district := [x for x in district or [] if x]:
+        stmt = stmt.where(Property.district.in_(district))
+    if metro:
+        stmt = stmt.where(Property.post_fields["metro"].astext == metro)
+    if bedrooms:
+        stmt = stmt.where(_beds(Property.bedrooms, bedrooms))
+    # ponytail: price in the object's own currency (rent is all USD); convert if GEL objects show up in the base
+    if price_min is not None:
+        stmt = stmt.where(Property.price >= price_min)
+    if price_max is not None:
+        stmt = stmt.where(Property.price <= price_max)
+    if archive_reason:
+        stmt = stmt.where(Property.archive_reason == archive_reason)
     if rented:  # the calendar: objects with a hand-typed lease end
         stmt = stmt.where(Property.rent_to.isnot(None))
     if base:
@@ -1985,6 +2008,15 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
     # the base by publication date, the archive by archiving date; work lists by the last change
     first = (Property.published_at if base else Property.archived_at if status == "archived" else Property.updated_at)
     return stmt.order_by(first.desc().nulls_last(), Property.id.desc())
+
+
+def facets(db: Session, user: User, **scope) -> dict:
+    """Filter options with counts over the tab's objects (same scope as query, no filters): sources, districts, metro."""
+    sub = query(db, user, **scope).order_by(None).subquery()
+    def facet(col):
+        rows = db.execute(select(col, func.count()).where(col.isnot(None), col != "").group_by(col).order_by(func.count().desc()))
+        return [{"value": v, "count": n} for v, n in rows]
+    return {"sources": facet(sub.c.source_type), "districts": facet(sub.c.district), "metros": facet(sub.c.post_fields["metro"].astext)}
 
 
 def status_counts(db: Session) -> dict[str, int]:
