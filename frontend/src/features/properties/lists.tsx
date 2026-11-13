@@ -133,7 +133,9 @@ export function NewListings({ base = '' }: { base?: string }) {
         </div>
         <div className="seg-full">
           <Seg value={f.flag || ''} onChange={set('flag')} options={[
-            { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, { value: 'duplicate', label: 'Дубль' },
+            { value: '', label: 'Все' }, { value: 'owner', label: 'Собственник' }, { value: 'agent_suspect', label: 'Агент?' }, 
+            // the card's red label «В базе / В архиве по этому адресу» (11-13; the old «Дубль» = agency channel matched nothing)
+            { value: 'in_base', label: 'В базе' }, { value: 'in_archive', label: 'В архиве' },
           ]} />
         </div>
         <div className="filter-grid">

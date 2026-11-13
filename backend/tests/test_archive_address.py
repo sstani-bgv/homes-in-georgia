@@ -84,3 +84,26 @@ def test_channel_posts_per_agent(db, client):
     db.commit()
     r = client.get("/api/analytics/channel-posts", params={"from": "2026-11-01", "to": "2026-11-13"}, headers=auth(zaza)).json()
     assert r["total"] == 3 and [(x["name"], x["posts"], x["exclusive"]) for x in r["items"]] == [("Zaza", 2, 1), ("GiorgiSV", 1, 0)]
+
+
+def test_feed_filters_by_base_label(db, client):
+    """11-13: «В базе» / «В архиве» filter the feed by the card's red label (baseAtAddress), same rules as similar_for."""
+    from app.models import ListingMatch
+    agent = make_user(db, "agent", "Давид")
+    live, arch, bare, other = (Property(address="Bakradze 20", status=s, bedrooms=b)
+                               for s, b in (("published", 1), ("archived", 1), ("published", 1), ("published", 3)))
+    db.add_all([live, arch, bare, other])
+    db.flush()
+    db.add_all(PropertyMedia(property_id=p.id, path=f"x/{p.id}.jpg") for p in (live, arch, other))  # bare: no photos
+    for lid in ("ss1", "ss2", "ss3", "ss4", "ss5"):
+        make_listing(db, lid, source="ss.ge", address=AD, bedrooms=1)
+    hints = {"ss1": [live, arch], "ss2": [arch], "ss3": [bare, arch], "ss4": [bare, other]}  # ss5: none
+    db.add_all(ListingMatch(listing_id=lid, property_id=p.id, score=0, reasons=[], status="address")
+               for lid, ps in hints.items() for p in ps)
+    db.commit()
+
+    def feed(flag):
+        r = client.get(f"/api/listings/new?flag={flag}&limit=1", headers=auth(agent)).json()
+        return r["total"], {i["id"] for i in client.get(f"/api/listings/new?flag={flag}", headers=auth(agent)).json()["items"]}
+    assert feed("in_base") == (1, {"ss1"})              # a live object with photos at the address
+    assert feed("in_archive") == (2, {"ss2", "ss3"})    # every shown one archived; bare / another flat aren't shown
