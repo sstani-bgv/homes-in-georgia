@@ -334,6 +334,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     street_house: x.street_house || o.address || '', floor: x.floor || o.floor || '',
     apartment_number: x.apartment_number || o.apartment_number || '', apartment_area: x.apartment_area || o.area || '',
   }));
+  // «Стереть» (Irakli 11-13): a wrong object substituted — exactly the fields «Подставить» fills go back to empty
+  const clearKnown = () => setD((x) => ({ ...x, cadastral_code: '', street_house: '', street_house_en: '', floor: '', apartment_number: '', apartment_area: '' }));
   // a registry extract / the pasted NAPR page: the code always, the other fields where still empty; says what it filled
   const applyExtract = (f: ExtractFields) => {
     const LABEL: Record<string, string> = { cadastral_code: 'код', street_house: 'адрес', street_house_en: 'адрес (ENG)', floor: 'этаж', apartment_number: 'квартира',
@@ -569,7 +571,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               <div className="form-grid">
                 <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.13.015.029.01.150' })}</div>
                 <div className="span2">
-                  <OwnerLookup personalId={ownerPid} current={String(d.cadastral_code ?? '')} onKnown={applyKnown} onFields={applyExtract}
+                  <OwnerLookup personalId={ownerPid} current={String(d.cadastral_code ?? '')} onKnown={applyKnown} onClear={clearKnown} onFields={applyExtract}
                     extractUrl={d.extract_url} onExtract={(url, file) => setD((x) => ({ ...x, extract_url: url, extract_file: file }))}
                     onCode={(c) => { if (c !== d.cadastral_code) { set('cadastral_code', c); toast(`Из реестра: ${c}`); } }} />
                 </div>

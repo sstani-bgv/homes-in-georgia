@@ -421,6 +421,8 @@ export interface ESignView {
   complete: boolean;
   /** the contract to read (null once this party signed) */
   html: string | null;
+  /** the registry extract is saved with the contract: GET /public/esign/{token}/extract (11-13) */
+  has_extract?: boolean;
 }
 export interface ContractIn {
   kind: NonNullable<Contract['kind']>; lang: NonNullable<Contract['lang']>; html: string; title?: string; cadastral?: string; address?: string;

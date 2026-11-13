@@ -209,3 +209,21 @@ def test_signed_html_without_marks_still_gets_the_record(db):
     assert "Протокол электронного подписания" in out and "&lt;b&gt;X&lt;/b&gt;" in out and "<b>X</b>" not in out
     db.rollback()
     assert db.query(User).count() == 1
+
+
+def test_extract_with_the_signing_link(db, client, monkeypatch):
+    # Irakli 11-13: the registry extract goes with the e-sign link — only by a signer token of that contract
+    from app import storage
+    key = "private/registry-extracts/" + "a" * 64 + ".pdf"
+    monkeypatch.setattr(storage, "read", lambda k: b"%PDF extract" if k == key else None)
+    ag = make_user(db, "agent")
+    c = _contract(db, client, ag, data={"extract_file": key})
+    _, tok = _start(client, ag, c["id"])
+    other = _contract(db, client, ag)
+    _, tok2 = _start(client, ag, other["id"])
+    assert client.get(f"/api/public/esign/{tok['tenant']}").json()["has_extract"] is True
+    r = client.get(f"/api/public/esign/{tok['tenant']}/extract")
+    assert r.status_code == 200 and r.content == b"%PDF extract"
+    assert client.get(f"/api/public/esign/{'x' * 32}/extract").status_code == 404  # a wrong token
+    assert client.get(f"/api/public/esign/{tok2['owner']}/extract").status_code == 404  # no extract on that contract
+    assert client.get(f"/api/public/esign/{tok2['owner']}").json()["has_extract"] is False

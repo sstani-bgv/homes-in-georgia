@@ -1,5 +1,6 @@
 // Stored contracts (backend services/contracts.py): the list, one contract with its PDF and lifecycle actions.
-// PDF: open in the browser's viewer (Telegram: the expiring share link in the external browser), download, share.
+// PDF: open in the browser's viewer (Telegram: the expiring share link in the external browser), download.
+// No «Поделиться» (Irakli 11-13): the parties get the contract via the e-sign links or «Отправить клиенту в Telegram».
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -45,14 +46,11 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
   const tg = insideTelegram();
   const [signOpen, setSignOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
-  const [link, setLink] = useState<string>(c.share ? absolute(c.share.path) : '');
   const done = (x: Contract, msg: string) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); toast(msg); };
   const shareLink = async () => {
     const x = c.share && new Date(c.share.expires_at).getTime() - Date.now() > 86_400_000 ? c : await api.contracts.share(c.id);
     if (x !== c) onChange(x);
-    const url = absolute(x.share!.path);
-    setLink(url);
-    return url;
+    return absolute(x.share!.path);
   };
   const busy = useMutation({ mutationFn: (fn: () => Promise<unknown>) => fn(), onError: (e) => toast(errText(e), true) });
   const closed = c.status === 'closed_no_deal';
@@ -68,42 +66,16 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
     if (tg) { await api.contracts.sendPdf(c.id); toast('PDF отправлен вам в Telegram'); return; }
     saveBlob(await api.contracts.pdf(c.id, c.has_signed_pdf), c.filename);
   });
-  const share = () => busy.mutate(async () => {
-    // the file itself where the browser can (phones: Telegram / WhatsApp in the share sheet), else an expiring link
-    if (!tg && navigator.canShare) {
-      const file = new File([await api.contracts.pdf(c.id, c.has_signed_pdf)], c.filename, { type: 'application/pdf' });
-      if (navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: c.filename }); } catch { /* the user closed the sheet */ }
-        return;
-      }
-    }
-    const url = await shareLink();
-    const text = `Договор ${c.cadastral || `#${c.id}`}`;
-    if (tg) { tgWebApp()?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`); return; }
-    if (navigator.share && mobile()) {
-      try { await navigator.share({ url, title: text }); } catch { /* closed */ }
-      return;
-    }
-    await navigator.clipboard?.writeText(url).then(() => toast('Ссылка на PDF скопирована'), () => undefined);
-  });
 
   return (
     <div className="col gap-sm">
       <div className="row row-wrap gap-sm">
         <Button onClick={open} loading={busy.isPending}><ExternalLink size={16} />Открыть PDF</Button>
         <Button variant="secondary" onClick={download}>{tg ? <><Send size={16} />PDF в Telegram</> : <><Download size={16} />Скачать PDF</>}</Button>
-        {!closed && <Button variant="secondary" onClick={share}><Share2 size={16} />Поделиться</Button>}
         {c.status === 'draft' && !c.pdf_stale && <Button variant="ok" onClick={() => setSignOpen(true)}><CheckCircle2 size={16} />Договор подписан</Button>}
         {(c.status === 'signed' || c.status === 'deal') && !c.has_signed_pdf && <Button variant="ghost" onClick={() => setSignOpen(true)}><Upload size={16} />Прикрепить скан</Button>}
         {(c.status === 'draft' || c.status === 'signed') && <Button variant="ghost" onClick={() => setCloseOpen(true)}><XCircle size={16} />Сделка не состоялась</Button>}
       </div>
-      {link && !closed && (
-        <div className="row row-wrap gap-sm" style={{ fontSize: 12 }}>
-          <span className="muted">Ссылка на PDF (только просмотр, до {fmtDate(c.share?.expires_at)}):</span>
-          <a href={link} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>{link}</a>
-          <a className="btn btn-sm btn-ghost" href={`https://t.me/share/url?url=${encodeURIComponent(link)}`} target="_blank" rel="noreferrer"><Send size={14} />Telegram</a>
-        </div>
-      )}
       {!closed && <SendToClient c={c} onChange={onChange} />}
       <ESignBlock c={c} onChange={(x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); }} />
       <SignModal c={c} open={signOpen} onClose={() => setSignOpen(false)} onDone={(x) => { setSignOpen(false); done(x, 'Отмечено: договор подписан'); }} />
@@ -171,9 +143,11 @@ function ESignBlock({ c, onChange }: { c: Contract; onChange: (c: Contract) => v
   }
   // the message goes in the signer's language, like the page it opens (11-13): the owner Georgian, the tenant English
   const where = c.address || c.cadastral || `#${c.id}`;
+  // with a saved extract the message says it is on the same page (Irakli 11-13: it goes with the link)
+  const ex = !!c.data?.extract_file;
   const text = (role: 'owner' | 'tenant') => role === 'owner'
-    ? `ხელშეკრულება: ${where}. გთხოვთ, გახსნათ ბმული და ელექტრონულად მოაწეროთ ხელი (გამქირავებელი).`
-    : `Contract: ${where}. Please open the link and sign it electronically (tenant).`;
+    ? `ხელშეკრულება: ${where}. ${ex ? 'ხელშეკრულება და ამონაწერი საჯარო რეესტრიდან — ბმულზე. ' : ''}გთხოვთ, გახსნათ ბმული და ელექტრონულად მოაწეროთ ხელი (გამქირავებელი).`
+    : `Contract: ${where}. ${ex ? 'The contract and the public registry extract are at the link. ' : ''}Please open the link and sign it electronically (tenant).`;
   const copy = (url: string, role: 'owner' | 'tenant') =>
     navigator.clipboard?.writeText(`${text(role)}\n${url}`).then(() => toast('Сообщение со ссылкой скопировано'), () => undefined);
   const send = async (url: string, role: 'owner' | 'tenant') => {

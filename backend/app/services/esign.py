@@ -143,7 +143,30 @@ def view(db: Session, token: str) -> dict:
         "parties": [{"role": r.role, "label": ROLE_LABEL[r.role], "signed": bool(r.signed_at)} for r in rows],
         "complete": done,
         "html": None if s.signed_at else c.html,  # the text to read before signing
+        "has_extract": bool(_extract_key(c)),
     }
+
+
+def _extract_key(c: Contract) -> str:
+    """The registry extract saved with the contract (data.extract_file); only our own storage keys."""
+    from app.services import registry
+    key = str((c.data or {}).get("extract_file") or "")
+    return key if registry.EXTRACT_KEY_RE.match(key) else ""
+
+
+def _extract(c: Contract) -> bytes | None:
+    from app import storage
+    key = _extract_key(c)
+    return storage.read(key) if key else None
+
+
+def extract(db: Session, token: str) -> tuple[Contract, bytes]:
+    """The extract for this contract's signers (Irakli 11-13: it goes with the signing link): the token is the access."""
+    _, c = _by_token(db, token)
+    data = _extract(c)
+    if not data:
+        raise DomainError("not_found", "Выписка не сохранена")
+    return c, data
 
 
 def _png(sig: str) -> bytes:

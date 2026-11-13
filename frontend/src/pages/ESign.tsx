@@ -15,7 +15,7 @@ import { fmtDateTime, phoneInput } from '../lib/format';
 const UI: Record<Lang, {
   intro: string; read: string; name: string; pid: string; phone: string; sign: string; clear: string; agree: string;
   send: string; done: string; waiting: string; complete: string; download: string; parties: string; signed: string; pending: string;
-  as: string; toSign: string; docLang: Record<ESignView['lang'], string>; err: Record<string, string>; errDefault: string;
+  as: string; toSign: string; extract: string; extractOpen: string; docLang: Record<ESignView['lang'], string>; err: Record<string, string>; errDefault: string;
 }> = {
   ka: {
     intro: 'ხელშეკრულების ელექტრონული ხელმოწერა', read: 'გთხოვთ, ყურადღებით წაიკითხოთ ხელშეკრულება', name: 'სახელი და გვარი',
@@ -24,6 +24,7 @@ const UI: Record<Lang, {
     waiting: 'ველოდებით მეორე მხარის ხელმოწერას. ხელმოწერილ PDF-ს ამავე ბმულზე ნახავთ.',
     complete: 'ხელშეკრულება ხელმოწერილია ორივე მხარის მიერ.', download: 'PDF-ის ჩამოტვირთვა', parties: 'მხარეები',
     signed: 'ხელმოწერილია', pending: 'ელოდება', as: 'თქვენ აწერთ ხელს, როგორც', toSign: 'ხელმოწერაზე გადასვლა ↓',
+    extract: 'ამონაწერი საჯარო რეესტრიდან', extractOpen: 'გახსნა (PDF)',
     docLang: { GEO: 'ხელშეკრულების ენა: ქართული', RU: 'ხელშეკრულების ენა: ქართული და რუსული', EN: 'ხელშეკრულების ენა: ქართული და ინგლისური' },
     err: {
       not_found: 'ბმული აღარ მოქმედებს. სთხოვეთ აგენტს ახალი ბმული.',
@@ -43,6 +44,7 @@ const UI: Record<Lang, {
     waiting: 'Ждём подпись второй стороны. Подписанный PDF появится по этой же ссылке.',
     complete: 'Договор подписан обеими сторонами.', download: 'Скачать PDF', parties: 'Стороны',
     signed: 'подписал(а)', pending: 'ожидает', as: 'Вы подписываете как', toSign: 'К подписи ↓',
+    extract: 'Выписка из реестра', extractOpen: 'Открыть (PDF)',
     docLang: { GEO: 'Язык договора: грузинский', RU: 'Язык договора: грузинский и русский', EN: 'Язык договора: грузинский и английский' },
     err: {
       not_found: 'Ссылка недействительна. Попросите агента прислать новую.',
@@ -62,6 +64,7 @@ const UI: Record<Lang, {
     waiting: 'Waiting for the other party to sign. The signed PDF will be available at this same link.',
     complete: 'The contract is signed by both parties.', download: 'Download PDF', parties: 'Parties',
     signed: 'signed', pending: 'pending', as: 'You are signing as', toSign: 'Go to signing ↓',
+    extract: 'Public registry extract', extractOpen: 'Open (PDF)',
     docLang: { GEO: 'Contract language: Georgian', RU: 'Contract language: Georgian and Russian', EN: 'Contract language: Georgian and English' },
     err: {
       not_found: 'This link is no longer valid. Please ask the agent for a new one.',
@@ -145,6 +148,13 @@ export function ESignPage() {
             <Badge key={p.role} tone={p.signed ? 'ok' : 'grey'}>{p.label[l]} · {p.signed ? t.signed : t.pending}</Badge>
           ))}
         </div>
+        {/* the registry extract comes with the signing link (Irakli 11-13); the token is the access */}
+        {v.has_extract && (
+          <div className="row row-wrap gap-sm" style={{ alignItems: 'center', fontSize: 14 }}>
+            <FileText size={16} style={{ color: 'var(--brand)' }} /><span>{t.extract}</span>
+            <a className="btn btn-sm btn-secondary" href={`/api/public/esign/${token}/extract`} target="_blank" rel="noopener noreferrer">{t.extractOpen}</a>
+          </div>
+        )}
       </div>
     </>
   );

@@ -797,15 +797,21 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 .status-bar-grid { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
 .status-tile { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 8px 2px 7px; border: 0; border-radius: 10px; background: var(--brand-tint); color: var(--ink); cursor: pointer; font: inherit; min-width: 0; }
 .status-tile b { font-size: 18px; font-weight: 800; line-height: 1.1; }
-.status-tile span { font-size: 11px; font-weight: 600; line-height: 1.15; text-align: center; color: var(--ink-2); hyphens: auto; -webkit-hyphens: auto; overflow-wrap: normal; word-break: normal; }
+/* labels wrap only between words, ≤2 lines, centred — no «на-значен» hyphenation (Irakli 11-13) */
+.status-tile span { width: 100%; font-size: 11px; font-weight: 600; line-height: 1.15; text-align: center; color: var(--ink-2); hyphens: none; -webkit-hyphens: none; overflow-wrap: normal; word-break: normal; }
 .status-tile:hover { background: var(--brand-soft); }
 .status-tile.active { background: var(--brand); color: #fff; }
 .status-tile.active span { color: rgba(255,255,255,.85); }
 @media (min-width: 768px) { .kanban:has(+ .status-bar) .kanban-col { max-height: calc(100vh - 330px); } }
 @media (max-width: 767px) {
   .status-bar { bottom: calc(61px + env(safe-area-inset-bottom)); margin: 0 calc(-1 * var(--gutter)); border-radius: 16px 16px 0 0; border-width: 1px 0 0; padding: 12px 10px 10px; }
-  .status-bar-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .status-tile { padding: 7px 1px 6px; }
+  .status-bar-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .status-tile { padding: 7px 0 6px; }
   .status-tile b { font-size: 17px; }
-  .status-tile span { font-size: 10px; }
+  .status-tile span { font-size: 10px; letter-spacing: -.01em; }
 }
+/* a narrow phone: the longest single words («Опубликован», «отправлено») still fit one tile */
+@media (max-width: 400px) { .status-tile span { font-size: 9px; letter-spacing: -.02em; } }
+/* a laptop / tablet: 11 lead columns in a row are narrow too */
+@media (min-width: 768px) and (max-width: 1279px) { .status-tile span { font-size: 10px; } }
+@media (min-width: 768px) and (max-width: 999px) { .status-bar-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }

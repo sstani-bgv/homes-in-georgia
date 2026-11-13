@@ -6,7 +6,7 @@
 //     11-13: only the link — the «Вставить из реестра» (page text) and «Загрузить выписку (PDF)» buttons are gone.
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Database, Link2 } from 'lucide-react';
+import { CheckCircle2, Database, Eraser, Link2 } from 'lucide-react';
 import { http } from '../../api/client';
 import { errText } from '../../components/toast';
 import { Button, Input } from '../../components/ui';
@@ -79,8 +79,8 @@ function ExtractLink({ x: { url, setUrl, note, load, go } }: { x: ReturnType<typ
 
 /** onCode: a cadastral code found in the clipboard on return from NAPR (RegistryApps, 09736a7).
  * onFields fills the empty fields and returns their names; onExtract keeps the extract's link + saved PDF. */
-export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, extractUrl, onExtract }: {
-  personalId: string; current: string; onKnown: (o: KnownObject) => void; onFields: (f: ExtractFields) => string[]; onCode?: (code: string) => void;
+export function OwnerLookup({ personalId, current, onKnown, onClear, onFields, onCode, extractUrl, onExtract }: {
+  personalId: string; current: string; onKnown: (o: KnownObject) => void; onClear: () => void; onFields: (f: ExtractFields) => string[]; onCode?: (code: string) => void;
   extractUrl?: string; onExtract: (url: string, file: string) => void;
 }) {
   const known = useKnownObjects(personalId);
@@ -111,7 +111,9 @@ export function OwnerLookup({ personalId, current, onKnown, onFields, onCode, ex
                   <span style={{ fontSize: 13 }}>{[o.address, o.floor && `этаж ${o.floor}`, o.apartment_number && `кв. ${o.apartment_number}`, o.area && `${o.area} м²`].filter(Boolean).join(' · ') || '—'}</span>
                   <span className="faint" style={{ fontSize: 12 }}>{o.owner_name ? `${o.owner_name} · ` : ''}{o.source}{o.date ? `, ${day(o.date)}` : ''}</span>
                 </span>
-                {on ? <span className="row gap-sm" style={{ fontSize: 13, color: 'var(--ok, #1a7f4b)' }}><CheckCircle2 size={14} />Подставлен</span>
+                {/* «Стереть» undoes a wrong «Подставить» (Irakli 11-13) */}
+                {on ? <span className="row gap-sm" style={{ fontSize: 13, color: 'var(--ok, #1a7f4b)', alignItems: 'center' }}><CheckCircle2 size={14} />Подставлен
+                    <Button size="sm" variant="ghost" onClick={onClear}><Eraser size={14} />Стереть</Button></span>
                   : <Button size="sm" variant="secondary" onClick={() => onKnown(o)}>Подставить</Button>}
               </div>
             );

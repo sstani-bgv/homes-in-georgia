@@ -549,7 +549,10 @@ on('POST', '/moderation/:id', (m) => { const i = F.moderation.findIndex((x) => x
 on('GET', '/addresses', () => page([]));
 
 // ---------- contracts: just the wizard's autosave and the card (no PDF in the mock); 11-13
-const contracts: Record<string, unknown>[] = [];
+// one generated rent contract with a saved registry extract: the card, e-sign and /esign/mock-owner-9001-… (Irakli 11-13)
+const contracts: Record<string, unknown>[] = [{ id: 9001, kind: 'rent', lang: 'EN', lead_id: null, deal_id: null, cadastral: '01.10.14.016.017.01.001',
+  address: 'თბილისი, ტაბიძის ქ. 43', has_pdf: true, status_label: 'Сгенерирован', filename: 'contract.pdf', created_at: new Date().toISOString(),
+  generated_at: new Date().toISOString(), data: { extract_file: 'private/registry-extracts/mock.pdf' } }];
 const cxOut = (c: Record<string, unknown>) => ({ status: 'draft', status_label: 'Черновик', has_pdf: false, versions: [], versions_count: 0, ...c });
 on('GET', '/contracts', (_m, _b, q) => page(contracts.filter((c) => (!q.get('lead_id') || c.lead_id === Number(q.get('lead_id')))
   && (!q.get('deal_id') || c.deal_id === Number(q.get('deal_id')))).map(cxOut)));
@@ -601,7 +604,7 @@ const esView = (token: string) => {
   return { role, role_label: ES_LABEL[role], contract_id: c.id, kind: 'rent', lang: c.lang || 'EN', address: c.address || 'Тбилиси, ул. Демо, 1', cadastral: null,
     doc_sha256: 'mock', prefill: { full_name: '', personal_id: '' }, signed_at: s?.signed_at || null, full_name: s?.full_name || null,
     parties: (['owner', 'tenant'] as const).map((r) => ({ role: r, label: ES_LABEL[r], signed: !!signers.find((x) => x.role === r)?.signed_at })),
-    complete: false, html: s?.signed_at ? null : '<html><head></head><body><p>ხელშეკრულება / Lease agreement (mock)</p><p>________________________</p></body></html>' };
+    complete: false, has_extract: !!(c as { data?: Record<string, unknown> }).data?.extract_file, html: s?.signed_at ? null : '<html><head></head><body><p>ხელშეკრულება / Lease agreement (mock)</p><p>________________________</p></body></html>' };
 };
 on('GET', '/public/esign/:token', (m) => esView(m[1]));
 on('POST', '/public/esign/:token', (m, b) => {
@@ -612,7 +615,9 @@ on('POST', '/public/esign/:token', (m, b) => {
 });
 
 // the registry (services/registry.py): one NAPR application for any owner ID; an extract link fills demo fields
-on('GET', '/registry/known', () => ({ items: [] }));
+// any owner ID: one object the CRM already knows (the «Уже есть в базе CRM» card, «Подставить» / «Стереть»)
+on('GET', '/registry/known', () => ({ items: [{ cadastral: '01.14.12.003.045.01.017', address: 'თბილისი, ჭავჭავაძის გამზ. 12', floor: '4',
+  apartment_number: '17', area: '62', owner_name: null, source: 'Tatia · договор #6', date: new Date().toISOString() }] }));
 on('GET', '/registry/applications', () => ({ total: 1, page: 1, lastpage: 1, items: [{ app_id: '1', reg_number: '892026010466', date: new Date().toISOString(),
   type: 'ამონაწერის მომზადება უძრავ ნივთზე', address: 'ქალაქი თბილისი', status: 'სარეგისტრაციო წარმოება დასრულებულია', done: true, applicants: [], url: 'https://napr.gov.ge' }] }));
 on('POST', '/registry/extract-from-url', (_m, b) => {

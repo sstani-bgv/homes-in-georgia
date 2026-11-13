@@ -223,3 +223,10 @@ def public_esign_sign(token: str, body: ESignIn, request: Request, db: Session =
 def public_esign_pdf(token: str, download: bool = False, db: Session = Depends(get_db, scope="function")):
     c, data = E.signed_pdf(db, token)
     return _pdf(data, C.filename(c, True), download)
+
+
+@public.get("/public/esign/{token}/extract")
+def public_esign_extract(token: str, download: bool = False, db: Session = Depends(get_db, scope="function")):
+    """The registry extract with the signing link (11-13): only by a valid signer token of that contract."""
+    c, data = E.extract(db, token)
+    return _pdf(data, f"Extract {c.cadastral or c.id}.pdf", download)
