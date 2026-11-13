@@ -7,7 +7,7 @@ import { itemsOf } from '../api/client';
 import type { AgentActivity, AgentStat, CounterPair } from '../api/types';
 import { Avatar, Badge, Button, Card, Drawer, Empty, ErrorBox, Input, KV, Loading, PageHead, Progress, Seg, Tabs } from '../components/ui';
 import { GROWTH_LADDER, KNOWLEDGE_ITEMS, LADDER_VIEWS, PRINCIPLES, QUIZ_ALL } from '../features/team/content';
-import { ROLE_LABEL, fmtDate, lastMonths, monthKey, monthLabel, nextLevelAt } from '../lib/format';
+import { ROLE_LABEL, fmtDate, lastMonths, money, monthKey, monthLabel, nextLevelAt } from '../lib/format';
 import { useUserNames } from '../lib/useUserNames';
 
 export function LevelProgress({ deals, level }: { deals: number; level?: number | null }) {
@@ -293,7 +293,10 @@ function UserCard({ a }: { a: AgentStat }) {
       {a.activity && <AgentActivityBlock act={a.activity} full />}
       <KV items={[
         ['Эксклюзивов', a.exclusive_deals], ['Сделок за месяц', a.deals_month ?? '—'], ['Заявок в работе', a.active_leads ?? '—'], ['Объектов в работе', a.active_properties ?? '—'],
-        ...Object.entries(s).filter(([, v]) => typeof v === 'number' || typeof v === 'string').slice(0, 8).map(([k, v]) => [k, String(v)] as [string, string]),
+        // the stats endpoint's extra numbers, in Russian (11-13: raw keys level / deals_total… were shown); level,
+        // exclusives and the month's deals are already above
+        ...(s.agent_amount_month !== undefined ? [['Заработок агента за месяц', money(Number(s.agent_amount_month), 'USD')] as [string, string]] : []),
+        ...(s.deals_total !== undefined ? [['Сделок всего', String(s.deals_total)] as [string, string]] : []),
       ]} />
     </div>
   );
