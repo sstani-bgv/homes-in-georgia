@@ -619,6 +619,8 @@ export interface AgentActivity {
   targets: { new: number; active: number; deals: number };
   weights: { new: number; active: number; deals: number };
   days: number;
+  /** ISO date the window starts from while it is shorter than `days` (new CRM start 2026-11-13), else null */
+  since?: string | null;
 }
 
 export interface Dashboard {

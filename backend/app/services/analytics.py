@@ -258,6 +258,7 @@ def dashboard(db: Session, month: str | None = None) -> dict:
 ACTIVITY_DAYS = 30
 ACTIVITY_TARGETS = {"new": 60, "active": 60, "deals": 5}
 ACTIVITY_WEIGHTS = {"new": 40, "active": 30, "deals": 30}
+ACTIVITY_START = datetime(2026, 11, 13, tzinfo=TZ)  # counts only new-CRM work from this day (old data inflated it)
 
 
 def activity_score(new: int, active: int, deals: int) -> int:
@@ -265,25 +266,33 @@ def activity_score(new: int, active: int, deals: int) -> int:
     return round(sum(min(got[k] / t, 1) * ACTIVITY_WEIGHTS[k] for k, t in ACTIVITY_TARGETS.items()))
 
 
-def _activity_counts(db: Session) -> tuple[dict, dict]:
-    """new objects (channel posts + CRM objects without a post) and confirmed deals per agent, rolling 30 days."""
+def _activity_since() -> tuple[datetime, bool]:
+    """window start and whether it is clipped by ACTIVITY_START (the first 30 days of the new CRM)."""
     since = now() - timedelta(days=ACTIVITY_DAYS)
-    posts = dict(db.execute(select(ChannelPost.agent_id, func.count()).where(ChannelPost.date >= since)
-                            .group_by(ChannelPost.agent_id)).all())
-    has_post = select(ChannelPost.id).where(ChannelPost.property_id == Property.id).exists()
-    crm = dict(db.execute(select(Property.agent_id, func.count())
-                          .where(func.coalesce(Property.taken_at, Property.created_at) >= since, ~has_post)
+    return (ACTIVITY_START, True) if since < ACTIVITY_START else (since, False)
+
+
+def _activity_counts(db: Session) -> tuple[dict, dict, dict]:
+    """per agent: objects added in the CRM in the window, objects in work added since ACTIVITY_START,
+    CRM-confirmed deals in the window. No channel posts / legacy objects / imported deals (11-13: they inflated it)."""
+    since, _ = _activity_since()
+    crm = Property.source_type.is_distinct_from("legacy")
+    new = dict(db.execute(select(Property.agent_id, func.count()).where(crm, Property.created_at >= since)
                           .group_by(Property.agent_id)).all())
-    new = {k: posts.get(k, 0) + crm.get(k, 0) for k in posts.keys() | crm.keys()}
+    active = dict(db.execute(select(Property.agent_id, func.count())
+                             .where(crm, Property.created_at >= ACTIVITY_START, Property.status.not_in(("archived", "rented")))
+                             .group_by(Property.agent_id)).all())
     deals = dict(db.execute(select(Deal.agent_id, func.count())
-                            .where(Deal.status == "confirmed", func.coalesce(Deal.confirmed_at, Deal.created_at) >= since)
+                            .where(Deal.status == "confirmed", Deal.source == "crm", Deal.confirmed_at >= since)
                             .group_by(Deal.agent_id)).all())
-    return new, deals
+    return new, active, deals
 
 
 def _activity(new: int, active: int, deals: int) -> dict:
+    since, clipped = _activity_since()
     return {"score": activity_score(new, active, deals), "new": new, "active": active, "deals": deals,
-            "targets": ACTIVITY_TARGETS, "weights": ACTIVITY_WEIGHTS, "days": ACTIVITY_DAYS}
+            "targets": ACTIVITY_TARGETS, "weights": ACTIVITY_WEIGHTS, "days": ACTIVITY_DAYS,
+            "since": since.astimezone(TZ).date().isoformat() if clipped else None}
 
 
 def agents(db: Session, month: str | None = None) -> list[dict]:
@@ -298,7 +307,7 @@ def agents(db: Session, month: str | None = None) -> list[dict]:
                                 .group_by(Lead.agent_id)).all())
     props = dict(db.execute(select(Property.agent_id, func.count()).where(Property.status.not_in(("archived", "rented")))
                             .group_by(Property.agent_id)).all())
-    act_new, act_deals = _activity_counts(db)
+    act_new, act_active, act_deals = _activity_counts(db)
     out = []
     # «Команда» shows only working agents (Irakli 2026-11-09): a deactivated one stays in the history, not on the board
     for u in db.scalars(select(User).where(FIELD_SQL, User.is_active.is_(True)).order_by(User.name)):
@@ -306,5 +315,5 @@ def agents(db: Session, month: str | None = None) -> list[dict]:
                     "mentor_id": u.mentor_id, **users.level_info(u), "deals_month": board.get(u.id, {}).get("deals", 0),
                     "agent_amount_month": board.get(u.id, {}).get("agent_amount", 0), "open_leads": lead_load.get(u.id, 0),
                     "properties": props.get(u.id, 0), "counters": counters.get(u.id),
-                    "activity": _activity(act_new.get(u.id, 0), props.get(u.id, 0), act_deals.get(u.id, 0))})
+                    "activity": _activity(act_new.get(u.id, 0), act_active.get(u.id, 0), act_deals.get(u.id, 0))})
     return out

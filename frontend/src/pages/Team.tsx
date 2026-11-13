@@ -29,9 +29,11 @@ const ACT_PARTS = [
   { k: 'deals', label: 'Закрытые сделки', Icon: Handshake },
 ] as const;
 
-const actHelp = (d: number) => `Новые объекты — посты агента в канале за ${d} дней + объекты, взятые в CRM за ${d} дней без поста. `
-  + 'Активные объекты — объекты агента сейчас, кроме архива и сданных. '
-  + `Закрытые сделки — подтверждённые сделки за ${d} дней. Каждая часть ограничена целью (не больше 100%).`;
+const actHelp = (d: number) => `Новые объекты — объекты, которые агент добавил в CRM за ${d} дней (из ленты или вручную). `
+  + 'Активные объекты — его объекты в работе (кроме архива и сданных), добавленные в новой CRM. '
+  + `Закрытые сделки — сделки, оформленные и подтверждённые в CRM за ${d} дней. `
+  + 'Посты в канале, объекты и сделки из старой CRM не считаются — счёт идёт с 13.11. Каждая часть ограничена целью (не больше 100%).';
+const fmtSince = (iso: string) => iso.slice(8, 10) + '.' + iso.slice(5, 7);
 
 export function AgentActivityBlock({ act, full }: { act: AgentActivity; full?: boolean }) {
   const formula = ACT_PARTS.map(({ k }) => `(${act[k]}/${act.targets[k]} × ${act.weights[k]}%)`).join(' + ');
@@ -39,7 +41,7 @@ export function AgentActivityBlock({ act, full }: { act: AgentActivity; full?: b
     <div className="act">
       <div className="row row-between">
         <span className="act-title"><BarChart3 size={15} />Активность агента<span title={actHelp(act.days)}><Info size={14} className="act-info" /></span></span>
-        <span className="act-sub">Расчёт за {act.days} дней</span>
+        <span className="act-sub">{act.since ? `Считается с ${fmtSince(act.since)}` : `Расчёт за ${act.days} дней`}</span>
       </div>
       <div className="row act-main">
         <div className="act-bar grow"><div className="ok" style={{ width: `${act.score}%` }} /></div>
