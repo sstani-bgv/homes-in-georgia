@@ -51,7 +51,7 @@ export function ManualProperty({ open, onClose, base = '' }: { open: boolean; on
 }
 
 /** «Объекты» tabs in three groups (Stanislav 11-13 mock-up): Входящие (new ads, operators' requests), Работа (the board,
- * the publication queue), База (mine, the whole base, the archive). The other groups' tabs stay one tap away below. */
+ * the publication queue), База (mine, the whole base, the archive). */
 const OBJ_GROUPS: { key: string; label: string; icon: ReactNode; tabs: ObjTab[] }[] = [
   { key: 'in', label: 'Входящие', icon: <Inbox size={20} />, tabs: ['new', 'requests'] },
   { key: 'work', label: 'Работа', icon: <Briefcase size={20} />, tabs: ['board', 'review'] },
@@ -97,13 +97,6 @@ export function ObjectsPage() {
         <div className="subtabs" role="tablist">
           {group.tabs.map((t) => (
             <button key={t} type="button" role="tab" aria-selected={t === tab} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>{OBJ_TAB[t]}{badge(t)}</button>
-          ))}
-        </div>
-        <div className="obj-jump">
-          {groups.filter((g) => g !== group).map((g) => (
-            <div key={g.key}><b>{g.label}:</b> {g.tabs.map((t, i) => (
-              <span key={t}>{i > 0 && ' · '}<button type="button" className="link-btn" onClick={() => setTab(t)}>{OBJ_TAB[t]}</button>{badge(t)}</span>
-            ))}</div>
           ))}
         </div>
       </div>
