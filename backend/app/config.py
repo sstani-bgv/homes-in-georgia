@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://homes:homes@localhost:5432/homes"
     TEST_DATABASE_URL: str = ""
     SECRET_KEY: str = "dev-secret-change-me"
+    # Daily Rent (посуточная аренда, the ApartFlow app on the same Hetzner box) opened inside the CRM (Irakli 11-13).
+    DAILY_RENT_URL: str = ""         # e.g. https://apartflow.91-99-162-108.sslip.io ; empty = tab shows «не подключено»
+    DAILY_RENT_SSO_SECRET: str = ""  # shared with ApartFlow's CRM_SSO_SECRET (signs the one-hour entry token)
     JWT_TTL_HOURS: int = 72
     PUBLIC_URL: str = "http://localhost:8000"
     BOT_TOKEN: str = ""

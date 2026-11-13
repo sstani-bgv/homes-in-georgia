@@ -10,14 +10,15 @@ import time
 import httpx
 
 from app.db import SessionLocal
-from app.models import LEVELS
+from app.models import ROLES
 from app.services import invites
 from app.services.errors import DomainError
 from app.telegram.client import conf
 
 log = logging.getLogger(__name__)
-ROLE_RU = {"superadmin": "суперадмин", "admin": "администратор", "operator": "оператор", "agent": "агент", "recruit": "рекрут"}
-assert set(ROLE_RU) == set(LEVELS)
+ROLE_RU = {"superadmin": "суперадмин", "admin": "администратор", "operator": "оператор", "agent": "агент", "recruit": "рекрут",
+           "daily_rent_manager": "менеджер посуточной аренды"}
+assert set(ROLE_RU) == set(ROLES)
 
 
 def token() -> str:

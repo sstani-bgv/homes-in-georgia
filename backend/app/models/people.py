@@ -7,7 +7,11 @@ from app.db import Base
 # Hierarchical RBAC (Irakli 2026-11-12, docs/ROLES-IRAKLI-2026-11-12.md): every role inherits all rights of the lower
 # ones, so access checks compare levels (at_least(u, "operator")), never role lists.
 LEVELS = {"recruit": 1, "agent": 2, "operator": 3, "admin": 4, "superadmin": 5}
-ROLES = ("superadmin", "admin", "operator", "agent", "recruit")
+ROLES = ("superadmin", "admin", "operator", "agent", "recruit", "daily_rent_manager")
+# Daily Rent (посуточная аренда, the ApartFlow app) — Irakli 11-13. daily_rent_manager is outside the ladder above
+# (role_level 0): it sees only the Daily Rent tab; api/deps.current_user refuses it everywhere else.
+DAILY_RENT_ONLY = "daily_rent_manager"
+DAILY_RENT_ROLES = ("superadmin", "admin", DAILY_RENT_ONLY)
 SUPER = ("superadmin",)
 ADMINS = SUPER + ("admin",)
 STAFF = ADMINS + ("operator",)
@@ -74,6 +78,10 @@ def role_level(u) -> int:
 
 def at_least(u, role: str) -> bool:
     return u is not None and role_level(u) >= LEVELS[role]
+
+
+def can_daily_rent(u) -> bool:
+    return u is not None and getattr(u, "role", None) in DAILY_RENT_ROLES
 
 
 def is_field(u) -> bool:

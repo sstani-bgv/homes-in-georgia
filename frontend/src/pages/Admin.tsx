@@ -14,7 +14,8 @@ import { parseMetrics } from '../lib/useUserNames';
 import { ANALYTICS_METRICS, ANALYTICS_SECTIONS } from '../features/deals/Analytics';
 
 const MISSING: Record<string, string> = { name: 'фамилия', birth_date: 'ДР', phone: 'телефон', email: 'email' };
-const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit'];
+const ROLES: Role[] = ['superadmin', 'admin', 'operator', 'agent', 'recruit', 'daily_rent_manager'];
+const FIELDLESS: Role[] = ['daily_rent_manager'];  // no level / agent hashtag: only the Daily Rent tab
 
 function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () => void }) {
   const qc = useQueryClient();
@@ -46,17 +47,17 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Field label="Фамилия *"><Input value={f.last_name || ''} placeholder="Беридзе" onChange={(e) => set('last_name', e.target.value)} /></Field>
         <Field label="Дата рождения *"><Input type="date" value={f.birth_date || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set('birth_date', e.target.value || null)} /></Field>
         <Field label="Email *" hint="Видят только администраторы"><Input type="email" inputMode="email" value={f.email || ''} placeholder="name@mail.com" onChange={(e) => set('email', e.target.value)} /></Field>
-        <Field label="Роль"><Select value={f.role} onChange={(e) => set('role', e.target.value as Role)} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
-        <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
+        <Field label="Роль"><Select value={f.role} onChange={(e) => { const r = e.target.value as Role; setF((x) => ({ ...x, role: r, ...(FIELDLESS.includes(r) ? { level: null, works_as_agent: false } : {}) })); }} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        {f.role && FIELDLESS.includes(f.role) ? <div /> : <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>}
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
         <Field label="Телефон *"><Input type="tel" value={f.phone || ''} onFocus={phoneFocus} onBlur={phoneBlur} onChange={(e) => set('phone', phoneInput(e))} inputMode="tel" /></Field>
-        <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
+        {f.role && FIELDLESS.includes(f.role) ? <div className="faint" style={{ fontSize: 13, alignSelf: 'center' }}>Видит только «Посуточная аренда»</div> : <Field label="Хэштег агента" hint="В конце каждого поста: имя латиницей (#Zaza), при совпадении имён + буква фамилии (#ArturB)">
           <div className="row gap-sm">
             <Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => set('agent_tag', e.target.value.replace(/^#+/, '') || null)} />
             <Button variant="secondary" size="sm" disabled={!f.first_name?.trim()} loading={suggest.isPending} onClick={() => suggest.mutate()}>Предложить</Button>
           </div>
-        </Field>
+        </Field>}
         {f.role === 'recruit' ? (
           <Field label="Наставник"><Select value={f.mentor_id ?? ''} onChange={(e) => set('mentor_id', e.target.value ? Number(e.target.value) : null)} placeholder="—" options={all.filter((u) => u.role === 'agent' || u.works_as_agent).map((u) => ({ value: u.id, label: u.name }))} /></Field>
         ) : <div />}
@@ -121,9 +122,10 @@ function InviteForm({ onDone }: { onDone: () => void }) {
     <div className="col gap-lg">
       <div className="form-grid">
         <Field label="Кого приглашаем" className="span2" hint="Для списка приглашений, необязательно"><Input value={f.note} placeholder="Нино, новый агент" onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
-        <Field label="Роль"><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r)).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        <Field label="Роль"><Select value={f.role} onChange={(e) => { const r = e.target.value as Role; setF({ ...f, role: r, ...(FIELDLESS.includes(r) ? { level: null, agent_tag: '', works_as_agent: false } : {}) }); }} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r)).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        {FIELDLESS.includes(f.role) ? <div className="faint" style={{ fontSize: 13, alignSelf: 'center' }}>Видит только «Посуточная аренда»</div> : <>
         <Field label="Уровень"><Seg value={f.level ?? 0} onChange={(v) => setF({ ...f, level: v || null })} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>
-        <Field label="Хэштег агента" hint="Можно задать позже"><Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => setF({ ...f, agent_tag: e.target.value.replace(/^#+/, '') })} /></Field>
+        <Field label="Хэштег агента" hint="Можно задать позже"><Input value={f.agent_tag ? `#${f.agent_tag}` : ''} placeholder="#Zaza" onChange={(e) => setF({ ...f, agent_tag: e.target.value.replace(/^#+/, '') })} /></Field></>}
       </div>
       {atLeast({ role: f.role }, 'operator') && <Switch checked={f.works_as_agent} onChange={(v) => setF({ ...f, works_as_agent: v })} label="Работает как агент" />}
       <div><Button loading={create.isPending} onClick={() => create.mutate()}><UserPlus size={16} />Создать приглашение</Button></div>

@@ -221,6 +221,11 @@ export const api = {
     channelPosts: (from: string, to: string) => http.get<{ total: number; items: { agent_id: number | null; name: string; posts: number; exclusive: number; last: string | null }[] }>('/analytics/channel-posts', { from, to }),
   },
 
+  /** «Посуточная аренда» (Daily Rent / ApartFlow): the frame address with a one-time entry token */
+  dailyRent: {
+    session: () => http.post<{ url: string; expires_in: number }>('/daily-rent/session'),
+  },
+
   ticker: {
     list: () => http.get<L<TickerMessage>>('/ticker'),
     create: (text: string) => http.post<TickerMessage>('/ticker', { text }),

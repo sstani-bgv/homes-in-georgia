@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, Header, Query
+from fastapi import Depends, Header, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import LEVELS, User, at_least
+from app.models import DAILY_RENT_ONLY, LEVELS, User, at_least
 from app.services.errors import DomainError
 
 ALG = "HS256"
@@ -25,7 +25,13 @@ def decode_token(token: str) -> dict:
         raise DomainError("unauthorized", "invalid or expired token", 401)
 
 
-def current_user(db: Session = Depends(get_db, scope="function"), authorization: str | None = Header(None),
+# The only CRM API a Daily Rent manager may call (Irakli 11-13): everything else is refused for that role here, in the
+# one dependency every endpoint goes through — so a new endpoint is closed to it by default.
+DAILY_RENT_PATHS = ("/api/auth/me",)
+DAILY_RENT_PREFIX = "/api/daily-rent/"
+
+
+def current_user(request: Request, db: Session = Depends(get_db, scope="function"), authorization: str | None = Header(None),
                  token: str | None = Query(None, include_in_schema=False)) -> User:
     raw = None
     if authorization and authorization.lower().startswith("bearer "):
@@ -39,6 +45,10 @@ def current_user(db: Session = Depends(get_db, scope="function"), authorization:
     user = db.get(User, int(payload["sub"]))
     if not user or not user.is_active:
         raise DomainError("unauthorized", "user inactive or deleted", 401)
+    if user.role == DAILY_RENT_ONLY:
+        path = request.url.path
+        if path not in DAILY_RENT_PATHS and not path.startswith(DAILY_RENT_PREFIX):
+            raise DomainError("forbidden", "the Daily Rent manager sees only Daily Rent")
     return user
 
 

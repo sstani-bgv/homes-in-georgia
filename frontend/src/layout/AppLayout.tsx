@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Building2, CalendarDays, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
+  BedDouble, Building2, CalendarDays, Handshake, CircleUser, ClipboardList, Eye, FileText, Home, Inbox, KeyRound, LogOut, Menu, Plus, Search,
   Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ADMIN_ROLES, STAFF_ROLES, atLeast } from '../api/types';
+import { ADMIN_ROLES, DAILY_RENT_ONLY, DAILY_RENT_ROLES, STAFF_ROLES, atLeast } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
   { to: '/owners', label: 'Собственники', icon: KeyRound, roles: STAFF },
   { to: '/team', label: 'Команда', icon: Trophy },
   { to: '/reports', label: 'Отчёты', icon: ClipboardList },
+  { to: '/daily-rent', label: 'Посуточная аренда', icon: BedDouble, roles: DAILY_RENT_ROLES },
   { to: '/admin', label: 'Управление', icon: Settings, roles: ADMIN_ROLES },
   { to: '/me', label: 'Кабинет', icon: CircleUser },
 ];
@@ -86,7 +87,12 @@ export function AppLayout() {
   useScrollMemory();
   const [more, setMore] = useState(false);
   const [add, setAdd] = useState(false);
-  const items = NAV.filter((n) => !n.roles || (user && n.roles.includes(user.role)));
+  const loc = useLocation();
+  // The Daily Rent manager sees only «Посуточная аренда» (Irakli 11-13); the backend refuses everything else too
+  const dailyOnly = user?.role === DAILY_RENT_ONLY;
+  const items = dailyOnly ? NAV.filter((n) => n.to === '/daily-rent')
+    : NAV.filter((n) => !n.roles || (user && n.roles.includes(user.role)));
+  if (dailyOnly && !loc.pathname.startsWith('/daily-rent')) return <Navigate to="/daily-rent" replace />;
   const bottom = items.slice(0, 4);
   const rest = items.slice(4);
   const logout = () => { signOut(); navigate('/login'); };
@@ -94,7 +100,7 @@ export function AppLayout() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <Link to="/" className="brand" aria-label="Главная" title="Главная">
+        <Link to={dailyOnly ? '/daily-rent' : '/'} className="brand" aria-label="Главная" title="Главная">
           <span className="brand-mark"><BrandMark /></span>
           <span className="brand-text">
             <div className="brand-name">Homes in Georgia</div>
@@ -121,12 +127,12 @@ export function AppLayout() {
       </aside>
       <div className="main">
         <header className="topbar">
-          <Link to="/" aria-label="Главная" title="Главная" className="only-mobile brand-mark" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--brand)', display: 'grid', placeItems: 'center' }}>
+          <Link to={dailyOnly ? '/daily-rent' : '/'} aria-label="Главная" title="Главная" className="only-mobile brand-mark" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--brand)', display: 'grid', placeItems: 'center' }}>
             <svg width="18" height="18" viewBox="0 0 64 64"><path d="M10 34 32 14l22 20v18H40V40H24v12H10z" fill="#fff" /><rect x="42" y="8" width="12" height="7" rx="2" fill="#E3172D" /></svg>
           </Link>
-          <Ticker />
+          {dailyOnly ? <div className="grow" style={{ fontWeight: 700 }}>Посуточная аренда</div> : <Ticker />}
           {IS_MOCK && <Badge tone="warn">demo-данные</Badge>}
-          <button className="btn btn-sm" onClick={() => setAdd(true)} aria-label="Добавить"><Plus size={16} /><span className="hide-mobile">Добавить</span></button>
+          {!dailyOnly && <button className="btn btn-sm" onClick={() => setAdd(true)} aria-label="Добавить"><Plus size={16} /><span className="hide-mobile">Добавить</span></button>}
         </header>
         <main className="content">
           <Outlet />

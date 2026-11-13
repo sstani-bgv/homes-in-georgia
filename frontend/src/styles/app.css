@@ -815,3 +815,8 @@ html.tg .drawer { height: var(--tg-viewport-height, 100dvh); }
 /* a laptop / tablet: 11 lead columns in a row are narrow too */
 @media (min-width: 768px) and (max-width: 1279px) { .status-tile span { font-size: 10px; } }
 @media (min-width: 768px) and (max-width: 999px) { .status-bar-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+/* «Посуточная аренда» — the Daily Rent app in a frame (pages/DailyRent.tsx) */
+.dr-frame { display: block; width: 100%; border: 1px solid var(--line, #e3e8f2); border-radius: 18px; background: #f3f5fa;
+  height: calc(100dvh - 190px); min-height: 520px; }
+@media (max-width: 767px) { .dr-frame { height: calc(100dvh - 230px - env(safe-area-inset-bottom)); border-radius: 14px; } }

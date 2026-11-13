@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import type { Role } from './api/types';
-import { ADMIN_ROLES, STAFF_ROLES } from './api/types';
+import { ADMIN_ROLES, DAILY_RENT_ROLES, STAFF_ROLES } from './api/types';
 import { useAuth } from './auth/AuthContext';
 import { Empty, Loading } from './components/ui';
 import { AppLayout } from './layout/AppLayout';
@@ -10,6 +10,7 @@ import { CabinetPage } from './pages/Cabinet';
 import { CalcPage } from './pages/Calc';
 import { CalendarPage } from './pages/Calendar';
 import { ContractsPage } from './pages/Contracts';
+import { DailyRentPage } from './pages/DailyRent';
 import { DashboardPage } from './pages/Dashboard';
 import { DealsPage } from './pages/Deals';
 import { ExclusiveSignPage } from './pages/ExclusiveSign';
@@ -95,6 +96,7 @@ export function App() {
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="daily-rent" element={<RequireAuth roles={DAILY_RENT_ROLES}><DailyRentPage /></RequireAuth>} />
         <Route path="admin" element={<RequireAuth roles={ADMIN_ROLES}><AdminPage /></RequireAuth>} />
         <Route path="me" element={<CabinetPage />} />
         <Route path="*" element={<NotFound />} />
