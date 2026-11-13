@@ -56,5 +56,6 @@ def test_could_be_same_floor_area_bedrooms():
     assert not could_be_same(ad, N(floor=13, bedrooms=1, area=52))      # another floor
     assert not could_be_same(ad, N(floor=2, bedrooms=1, area=60))       # 60 vs 52 m²
     assert not could_be_same(ad, N(floor=None, bedrooms=2, area=52))    # another bedroom count
-    assert could_be_same(ad, N(floor=2, bedrooms=1, area=54))           # ±7%
+    assert not could_be_same(ad, N(floor=3, bedrooms=1, area=60)) and not could_be_same(N(floor=3, bedrooms=1, area=62), N(floor=3, bedrooms=1, area=60))
+    assert could_be_same(ad, N(floor=2, bedrooms=1, area=52.6))         # the cadastre's area, rounded
     assert could_be_same(ad, N(floor=None, bedrooms=None, area=None))   # nothing known: the address decides

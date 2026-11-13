@@ -250,7 +250,8 @@ BASE_HINT = "address"  # listing_matches.status of a «В архиве / в ба
 
 
 def could_be_same(l, p) -> bool:
-    """The ad can be this object of our base: what both know agrees — floor, bedrooms, area ±7% (11-13: «тут
+    """The ad can be this object of our base: what both know agrees — floor, bedrooms, area to 1 m² (it comes from the
+    cadastre, so it is exact; 1 m² for rounding) (11-13: «тут
     52 м², этаж 2 — зачем ты показываешь 60 м² и 13-й этаж?»). Unknown on either side doesn't rule it out."""
     def known(a, b):
         return a is not None and b is not None
@@ -258,7 +259,7 @@ def could_be_same(l, p) -> bool:
         return False
     if known(l.bedrooms, p.bedrooms) and int(l.bedrooms) != int(p.bedrooms):
         return False
-    if l.area and p.area and abs(float(l.area) - float(p.area)) > 0.07 * max(float(l.area), float(p.area)):
+    if l.area and p.area and abs(float(l.area) - float(p.area)) > 1:
         return False
     return True
 

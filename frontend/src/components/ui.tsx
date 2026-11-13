@@ -293,9 +293,11 @@ export function PageHead({ label, title, actions }: { label?: string; title: Rea
 function useLockScroll(open: boolean) {
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    // on <html>, not <body>: with html { overflow-x: clip } a hidden body shrinks the page to the screen and the
+    // feed jumped to the top on every opened ad (11-13)
+    const root = document.documentElement, prev = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => { root.style.overflow = prev; };
   }, [open]);
 }
 
