@@ -38,6 +38,8 @@ export interface CxData {
   transfer_date: string;
   with_pets: boolean;
   pet_deposit: string;
+  extract_url?: string;  // the registry extract's link the agent pasted (OwnerLookup ExtractLink)
+  extract_file?: string; // its PDF saved by the server (GET /contracts/{id}/extract)
 }
 
 export const EMPTY: CxData = {

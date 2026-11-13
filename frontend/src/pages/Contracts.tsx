@@ -5,16 +5,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Download, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send } from 'lucide-react';
+import { Building2, Copy, Download, ExternalLink, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Send, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Contract, Deal, LeadContract } from '../api/types';
 import { ContractActions, ContractList, ContractStatusBadge, ContractView } from '../features/contracts/ContractCard';
-import { insideTelegram } from '../auth/AuthContext';
+import { insideTelegram, tgWebApp, useAuth } from '../auth/AuthContext';
 import { errText, useToast } from '../components/toast';
-import { Badge, Button, Card, Field, Input, PageHead, Select, Switch, Tabs } from '../components/ui';
-import { REG_RU, RegistryApps, useSettledId } from '../components/RegistryApps';
+import { Badge, Button, Card, Field, Input, Modal, PageHead, Select, Switch, Tabs } from '../components/ui';
+import { useSettledId } from '../components/RegistryApps';
+import { OwnerLookup, parseRegistryText, useKnownObjects, type ExtractFields, type KnownObject } from '../features/contracts/OwnerLookup';
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import {
   CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, cxFmt, cxOnem, langsFor, monthsBetween, requiredFields, reviewLabels,
@@ -74,14 +75,29 @@ function blocks(bs: DraftBlock[]): string {
   }).join('');
 }
 
-const DOC_CSS = `.contract-doc .cd-p{margin:0 0 3px;text-align:justify;white-space:pre-line}.contract-doc .cd-c{text-align:center}
-.contract-doc .cd-r{text-align:right}.contract-doc .cd-gap{height:.7em}.contract-doc .cd-spread{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.contract-doc{position:relative;background:url(/brand/contract-watermark.png) top center/100% auto repeat-y}
+/** David's Google Docs, as they print (File → Page setup + the text size of each draft, measured on their PDF export):
+ *  margins, font size, the round watermark's size (pt; 0 = none). Pets / commercial follow the rent draft of the language. */
+// m: page margins [top, right, bottom, left] in pt — the body's box; the header line sits at 39–57 pt from the top and the
+// initials footer starts at 786 pt (both inside the margins), as in the originals. ka: the line height of the Georgian
+// text — Google lays FreeSerif lines out taller than Chrome's «normal»; these values give the originals' page breaks
+const PAGE: Record<string, { m: [number, number, number, number]; pt: number; wm: number; ka: number }> = {
+  GEO: { m: [72, 72, 85, 72], pt: 9.5, wm: 407, ka: 1.36 },
+  RU: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.45 },
+  EN: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.45 },
+  sale_GEO: { m: [62, 42.5, 60, 85], pt: 12, wm: 0, ka: 1.36 },
+};
+const pageOf = (doc: ContractDoc) => PAGE[doc.key] || PAGE[doc.key.split('_')[1]] || PAGE.RU;
+/** The originals: Georgia; Georgian letters (Georgia has none) fall back to FreeSerif, as in Google's own PDF. */
+const DOC_FONT = `Georgia,'FreeSerif','Noto Serif Georgian','DejaVu Serif',serif`;
+
+const DOC_CSS = `.contract-doc .cd-p{margin:0;text-align:justify;white-space:pre-line}.contract-doc .cd-c{text-align:center}
+.contract-doc .cd-r{text-align:right}.contract-doc .cd-gap{height:1.15em}.contract-doc .cd-spread{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.contract-doc{position:relative;font-family:${DOC_FONT};line-height:normal;background:url(/brand/contract-watermark.png) center 80px/78% auto repeat-y}
 .contract-doc .cd-wm{display:none}.contract-doc .cd-head .cd-p{display:inline;font-weight:700;text-decoration:underline;color:#111}
 .contract-doc .cd-flag{height:13px;margin-left:6px;vertical-align:-1px}.contract-doc .cd-head{margin-bottom:10px}
 .contract-doc .cd-hf{font-size:8.5pt;color:#444}.contract-doc .cd-hf .cd-p{text-align:left}.contract-doc .cd-foot{margin-top:18px}
-.contract-doc table{width:100%;border-collapse:collapse;margin:6px 0}.contract-doc .cd-cols{table-layout:fixed;font-size:9.5pt}
-.contract-doc .cd-cols td{width:50%;vertical-align:top;padding:0 8px}.contract-doc .cd-grid td{border:1px solid #111;padding:3px 6px;vertical-align:top}
+.contract-doc table{width:100%;border-collapse:collapse;margin:0}.contract-doc .cd-cols{table-layout:fixed;width:calc(100% + 10.8pt);margin-left:-5.4pt}
+.contract-doc .cd-cols td{width:50%;vertical-align:top;padding:0 5.4pt}.contract-doc .cd-grid td{border:1pt solid #000;padding:0 5.4pt;vertical-align:top}
 .contract-doc .cd-grid .cd-p{margin:0}
 @media screen and (max-width:767px){.contract-doc .cd-cols td{display:block;width:auto;padding:0 0 12px}}`;
 
@@ -96,11 +112,15 @@ function docInner(doc: ContractDoc): string {
 /** Print: the header (+ flag) and the page number in the top margin, the initials line at the bottom of every page;
  *  the inline copies are hidden then (Chrome @page margin boxes). */
 function pageCss(doc: ContractDoc): string {
+  const pg = pageOf(doc), [mt, , mb] = pg.m;
+  const top = `vertical-align:bottom;padding-bottom:${Math.max(0, mt - 57)}pt`;  // the header line ends at 57 pt
+  const bottom = `vertical-align:top;padding-top:${Math.max(0, 786 - (842 - mb))}pt`;  // the footer starts at 786 pt
   const str = (x: string) => `"${x.replace(/\*\*/g, '').replace(/ {8,}/g, '        ').replace(/["\\]/g, '\\$&')}"`;
-  const head = doc.header.length ? `@top-left{content:${str(doc.header.join(' '))} url(/brand/ge-flag.svg);font:700 10pt Montserrat,Arial,sans-serif;text-decoration:underline;vertical-align:bottom}` : '';
-  const foot = doc.footer.length ? `@bottom-center{content:${str(doc.footer.join(' '))};font:8.5pt 'Noto Sans Georgian',Arial,sans-serif;color:#444;white-space:pre}` : '';
-  return `@media print{@page{size:A4;margin:18mm 15mm 16mm;${head}@top-right{content:counter(page);font:9pt Arial,sans-serif}${foot}}
-.contract-doc .cd-head,.contract-doc .cd-foot{display:none}.contract-doc .cd-wm{display:block;position:fixed;inset:0;width:100%;height:100%;object-fit:contain;z-index:-1}}`;
+  const head = doc.header.length ? `@top-left{content:${str(doc.header.join(' '))} url(/brand/ge-flag.svg);font:700 10pt Oswald,'Arial Narrow',Montserrat,Arial,sans-serif;text-decoration:underline;${top}}` : '';
+  const foot = doc.footer.length ? `@bottom-center{content:${str(doc.footer.join(' '))};font:9pt ${DOC_FONT};color:#000;white-space:pre;${bottom}}` : '';
+  const wm = pg.wm ? `.contract-doc .cd-wm{display:block;position:fixed;left:50%;top:50%;width:${pg.wm}pt;height:${pg.wm}pt;transform:translate(-50%,-50%);z-index:-1}` : '';
+  return `@media print{@page{size:A4;margin:${pg.m.map((x) => `${x}pt`).join(' ')};${head}@top-right{content:counter(page);font:9pt Georgia,serif;${top}}${foot}}
+.contract-doc{font-size:${pg.pt}pt;background:none}.contract-doc .cd-cols td:first-child,.contract-doc .cd-body>.cd-p{line-height:${pg.ka}}.contract-doc .cd-head,.contract-doc .cd-foot{display:none}${wm}}`;
 }
 
 export function ContractDocument({ doc, editable }: { doc: ContractDoc; editable?: boolean }) {
@@ -118,14 +138,14 @@ export function ContractDocument({ doc, editable }: { doc: ContractDoc; editable
 function docHtml(doc: ContractDoc): string {
   // the text as edited in the preview (Irakli: «иногда приходится редактировать договоры»), else as generated
   const inner = document.querySelector('.contract-doc .cd-body')?.innerHTML || docInner(doc);
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.45}${DOC_CSS}</style></head><body><div class="contract-doc">${inner}</div></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{font-family:${DOC_FONT};font-size:${pageOf(doc).pt}pt;line-height:normal}${DOC_CSS}</style></head><body><div class="contract-doc">${inner}</div></body></html>`;
 }
 
 /** The page the server prints to PDF: the edited text + the print CSS of «Печать» (header, page numbers, initials,
  *  watermark). Brand images stay /brand/… links: the server inlines them. */
 function pdfHtml(doc: ContractDoc): string {
   const inner = document.querySelector('.contract-doc .cd-body')?.innerHTML || docInner(doc);
-  const base = `body{margin:0;background:#fff;color:#111}.contract-doc{font-family:'Noto Sans Georgian','Montserrat',Arial,sans-serif;font-size:10.5pt;line-height:1.55}`;
+  const base = `body{margin:0;background:#fff;color:#000}.contract-doc{font-size:${pageOf(doc).pt}pt}`;
   return `<!doctype html><html lang="ka"><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>${base}${DOC_CSS}${pageCss(doc)}</style></head><body><article class="contract-doc" lang="ka"><div class="cd-body">${inner}</div></article></body></html>`;
 }
 
@@ -306,7 +326,39 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
   };
   const sale = type === 'sale';
   const req = useMemo(() => new Set(type ? requiredFields(type) : []), [type]);
-  const ownerPid = useSettledId(String(d.owner_personal_number ?? ''));  // → the owner's NAPR applications under the cadastral field
+  const ownerPid = useSettledId(String(d.owner_personal_number ?? ''));  // → the owner's objects: CRM records, then NAPR
+  const known = useKnownObjects(ownerPid);
+  // the owner's ID typed and the CRM already has his object: the cadastral code (and the empty address fields) fill in
+  const applyKnown = (o: KnownObject) => setD((x) => ({
+    ...x, cadastral_code: o.cadastral,
+    street_house: x.street_house || o.address || '', floor: x.floor || o.floor || '',
+    apartment_number: x.apartment_number || o.apartment_number || '', apartment_area: x.apartment_area || o.area || '',
+  }));
+  // a registry extract / the pasted NAPR page: the code always, the other fields where still empty; says what it filled
+  const applyExtract = (f: ExtractFields) => {
+    const LABEL: Record<string, string> = { cadastral_code: 'код', street_house: 'адрес', floor: 'этаж', apartment_number: 'квартира',
+      apartment_area: 'площадь', owner_full_name: 'собственник', owner_personal_number: 'личный номер' };
+    // only the empty fields: what the agent typed stays (a different code is pointed out, not replaced)
+    const put: Partial<CxData> = {};
+    for (const k of Object.keys(LABEL) as (keyof ExtractFields & keyof CxData)[]) {
+      const v = f[k];
+      if (v && !String(d[k] ?? '').trim()) (put as Record<string, string>)[k] = v;
+    }
+    setD((x) => ({ ...x, ...put }));
+    const names = Object.keys(put).map((k) => LABEL[k]);
+    const typed = String(d.cadastral_code ?? '').trim();
+    if (f.cadastral_code && typed && typed !== f.cadastral_code) toast(`В выписке другой кадастровый код: ${f.cadastral_code} — проверьте`, true);
+    else toast(names.length ? `Из реестра: ${names.join(', ')}` : 'Поля уже заполнены — из реестра ничего не изменено');
+    return names;
+  };
+  const [autoFor, setAutoFor] = useState('');
+  useEffect(() => {
+    const first = known.data?.[0];
+    if (!first || autoFor === ownerPid || String(d.cadastral_code ?? '').trim()) return;
+    setAutoFor(ownerPid);
+    applyKnown(first);
+    toast(`Кадастровый код из базы CRM: ${first.cadastral} (${first.source})`);
+  }, [known.data, ownerPid]);  // eslint-disable-line react-hooks/exhaustive-deps
   const drafts = useDrafts();
   const doc = useMemo(() => (drafts && type && lang ? buildContract(drafts, type, lang, d) : null), [drafts, type, lang, d]);
   // David has no Commercial GEO+ENG and only a Georgian sale draft: drop a language the chosen type doesn't have
@@ -406,7 +458,16 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     <Field label={`${label}${req.has(k) ? ' *' : ''}`} hint={k === 'cadastral_code' ? cadastralHint(String(d[k] ?? '')) : undefined}>
       <Input type={t} value={String(d[k] ?? '')} placeholder={placeholder} inputMode={t === 'number' ? 'decimal' : undefined}
         aria-invalid={bad(k) || undefined} style={bad(k) ? { borderColor: 'var(--accent)' } : undefined}
-        onChange={(e) => set(k, k === 'cadastral_code' ? cadastralInput(e) : e.target.value)} />
+        onChange={(e) => set(k, k === 'cadastral_code' ? cadastralInput(e) : e.target.value)}
+        onPaste={k === 'cadastral_code' ? (e) => {
+          // the whole NAPR page pasted into the code field: the code is found in it (backend registry.code_from_text)
+          const t = e.clipboardData.getData('text');
+          if (t.length < 40) return;
+          e.preventDefault();
+          parseRegistryText(t).then(
+            (r) => (Object.keys(r.fields).length ? applyExtract(r.fields) : toast('В тексте не нашлось данных реестра', true)),
+            (err) => toast(errText(err), true));
+        } : undefined} />
     </Field>
   );
 
@@ -494,10 +555,12 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
             <div className="form-grid">
               <div className="span2">{F({ k: 'timestamp', label: 'Дата договора', type: 'date' })}</div>
               {F({ k: 'owner_full_name', label: sale ? 'Продавец (ФИО)' : 'Собственник (ФИО)', placeholder: 'Полное имя' })}
-              {F({ k: 'owner_personal_number', label: sale ? 'Личный номер продавца' : 'Личный номер собственника', placeholder: 'Personal ID' })}
+              <div>{F({ k: 'owner_personal_number', label: sale ? 'Личный номер продавца' : 'Личный номер собственника', placeholder: 'Personal ID' })}
+                <CecCheck pid={String(d.owner_personal_number ?? '')} fullName={String(d.owner_full_name ?? '')} /></div>
               {sale && <div className="span2">{F({ k: 'owner_birth_day', label: 'Дата рождения продавца', type: 'date' })}</div>}
               {F({ k: 'client_full_name', label: sale ? 'Покупатель (ФИО)' : 'Арендатор (ФИО)', placeholder: 'Полное имя' })}
-              {F({ k: 'client_personal_number', label: sale ? 'Личный номер покупателя' : 'Личный номер арендатора', placeholder: 'Personal ID' })}
+              <div>{F({ k: 'client_personal_number', label: sale ? 'Личный номер покупателя' : 'Личный номер арендатора', placeholder: 'Personal ID' })}
+                <CecCheck pid={String(d.client_personal_number ?? '')} fullName={String(d.client_full_name ?? '')} /></div>
               {sale && <div className="span2">{F({ k: 'client_birth_day', label: 'Дата рождения покупателя', type: 'date' })}</div>}
             </div>
           )}
@@ -506,9 +569,9 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
               <div className="form-grid">
                 <div className="span2">{F({ k: 'cadastral_code', label: 'Кадастровый код', placeholder: '01.10.13.015.029.01.150' })}</div>
                 <div className="span2">
-                  {ownerPid ? <RegistryApps base="/registry/applications" personalId={ownerPid} t={REG_RU}
+                  <OwnerLookup personalId={ownerPid} current={String(d.cadastral_code ?? '')} onKnown={applyKnown} onFields={applyExtract}
+                    extractUrl={d.extract_url} onExtract={(url, file) => setD((x) => ({ ...x, extract_url: url, extract_file: file }))}
                     onCode={(c) => { if (c !== d.cadastral_code) { set('cadastral_code', c); toast(`Из реестра: ${c}`); } }} />
-                    : <span className="faint" style={{ fontSize: 12 }}>Введите личный номер собственника на вкладке «Стороны» — здесь появятся его заявки в Публичном реестре с кадастровым кодом.</span>}
                 </div>
                 <div className="span2">{F({ k: 'street_house', label: 'Адрес', placeholder: 'Улица, номер дома' })}</div>
                 {F({ k: 'floor', label: 'Этаж', placeholder: '2' })}
@@ -604,6 +667,48 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
 
 /** /contracts: the list (active / history); ?id= one contract; ?new=1 (or ?lead_id= / ?deal_id=) the wizard, ?edit= the
  *  wizard on a stored draft / generated contract (autosaved; «Обновить PDF» regenerates it). */
+// Optional check of a party on the CEC voter list (11-13). voters.cec.gov.ge sends X-Frame-Options: SAMEORIGIN (no iframe),
+// ignores URL params (no pre-fill) and sits behind Cloudflare Turnstile + an SMS code, so we only open it in a popup
+// and hand the agent the values to paste: personal number, surname, and the agent's own phone (the code goes to whoever checks).
+const CEC_URL = 'https://voters.cec.gov.ge/';
+function CecCheck({ pid, fullName }: { pid: string; fullName: string }) {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const id = pid.replace(/\D/g, '');
+  const surname = fullName.trim().split(/\s+/).pop() ?? '';  // ponytail: "Имя Фамилия" order assumed
+  const phone = (user?.phone ?? '').replace(/\D/g, '').slice(-9);  // the site wants 5XXXXXXXX without +995
+  const copy = (v: string, what: string) => navigator.clipboard?.writeText(v).then(() => toast(`${what} скопирован${what === 'Фамилия' ? 'а' : ''}`), () => toast('Не удалось скопировать', true));
+  const go = () => {
+    void navigator.clipboard?.writeText(id).catch(() => undefined);  // before the popup takes focus
+    const wa = insideTelegram() ? tgWebApp() : null;
+    if (wa?.openLink) wa.openLink(CEC_URL);
+    else window.open(CEC_URL, 'cec', 'popup,width=520,height=780');  // blocked → the link in the modal
+    setOpen(true);
+  };
+  const row = (label: string, v: string, what: string) => (
+    <div className="row gap-sm" style={{ justifyContent: 'space-between' }}>
+      <span><span className="faint">{label}: </span><b>{v}</b></span>
+      <Button variant="ghost" size="sm" onClick={() => copy(v, what)}><Copy size={14} />Копировать</Button>
+    </div>
+  );
+  return (
+    <>
+      <Button variant="ghost" size="sm" disabled={!id} onClick={go} style={{ marginTop: 4 }}><UserCheck size={14} />Проверить в ЦИК</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Проверка в ЦИК">
+        <div className="col gap-sm">
+          <span>Личный номер скопирован — вставьте его на сайте ЦИК, затем фамилию и телефон, и введите код из SMS.</span>
+          {row('Личный номер', id, 'Номер')}
+          {surname && row('Фамилия', surname, 'Фамилия')}
+          {phone ? row('Телефон', phone, 'Телефон') : <span className="faint">В профиле нет вашего телефона — укажите номер, на который придёт код.</span>}
+          <a href={CEC_URL} target="_blank" rel="noreferrer" className="row gap-sm"><ExternalLink size={14} />Открыть voters.cec.gov.ge</a>
+          <span className="faint" style={{ fontSize: 12 }}>Проверка необязательна. Фамилию на сайте вводят по-грузински.</span>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 function Contracts({ compact }: { compact?: boolean }) {
   const [params] = useSearchParams();
   const base = compact ? '/m/contracts' : '/contracts';

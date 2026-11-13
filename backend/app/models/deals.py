@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
@@ -116,3 +116,29 @@ class Contract(Base):
     data = Column(JSONB)  # the wizard's fields (frontend CxData, + its _step/_dep/_end): the deal page prefills from it (0008)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ContractSigner(Base):
+    """Electronic signing of a contract (services/esign.py, migration 0009): one row per party — owner | tenant —
+    with its own unguessable link /esign/<token>. The party reads the contract, types his name / personal ID / phone and
+    signs with a finger; when every party has signed, the signed PDF (signatures on every page + the signing record)
+    replaces the scan and the contract becomes «Договор подписан»."""
+    __tablename__ = "contract_signers"
+    __table_args__ = (Index("contract_signers_contract_idx", "contract_id"),
+                      UniqueConstraint("contract_id", "role", name="contract_signers_role_uq"),
+                      CheckConstraint("role IN ('owner', 'tenant')", name="contract_signers_role_check"))
+    id = Column(Integer, primary_key=True)
+    contract_id = Column(Integer, ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False)  # owner | tenant
+    token = Column(Text, nullable=False, unique=True)
+    doc_sha256 = Column(Text, nullable=False)  # of the contract HTML the link was made for: an edit voids the link
+    full_name = Column(Text)
+    personal_id = Column(Text)
+    phone = Column(Text)
+    signature = Column(Text)  # data:image/png;base64,… as drawn
+    lang = Column(Text)
+    ip = Column(Text)
+    user_agent = Column(Text)
+    signed_at = Column(DateTime(timezone=True))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
