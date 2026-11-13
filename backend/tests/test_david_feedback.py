@@ -16,10 +16,11 @@ def test_base_twin_ranks_over_nearer_flat_and_whole_house_is_shown(db):
     make_client_listing(db, "tg2", address=None, bedrooms=2, area=115, floor=11, lat=41.70929, lng=44.76366)     # 1 km, mis-geocoded
     make_client_listing(db, "tg3", address=None, bedrooms=2, area=115, floor=11, lat=41.75, lng=44.80)           # 5 km: too far
     make_client_listing(db, "tg4", address=None, bedrooms=5, area=300, floor=2, lat=41.70614, lng=44.77521)      # same house, other flat
-    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg4", "tg1"]
-    db.get(Property, properties.similar_in_base(db, [ad])["lv1"][1]["property_id"]).status = "archived"
+    # 11-13: only a flat that can be this one — another floor (tg1) or another flat of the house (tg4) is not shown
+    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2"]
+    db.get(Property, properties.similar_in_base(db, [ad])["lv1"][0]["property_id"]).status = "archived"
     db.commit()
-    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2", "tg4", "tg1"]  # archived count too
+    assert _obj_listing(db, properties.similar_in_base(db, [ad])["lv1"]) == ["tg2"]  # archived count too
 
 
 def _ready(db, agent, lid, **kw):

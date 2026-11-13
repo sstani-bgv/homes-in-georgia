@@ -301,7 +301,8 @@ function useLockScroll(open: boolean) {
 
 function useEsc(onClose: () => void) {
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // Esc over a photo viewer closes the viewer only, not the modal under it
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.lightbox')) onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
@@ -356,5 +357,33 @@ export function KV({ items }: { items: [string, ReactNode][] }) {
         <div key={k} style={{ display: 'contents' }}><dt>{k}</dt><dd>{v ?? '—'}</dd></div>
       ))}
     </dl>
+  );
+}
+
+/** Full-screen photo / video viewer over everything (a modal too): ← → Esc. */
+export function Lightbox({ items, index, onIndex, onClose }: { items: { kind?: string; room?: string | null; src: string }[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
+  const go = (d: number) => onIndex((index + d + items.length) % items.length);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  });
+  const m = items[index];
+  return createPortal(
+    <>
+      <div className="overlay" style={{ zIndex: 62 }} onClick={onClose} />
+      <div className="lightbox" style={{ zIndex: 63 }} role="dialog" aria-modal="true" onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()}>
+          {m.kind === 'video' ? <video key={m.src} src={mediaUrl(m.src)} controls autoPlay /> : <img src={mediaUrl(m.src)} alt={m.room || ''} />}
+        </div>
+        <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
+          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(-1)} aria-label="Назад"><ChevronLeft size={18} /></Button>}
+          <span className="badge">{index + 1} / {items.length}{m.room ? ` · ${m.room}` : ''}</span>
+          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(1)} aria-label="Вперёд"><ChevronRight size={18} /></Button>}
+          <Button variant="secondary" className="icon-btn" onClick={onClose} aria-label="Закрыть"><X size={18} /></Button>
+        </div>
+      </div>
+    </>,
+    document.body,
   );
 }

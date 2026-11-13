@@ -7,7 +7,7 @@ import { Bot, Clock, Copy, ExternalLink, Lock, MapPin, User as UserIcon } from '
 import { api } from '../api';
 import type { AiFlags, EventItem, Lead, LeadStatus, Listing, Property, PropertyStatus, SimilarFlat } from '../api/types';
 import { thumbUrl } from '../api/client';
-import { Badge, Button, ErrorBox, KV, Loading, Modal, useNow } from './ui';
+import { Badge, Button, ErrorBox, KV, Lightbox, Loading, Modal, useNow } from './ui';
 import { useToast } from './toast';
 import { ARCHIVE_REASON, CR_KIND, LEAD_STATUS, OUTCOME_LABEL, PROPERTY_STATUS, REFUSAL_LABEL, bedroomsLabel, districtLabel, fmtDateTime, formatPhone, money, pluralForm, SOURCE_LABEL } from '../lib/format';
 
@@ -78,36 +78,35 @@ export function ExclusiveConflictBadge({ p }: { p: Pick<Property, 'exclusive_con
 }
 
 /** Full listing: photos, text, all source links. A merged duplicate keeps every copy's link in `urls`. */
-/** The listing next to the objects of our base at its address, so the agent decides by eye whether it is one of them. */
+/** Photos in a row; a tap opens them full-screen right here, the page / modal underneath stays as it is (11-13). */
+export function PhotoStrip({ photos }: { photos: (string | null | undefined)[] }) {
+  const shots = photos.filter(Boolean) as string[];
+  const [open, setOpen] = useState<number | null>(null);
+  if (!shots.length) return <div className="faint" style={{ fontSize: 12 }}>Без фото</div>;
+  return (
+    <>
+      <div className="cmp-photos">{shots.map((p, i) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" style={{ cursor: 'zoom-in' }} onClick={() => setOpen(i)} />)}</div>
+      {open !== null && <Lightbox items={shots.map((src) => ({ src }))} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+    </>
+  );
+}
+
+/** Our object from a comparison: a new tab on the desktop, so the ad and the comparison stay open; in the Mini App
+ * (no tabs) in-app navigation, back returns to the same spot. */
+function ObjectLink({ to, text }: { to: string; text: string }) {
+  const tg = document.documentElement.classList.contains('tg');
+  return tg ? <Link to={to} className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{text}</Link>
+    : <a href={to} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{text}</a>;
+}
+
+/** In the ad's window: a button to the side-by-side comparison with the objects of our base at its address. */
 export function SimilarInChannel({ listing, similar }: { listing: Listing & { floor?: number | null }; similar: SimilarFlat[] }) {
+  const [cmp, setCmp] = useState(false);
   return (
     <div className="col gap-sm">
-      <div className="alert alert-warn">По этому адресу уже есть объекты в нашей базе. Сравните фото и параметры: это одна из них или другая квартира в том же доме?</div>
-      {similar.map((s) => (
-        <div key={s.id} className="card col gap-sm" style={{ padding: 12 }}>
-          <div className="row gap-sm" style={{ alignItems: 'flex-start' }}>
-            {s.photo && <img src={thumbUrl(s.photo)} alt="" loading="lazy" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 8, flex: 'none' }} />}
-            <div className="col" style={{ minWidth: 0 }}>
-              <strong className="ellipsis">{s.address || `Объект #${s.id}`}</strong>
-              {!!s.reasons?.length && <span className="faint" style={{ fontSize: 12 }}>{s.reasons.join(' · ')}</span>}
-              {s.url && <Link to={s.url} className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />Открыть объект #{s.id}</Link>}
-            </div>
-          </div>
-          <table style={{ fontSize: 13, width: '100%' }}>
-            <thead><tr><th /><th style={{ textAlign: 'left' }}>Это объявление</th><th style={{ textAlign: 'left' }}>В базе</th></tr></thead>
-            <tbody>
-              {([
-                ['Цена', money(listing.price, 'USD'), money(s.price_usd ?? null, 'USD')],
-                ['Спальни', bedroomsLabel(listing.bedrooms) || '—', bedroomsLabel(s.bedrooms) || '—'],
-                ['Площадь', listing.area ? `${listing.area} м²` : '—', s.area ? `${s.area} м²` : '—'],
-                ['Этаж', listing.floor ?? '—', s.floor ?? '—'],
-              ] as [string, ReactNode, ReactNode][]).map(([k, a, b]) => (
-                <tr key={k}><td className="muted">{k}</td><td>{a}</td><td style={{ fontWeight: String(a) === String(b) ? 400 : 700 }}>{b}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ))}
+      <div className="alert alert-warn">По этому адресу в нашей базе есть похожие квартиры: тот же этаж и площадь. Сравните фото: это одна из них?</div>
+      <Button variant="secondary" onClick={() => setCmp(true)}>Сравнить по фото: {baseAtAddress(similar).toLowerCase()}</Button>
+      {cmp && <ChannelCompare listing={{ ...listing, similar }} onClose={() => setCmp(false)} />}
     </div>
   );
 }
@@ -127,9 +126,7 @@ export function ListingModal({ id, onClose }: { id: string; onClose: () => void 
           )}
           {!!l.photos?.length && (
             <div className="col gap-sm">
-              <div className="row" style={{ overflowX: 'auto', gap: 8, scrollSnapType: 'x mandatory', scrollbarWidth: 'none', paddingBottom: 2 }}>
-                {l.photos.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" style={{ height: 180, borderRadius: 10, flex: 'none', scrollSnapAlign: 'start' }} />)}
-              </div>
+              <PhotoStrip photos={l.photos} />
               {l.photos.length > 2 && <div className="faint" style={{ fontSize: 12 }}>{l.photos.length} фото · листайте вбок</div>}
             </div>
           )}
@@ -188,18 +185,16 @@ export function CompareSide({ label, photos, address, rows, link, children }: {
   label: string; photos: (string | null | undefined)[]; address?: string | null; rows: [string, ReactNode][];
   link?: { href?: string | null; text: string }; children?: ReactNode;
 }) {
-  const shots = photos.filter(Boolean) as string[];
   return (
     <div className="cmp-side">
       <span className="label">{label}</span>
-      {shots.length ? <div className="cmp-photos">{shots.map((p) => <img key={p} src={thumbUrl(p)} alt="" loading="lazy" />)}</div>
-        : <div className="faint" style={{ fontSize: 12 }}>Без фото</div>}
+      <PhotoStrip photos={photos} />
       <strong style={{ fontSize: 15 }}>{address || 'Адрес не указан'}</strong>
       <KV items={rows} />
       {children}
       {/* our own object: in-app navigation (back returns here, and the Mini App stays the Mini App); a source site: new tab */}
       {link?.href && (link.href.startsWith('/') && !link.href.startsWith('/api/')
-        ? <Link to={link.href} className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</Link>
+        ? <ObjectLink to={link.href} text={link.text} />
         : <a href={link.href} target="_blank" rel="noreferrer" className="row gap-sm" style={{ fontSize: 13 }}><ExternalLink size={14} />{link.text}</a>)}
     </div>
   );
@@ -233,7 +228,7 @@ function ChannelCompare({ listing, onClose }: { listing: Listing & { floor?: num
   return (
     <Modal open wide onClose={onClose} title={baseAtAddress(similar)}>
       <div className="col gap-lg">
-        <div className="alert alert-warn" style={{ fontSize: 13 }}>По этому адресу уже есть объекты в нашей базе, в том числе в архиве. Сравните фото и параметры: это одна из них или другая квартира в том же доме? Бот мог ошибиться — решите сами.</div>
+        <div className="alert alert-warn" style={{ fontSize: 13 }}>В базе по этому адресу есть квартиры с тем же этажом, площадью и спальнями. Сравните фото (нажмите, чтобы открыть крупно): это одна из них? Бот мог ошибиться — решите сами.</div>
         <div className="cmp">
           <ListingSide l={listing} />
           <div className="col gap-sm" style={{ minWidth: 0 }}>

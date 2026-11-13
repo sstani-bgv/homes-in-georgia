@@ -249,6 +249,20 @@ def known_objects(db: Session, listing_ids: list[str]) -> dict[str, dict]:
 BASE_HINT = "address"  # listing_matches.status of a «В архиве / в базе по этому адресу» row: a hint, nobody decides it
 
 
+def could_be_same(l, p) -> bool:
+    """The ad can be this object of our base: what both know agrees — floor, bedrooms, area ±7% (11-13: «тут
+    52 м², этаж 2 — зачем ты показываешь 60 м² и 13-й этаж?»). Unknown on either side doesn't rule it out."""
+    def known(a, b):
+        return a is not None and b is not None
+    if known(l.floor, p.floor) and int(l.floor) != int(p.floor):
+        return False
+    if known(l.bedrooms, p.bedrooms) and int(l.bedrooms) != int(p.bedrooms):
+        return False
+    if l.area and p.area and abs(float(l.area) - float(p.area)) > 0.07 * max(float(l.area), float(p.area)):
+        return False
+    return True
+
+
 def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
                     twin_radius: float = 1500) -> dict[str, list[dict]]:
     """Objects of our base (archived legacy ones too) at the ad's address, for the agent to compare by eye (David
@@ -278,7 +292,7 @@ def similar_in_base(db: Session, rows: list[Listing], radius: float = 60,
         mine, pin = street_house(l.address), (l.lat, l.lng) if l.lat is not None and l.lng is not None else None
         found = []
         for p, addr, at in objs:
-            if p.listing_id == l.id or (l.id, p.id) in linked:
+            if p.listing_id == l.id or (l.id, p.id) in linked or not could_be_same(l, p):
                 continue
             rel = relation(mine, addr)
             d = 111_000 * math.hypot(pin[0] - at[0], (pin[1] - at[1]) * 0.75) if pin and at else None  # metres, equirectangular (0.75 = cos 41.7°)
@@ -320,8 +334,13 @@ def similar_for(db: Session, listing_ids: list[str]) -> dict[str, list[dict]]:
                       .where(ListingMatch.listing_id.in_(listing_ids), ListingMatch.status == BASE_HINT)
                       .order_by(ListingMatch.score.desc(), ListingMatch.id)).all()
     photos = _photo_lists(db, list({p.id: p for _, _, p in rows}.values()))
+    ads = {x.id: x for x in db.scalars(select(Listing).where(Listing.id.in_(listing_ids)))}
     out: dict[str, list[dict]] = {}
     for lid, why, p in rows:
+        # nothing to compare by eye without photos; another floor / area / bedrooms is another flat (11-13).
+        # Filtered here, so hints stored before the rule follow it too
+        if not photos.get(p.id) or (lid in ads and not could_be_same(ads[lid], p)):
+            continue
         out.setdefault(lid, []).append({
             "id": p.id, "url": f"/properties/{p.id}", "address": p.address, "status": p.status,
             "archive_reason": p.archive_reason, "photo": (photos.get(p.id) or [None])[0], "photos": photos.get(p.id, []),

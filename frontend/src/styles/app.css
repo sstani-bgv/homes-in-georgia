@@ -410,8 +410,11 @@ a.brand, a.brand:hover { color: inherit; text-decoration: none; }
 .cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .cmp-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line-2); border-radius: 14px; }
 .cmp-photos { display: flex; gap: 6px; overflow-x: auto; }
-.cmp-photos img { height: 130px; max-width: 80%; object-fit: cover; border-radius: 8px; flex: none; }
-@media (max-width: 720px) { .cmp { grid-template-columns: minmax(0, 1fr); } .cmp-photos img { height: 110px; } }
+.cmp-photos img { height: 160px; max-width: 80%; object-fit: cover; border-radius: 8px; flex: none; }
+/* the ad stays in view while the objects scroll by */
+.cmp > .cmp-side:first-child { position: sticky; top: 0; align-self: start; background: var(--surface); z-index: 1; }
+.cmp-photos img { cursor: zoom-in; }
+@media (max-width: 720px) { .cmp { grid-template-columns: minmax(0, 1fr); } .cmp > .cmp-side:first-child { position: static; } .cmp-photos img { height: 110px; } }
 .modal-head { padding: 18px 20px 0; display: flex; justify-content: space-between; align-items: center; }
 .modal-body { padding: 14px 20px 20px; }
 .lightbox { position: fixed; inset: 0; z-index: 61; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; animation: fade .15s; }

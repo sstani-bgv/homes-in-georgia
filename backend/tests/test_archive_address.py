@@ -1,5 +1,5 @@
 """David 2026-11-12: a new ad «Old Tbilisi, Vera, Bakradze 20» must point at the archive objects of that address."""
-from app.models import Property
+from app.models import Property, PropertyMedia
 from app.services import matching
 from app.services.dedup import house_relation
 from tests.conftest import auth, make_listing, make_user
@@ -32,6 +32,10 @@ def test_new_ad_lists_archive_objects_at_its_address(db, client):
               for a in ("20 Dimitri Bakradze St", "20A Dimitri Bakradze St", "16 Dimitri Bakradze St",
                         "20 Dimitri Uznadze St")}  # legacy archive: no source ad, no pin
     db.add_all(legacy.values())
+    db.flush()
+    db.add_all(PropertyMedia(property_id=p.id, path=f"legacy/{p.id}.jpg") for p in legacy.values())  # compared by photo
+    db.add(Property(address="20 Dimitri Bakradze St", status="archived", bedrooms=1))  # no photos: nothing to compare
+    db.add(Property(address="20 Dimitri Bakradze St", status="archived", bedrooms=3))  # another flat of the house
     db.commit()
     make_listing(db, "ss900", source="ss.ge", address=AD, bedrooms=1, price_usd=700, lat=None, lng=None)
     matching.process(db, ["ss900"])  # at parse time, not on every feed render
@@ -43,3 +47,14 @@ def test_new_ad_lists_archive_objects_at_its_address(db, client):
                    (ids["20A Dimitri Bakradze St"], ["соседний корпус 20A"], "archived", f"/properties/{ids['20A Dimitri Bakradze St']}"),
                    (ids["16 Dimitri Bakradze St"], ["рядом по улице, дом 16"], "archived", f"/properties/{ids['16 Dimitri Bakradze St']}")]
     assert [s["id"] for s in client.get("/api/listings/ss900", headers=auth(agent)).json()["similar"]] == [x[0] for x in got]
+
+
+def test_could_be_same_floor_area_bedrooms():
+    from types import SimpleNamespace as N
+    from app.services.properties import could_be_same
+    ad = N(floor=2, bedrooms=1, area=52)
+    assert not could_be_same(ad, N(floor=13, bedrooms=1, area=52))      # another floor
+    assert not could_be_same(ad, N(floor=2, bedrooms=1, area=60))       # 60 vs 52 m²
+    assert not could_be_same(ad, N(floor=None, bedrooms=2, area=52))    # another bedroom count
+    assert could_be_same(ad, N(floor=2, bedrooms=1, area=54))           # ±7%
+    assert could_be_same(ad, N(floor=None, bedrooms=None, area=None))   # nothing known: the address decides

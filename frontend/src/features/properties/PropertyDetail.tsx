@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, ChevronLeft, ChevronRight, Clock, ExternalLink, Home, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, mediaUrl, thumbUrl } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -12,7 +12,7 @@ import { FIELD_FILTER } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
-import { Badge, Button, Card, ErrorBox, Field, Input, KV, Loading, Modal, Seg, Select, Switch, Textarea, DistrictSelect } from '../../components/ui';
+import { Badge, Button, Card, ErrorBox, Field, Input, KV, Lightbox, Loading, Modal, Seg, Select, Switch, Textarea, DistrictSelect } from '../../components/ui';
 import { ARCHIVE_REASON, distLabel, districtLabel, SOURCE_LABEL, bedroomsLabel, demandLabel, fmtDate, fmtDateTime, formatPhone, isoToLocal, localToIso, money, phoneInput } from '../../lib/format';
 import { DealStatusBadge } from '../../pages/Deals';
 import { RequestRow } from './requests';
@@ -495,33 +495,6 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
 
 type Shot = Pick<Media, 'kind' | 'room'> & { id: number | string; src: string };
 const shotsOf = (p: Property): Shot[] => (p.media || []).map((m) => ({ id: m.id, kind: m.kind, room: m.room, src: m.url || m.path }));
-
-function Lightbox({ items, index, onIndex, onClose }: { items: Shot[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
-  const go = (d: number) => onIndex((index + d + items.length) % items.length);
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  });
-  const m = items[index];
-  return createPortal(
-    <>
-      <div className="overlay" onClick={onClose} />
-      <div className="lightbox" role="dialog" aria-modal="true" onClick={onClose}>
-        <div onClick={(e) => e.stopPropagation()}>
-          {m.kind === 'video' ? <video key={m.src} src={mediaUrl(m.src)} controls autoPlay /> : <img src={mediaUrl(m.src)} alt={m.room || ''} />}
-        </div>
-        <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
-          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(-1)} aria-label="Назад"><ChevronLeft size={18} /></Button>}
-          <span className="badge">{index + 1} / {items.length}{m.room ? ` · ${m.room}` : ''}</span>
-          {items.length > 1 && <Button variant="secondary" className="icon-btn" onClick={() => go(1)} aria-label="Вперёд"><ChevronRight size={18} /></Button>}
-          <Button variant="secondary" className="icon-btn" onClick={onClose} aria-label="Закрыть"><X size={18} /></Button>
-        </div>
-      </div>
-    </>,
-    document.body,
-  );
-}
 
 function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder }: { p?: Property; items?: Shot[]; grouped?: boolean; onDelete?: (id: number) => void; onRoom?: (id: number, room: string | null) => void; onOrder?: (ids: number[]) => void }) {
   const all = items || (p ? shotsOf(p) : []);

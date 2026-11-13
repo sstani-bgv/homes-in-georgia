@@ -169,11 +169,12 @@ def test_new_listing_filters(db, client):
 
 def test_feed_similar_dismiss_and_agent(db, client):
     georgiy = make_user(db, "agent", "Георгий")
-    # Uznadze 4: the base has a 2-bed on the 1st floor 29 m away; the ss.ge 3-bed must be offered for comparison
-    make_client_listing(db, "tg547262", address=None, lat=41.7046326, lng=44.7977643, bedrooms=2, area=100, floor=1,
+    # Uznadze 4: the base has a 2-bed on the 1st floor 29 m away; an ss.ge 2-bed of ~that area is offered for comparison,
+    # another flat of the house (5-bed, 300 m²) is not (11-13)
+    make_client_listing(db, "tg547262", address=None, lat=41.7046326, lng=44.7977643, bedrooms=2, area=100, floor=1, photos='["https://x/1.jpg"]',
                         urls='["https://t.me/rent_tbilisi_ge/547262"]')
     obj = db.scalar(select(Property.id).where(Property.listing_id == "tg547262"))
-    make_listing(db, "ss33213266", address=None, source="ss.ge", lat=41.70478285, lng=44.79748039, bedrooms=3, area=130)
+    make_listing(db, "ss33213266", address=None, source="ss.ge", lat=41.70478285, lng=44.79748039, bedrooms=2, area=104, floor=None)
     make_listing(db, "ss2", address=None, source="ss.ge", lat=41.7046326, lng=44.7977643, bedrooms=5, area=300)  # same house, other flat
     make_listing(db, "ss3", address=None, source="ss.ge", lat=41.72, lng=44.77)
     from app.services import matching
@@ -181,7 +182,7 @@ def test_feed_similar_dismiss_and_agent(db, client):
     items = {i["id"]: i for i in client.get("/api/listings/new", headers=auth(georgiy)).json()["items"]}
     sim = items["ss33213266"]["similar"]
     assert [s["id"] for s in sim] == [obj] and sim[0]["url"] == f"/properties/{obj}" and re.match(r"в (2\d|3\d) м$", sim[0]["reasons"][0])
-    assert [s["id"] for s in items["ss2"]["similar"]] == [obj] and items["ss3"]["similar"] == []  # whole house shown
+    assert items["ss2"]["similar"] == [] and items["ss3"]["similar"] == []
     assert client.get("/api/listings/ss33213266", headers=auth(georgiy)).json()["similar"][0]["id"] == obj
 
     assert client.post("/api/listings/ss3/dismiss", headers=auth(georgiy)).status_code == 200
