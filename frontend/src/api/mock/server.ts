@@ -204,7 +204,7 @@ on('GET', '/properties', (_m, _b, q) => {
   let ps = F.properties;
   if (q.get('mine')) ps = ps.filter((p) => p.agent_id === u.id);
   if (q.get('status')) ps = ps.filter((p) => q.get('status')!.split(',').includes(p.status));
-  if (q.get('agent_id')) ps = ps.filter((p) => p.agent_id === Number(q.get('agent_id')));
+  if (q.get('agent_id')) ps = ps.filter((p) => (p.agent_id ?? 0) === Number(q.get('agent_id')));
   const s = q.get('q')?.toLowerCase();
   if (s) ps = ps.filter((p) => `${p.address} ${p.district} ${p.id}`.toLowerCase().includes(s));
   return page(ps.map((p) => propOut(p, u)));

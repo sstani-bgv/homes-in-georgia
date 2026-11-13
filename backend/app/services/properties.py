@@ -1948,6 +1948,7 @@ def card(db: Session, p: Property, user: User) -> dict:
 # «База объектов»: published (shot + operator approved), or rented after that; published_at keeps out an object that got
 # «rented»/«published» through a deal without ever being published (mark_rented / unmark_rented)
 BASE_STATUSES = ("published", "rented")
+PLATFORM = "Платформа"  # an object with no agent (agent_id NULL, legacy imports) is the platform's (Stanislav 11-13)
 
 
 def query(db: Session, user: User, status: str | None = None, agent_id: int | None = None, q: str | None = None,
@@ -1961,6 +1962,8 @@ def query(db: Session, user: User, status: str | None = None, agent_id: int | No
     # everyone: the deal form's picker only (deal_search), where another agent's object comes blocked, without data
     if mine or (not at_least(user, "operator") and not everyone):
         stmt = stmt.where(Property.agent_id == user.id)
+    elif agent_id == 0:  # «Платформа»: objects with no agent belong to the platform (Stanislav 11-13)
+        stmt = stmt.where(Property.agent_id.is_(None))
     elif agent_id:
         stmt = stmt.where(Property.agent_id == agent_id)
     if status:
