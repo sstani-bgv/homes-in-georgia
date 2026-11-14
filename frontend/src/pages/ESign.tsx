@@ -87,7 +87,7 @@ const errIn = (t: (typeof UI)[Lang], e: unknown) => t.err[(e instanceof ApiError
 
 /** The contract as stored (cleaned server-side), in a sandboxed frame — no scripts; sized once to its content.
  *  (Measured from the body, not the frame's own viewport: that grows with the frame and never settles.) */
-function ContractFrame({ html }: { html: string }) {
+export function ContractFrame({ html }: { html: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [h, setH] = useState(600);
   const fit = () => {

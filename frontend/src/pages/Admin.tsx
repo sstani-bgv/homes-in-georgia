@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Copy, Plus, Send, Trash2, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Plus, Send, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Invite, InviteStatus, Role, Settings, User } from '../api/types';
@@ -201,6 +202,7 @@ function Users() {
           {incomplete > 0 && <button type="button" className={`chip ${gapsOnly ? 'active' : ''}`} onClick={() => setGapsOnly((v) => !v)}>Не заполнен профиль: {incomplete}</button>}
           <Button onClick={() => setInviting(true)}><UserPlus size={16} />Пригласить</Button>
           <Button variant="secondary" onClick={() => setOpen('new')}><Plus size={16} />Пользователь</Button>
+          <Link className="btn btn-secondary" to="/ndas"><ShieldCheck size={16} />Соглашение (NDA)</Link>
         </div>
       </div>
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : (
