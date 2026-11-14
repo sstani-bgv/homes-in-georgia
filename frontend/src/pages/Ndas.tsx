@@ -1,6 +1,7 @@
-// /ndas (staff): the agreement (edition 1.1, «NDA» in the menu) for new agents (backend services/nda.py, docs/NDA.md). David draws the company's signature once;
+// /ndas (staff; no menu item — Управление → Пользователи → «Соглашение (NDA)»): the agreement (edition 1.1) for new agents (backend services/nda.py, docs/NDA.md). David draws the company's signature once;
 // staff fill in the agent and send him the personal link /nda/<token>; he confirms himself with Telegram and signs.
 import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Download, Send, Share2, ShieldCheck, XCircle } from 'lucide-react';
 import { fetchBlob, http, itemsOf } from '../api/client';
@@ -140,6 +141,7 @@ export function NdasPage() {
   const rows = itemsOf(q.data);
   return (
     <div className="col gap-lg">
+      <div><Link to="/admin" className="muted" style={{ fontSize: 13 }}>← Управление · Пользователи</Link></div>
       <PageHead label="Новые агенты" title="Соглашения (NDA)" />
       <CompanySignature />
       <NewNda onMade={(n) => { setMade(n); setTab('sent'); qc.invalidateQueries({ queryKey: ['ndas'] }); }} />
