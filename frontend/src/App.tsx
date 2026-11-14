@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import type { Role } from './api/types';
-import { ADMIN_ROLES, DAILY_RENT_ROLES, STAFF_ROLES } from './api/types';
+import { ADMIN_ROLES, DAILY_RENT_ROLES, STAFF_ROLES, SUPER_ROLES } from './api/types';
 import { useAuth } from './auth/AuthContext';
 import { Empty, Loading } from './components/ui';
 import { AppLayout } from './layout/AppLayout';
 import { AdminPage } from './pages/Admin';
+import { AnalyticsPage } from './pages/Analytics';
 import { CabinetPage } from './pages/Cabinet';
 import { CalcPage } from './pages/Calc';
 import { CalendarPage } from './pages/Calendar';
@@ -16,6 +17,8 @@ import { DealsPage } from './pages/Deals';
 import { ExclusiveSignPage } from './pages/ExclusiveSign';
 import { InvitePage } from './pages/Invite';
 import { ESignPage } from './pages/ESign';
+import { NdaSignPage } from './pages/NdaSign';
+import { NdasPage } from './pages/Ndas';
 import { LeadPage, LeadsPage, ObjectsPage, PropertyPage } from './pages/Funnels';
 import { LoginPage } from './pages/Login';
 import { ClientPage, ClientsPage, OwnersPage } from './pages/People';
@@ -30,7 +33,7 @@ function RequireAuth({ children, roles }: { children: ReactNode; roles?: Role[] 
     const next = encodeURIComponent(loc.pathname + loc.search);
     return <Navigate to={`/login?next=${next}`} replace state={{ error }} />;
   }
-  if (roles && !roles.includes(user.role)) return <Empty text="Раздел доступен только администраторам" />;
+  if (roles && !roles.includes(user.role)) return <Empty text={roles.includes('admin') || roles.includes('operator') ? 'Раздел доступен только администраторам' : 'Раздел доступен только суперадминам'} />;
   return <>{children}</>;
 }
 
@@ -75,6 +78,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/sign/:token" element={<ExclusiveSignPage />} />
       <Route path="/esign/:token" element={<ESignPage />} />
+      <Route path="/nda/:token" element={<NdaSignPage />} />
       <Route path="/invite/:token" element={<InvitePage />} />
       <Route path="/m/*" element={<MRedirect />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
@@ -92,10 +96,12 @@ export function App() {
         <Route path="owners" element={<RequireAuth roles={STAFF}><OwnersPage /></RequireAuth>} />
         <Route path="team" element={<TeamPage />} />
         <Route path="contracts" element={<ContractsPage />} />
+        <Route path="ndas" element={<RequireAuth roles={STAFF}><NdasPage /></RequireAuth>} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="analytics" element={<RequireAuth roles={SUPER_ROLES}><AnalyticsPage /></RequireAuth>} />
         <Route path="daily-rent" element={<RequireAuth roles={DAILY_RENT_ROLES}><DailyRentPage /></RequireAuth>} />
         <Route path="admin" element={<RequireAuth roles={ADMIN_ROLES}><AdminPage /></RequireAuth>} />
         <Route path="me" element={<CabinetPage />} />

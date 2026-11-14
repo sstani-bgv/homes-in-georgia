@@ -1,4 +1,4 @@
-"""Deals, evaluations, reports, counters, analytics."""
+"""Deals, evaluations, reports, counters, analytics (incl. hge.ge site analytics for superadmins)."""
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_user, paginate, require_level
 from app.db import get_db
 from app.models import Deal, Evaluation, Property, User, at_least, is_field
-from app.services import analytics, deals, evaluations, reports, users
+from app.services import analytics, deals, evaluations, reports, site_analytics, users
 from app.services import properties as P
 from app.services.common import get_or_404
 from app.services.errors import forbidden
@@ -189,6 +189,12 @@ def analytics_listings(db: Session = Depends(get_db, scope="function"), user: Us
 def analytics_channel_posts(date_from: date = Query(alias="from"), date_to: date = Query(alias="to"),
                             db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return analytics.channel_posts(db, date_from, date_to)
+
+
+@router.get("/analytics/site")
+def analytics_site(days: int = 7, fresh: bool = False, user: User = Depends(require_level("superadmin"))):
+    """hge.ge visitors, contacts, sources, searches, errors: CRM «Аналитика», superadmins only."""
+    return site_analytics.report(days, fresh)
 
 
 @router.get("/analytics/agents")

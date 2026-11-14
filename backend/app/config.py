@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     LLM_MODEL: str = ""
     APIFY_TOKEN: str = ""
     GOOGLE_SA_JSON: str = ""
+    # «Аналитика» (superadmins only): report of hge.ge's own counter (apps-script/site-analytics.gs in -rentintbilisi-crm).
+    # The URL is public (it ships in the site's config.js); the key is REPORT_KEY from that script's properties, server-side only.
+    SITE_ANALYTICS_URL: str = "https://script.google.com/macros/s/AKfycbwPOZbRvKr2D1j61bn-fRwVeRjb-tNH6X31XNKoU5gKXQ_PcU6Ad6YFn1n7kxAKFw7voA/exec"
+    SITE_ANALYTICS_KEY: str = ""
     SHEET_ID: str = ""
     GOOGLE_SA_SUBJECT: str = ""         # optional: a Workspace user the service account acts as (domain-wide delegation)
     GDRIVE_CONTRACTS_FOLDER: str = "1DDD3V7EzEIPZHuTgNXV0nKzc3K3wwLFy"  # signed contract PDFs (services/contracts.py)

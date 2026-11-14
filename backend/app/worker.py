@@ -148,6 +148,20 @@ def contract_esign_pdf(db: Session, job: Job):
     return esign.finalize(db, _ref_id(job))
 
 
+@handler("nda_pdf")
+def nda_pdf(db: Session, job: Job):
+    """An agent signed his NDA but printing the PDF failed in the request: print it again (services/nda.finalize)."""
+    from app.services import nda
+    return nda.finalize(db, _ref_id(job))
+
+
+@handler("nda_drive")
+def nda_drive(db: Session, job: Job):
+    """A signed NDA → the Drive folder of contracts (services/nda.drive_upload); errors retry with backoff."""
+    from app.services import nda
+    return nda.drive_upload(db, _ref_id(job))
+
+
 @handler("review_batch")
 def review_batch(db: Session, job: Job):
     return "noop"  # the bot's own review loop handles catalog moderation cards

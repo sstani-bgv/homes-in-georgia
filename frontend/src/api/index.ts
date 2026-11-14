@@ -8,7 +8,7 @@ import type {
   Birthday, Invite, InviteInfo,
   AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractDraftIn, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, LeadStatus, DealPrefill, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
-  Settings, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
+  Settings, SiteReport, Source, SourceSchedule, TickerMessage, UserbotStatus, User, ListingsStats, Elsewhere, PostDraft, ChangeRequest, DealPick, Demand, GeoHit,
 } from './types';
 
 type L<T> = Page<T> | T[];
@@ -219,6 +219,8 @@ export const api = {
     agents: () => then(http.get<L<AgentStat>>('/analytics/agents'), (d) => normPage(d, normAgentStat)),
     /** «Посты в канал»: posts per agent over [from, to] (YYYY-MM-DD, Tbilisi days) */
     channelPosts: (from: string, to: string) => http.get<{ total: number; items: { agent_id: number | null; name: string; posts: number; exclusive: number; last: string | null }[] }>('/analytics/channel-posts', { from, to }),
+    /** hge.ge visitors and contacts (superadmins only); fresh = skip the 2-minute server cache. */
+    site: (days: number, fresh?: boolean) => http.get<SiteReport>('/analytics/site', { days, fresh: fresh || undefined }),
   },
 
   /** «Посуточная аренда» (Daily Rent / ApartFlow): the frame address with a one-time entry token */

@@ -4,15 +4,14 @@ Not part of the level ladder (role_level = 0): every CRM endpoint refuses it exc
 (api/deps.py current_user), so it can never see objects, leads, deals or people.
 
 Revision ID: 0018
-Revises: 0016  (0017 is taken by the NDA PR, 0017_agent_ndas: whichever of the two is merged second points
-               down_revision at the other one, so the chain stays linear)
+Revises: 0017
 """
 from typing import Sequence, Union
 
 from alembic import op
 
 revision: str = '0018'
-down_revision: Union[str, Sequence[str], None] = '0016'
+down_revision: Union[str, Sequence[str], None] = '0017'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
