@@ -710,3 +710,36 @@ export interface Invite {
   used_at: string | null; used_by: { id: number; name: string } | null; bot_link: string | null; web_link: string;
 }
 export interface InviteInfo { status: InviteStatus; role: Role; invited_by: string | null; expires_at: string }
+
+/** GET /analytics/site: the hge.ge counter report (apps-script/site-analytics.gs aggregate_), superadmins only. */
+export interface SiteTotals {
+  visitors: number; newVisitors: number; sessions: number; pageviews: number; listingViews: number;
+  contacts: number; contactSessions: number; conversion: number; shares: number; favs: number;
+}
+export interface SiteFlow { name: string; source?: string; sessions: number; contacts: number; conversion: number }
+export interface SiteListing { id: string; service: string; agent: string; views: number; viewers: number; contacts: number; shares: number; favs: number; conversion: number }
+export interface SiteAgent { name: string; listings: number; views: number; contacts: number; conversion: number }
+export interface SiteCount { name: string; n: number }
+export interface SiteError { name: string; n: number; sessions: number; page: string; device: string; last: number }
+export interface SiteReport {
+  period: { from: number; to: number; days: number };
+  totals: SiteTotals;
+  prev: SiteTotals;
+  daily: { d: string; visitors: number; sessions: number; contacts: number; views: number }[];
+  contactsBy: Record<string, number>;
+  sources: SiteFlow[];
+  campaigns: SiteFlow[];
+  listings: SiteListing[];
+  bestListings: SiteListing[];
+  noResponse: SiteListing[];
+  agents: SiteAgent[];
+  searches: SiteCount[];
+  zeroSearches: SiteCount[];
+  sharesBy: Record<string, number>;
+  socialBy: Record<string, number>;
+  devices: Record<string, number>;
+  langs: Record<string, number>;
+  themes: Record<string, number>;
+  errors: SiteError[];
+  perf: { loadMedian: number; loadP75: number; lcpMedian: number; lcpP75: number; n: number; byDevice: Record<string, { median: number; p75: number; n: number }> };
+}
