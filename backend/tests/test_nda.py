@@ -52,8 +52,9 @@ def tg_sent(monkeypatch):
 def test_full_flow(db, client, fake_chrome, tg_sent):
     boss, op = make_user(db, "superadmin", tg_id=111), make_user(db, "operator", tg_id=222)
     ag = make_user(db, "agent")
-    body = {"lang": "KA-RU", "full_name": "Nino *Test*", "personal_id": "01001055555", "phone": "+995 555 11 22 33",
-            "telegram": "@Nino_Agent", "role": "Агент"}
+    body = {"lang": "KA-RU", "full_name": "Nino *Test*", "full_name_ka": "ნინო ტესტი", "personal_id": "01001055555",
+            "phone": "+995 555 11 22 33", "telegram": "@Nino_Agent", "role": "recruit", "ie": "406112233",
+            "address": "Tbilisi, Vake 1", "email": "nino@example.com", "access": "2026-11-20", "iban_gel": "GE00TB0000000000000001"}
     # no company signature yet; only a superadmin sets it; agents can't make NDAs
     assert client.post("/api/ndas", json=body, headers=auth(op)).status_code == 409
     assert client.put("/api/ndas/company-signature", json={"signature": SIG}, headers=auth(op)).status_code == 403
@@ -62,9 +63,14 @@ def test_full_flow(db, client, fake_chrome, tg_sent):
     r = client.post("/api/ndas", json=body, headers=auth(op))
     assert r.status_code == 200, r.text
     n = r.json()
-    assert n["status"] == "sent" and n["telegram"] == "Nino_Agent" and n["full_name"] == "Nino Test"
-    assert "Nino Test" in n["html"] and "01001055555" in n["html"] and "@Nino_Agent" in n["html"]
-    assert "Получатель" in n["html"] and "მიმღები" in n["html"] and "рус" in n["html"]  # two columns + the language clause
+    assert n["status"] == "sent" and n["telegram"] == "Nino_Agent" and n["full_name"] == "Nino Test" and n["role"] == "Рекрут"
+    assert n["details"]["level"] == "25" and n["number"].endswith(f"-{n['id']:04d}")
+    h = n["html"]
+    for s in ("Nino Test", "ნინო ტესტი", "01001055555", "@Nino_Agent", "406112233", "Tbilisi, Vake 1", "nino@example.com",
+              "20.11.2026", "GE00TB0000000000000001", "რეკრუტი", "Рекрут", n["number"], "326129853", "GE89TB7085336010100094"):
+        assert s in h, s
+    assert "Участник" in h and "მონაწილე" in h and "русском" in h and "Приложение 5" in h  # two columns, chapter 24, appendices
+    assert "{" not in h.split("<body>")[1]  # every field filled
     token = n["path"].split("/")[-1]
 
     v = client.get(f"/api/public/nda/{token}").json()  # no login
@@ -102,9 +108,10 @@ def test_full_flow(db, client, fake_chrome, tg_sent):
 def test_any_account_when_no_username_cancel_and_languages(db, client):
     boss = make_user(db, "superadmin")
     client.put("/api/ndas/company-signature", json={"signature": SIG}, headers=auth(boss))
-    for lang, needle, absent in (("KA", "მიმღები", "Получатель"), ("KA-EN", "Recipient", "Получатель")):
+    for lang, needle, absent in (("KA", "მონაწილე", "Участник"), ("KA-EN", "Participant", "Участник")):
         n = client.post("/api/ndas", json={"lang": lang, "full_name": "A", "personal_id": "1"}, headers=auth(boss)).json()
-        assert needle in n["html"] and absent not in n["html"]
+        assert needle in n["html"] and absent not in n["html"] and n["role"] == "Агент" and n["details"]["level"] == "50"
+        assert ("ინგლისურ" in n["html"]) == (lang == "KA-EN")  # chapter 24 «Language»: bilingual only
     n = client.post("/api/ndas", json={"lang": "KA", "full_name": "A", "personal_id": "1"}, headers=auth(boss)).json()
     token = n["path"].split("/")[-1]
     assert client.post(f"/api/public/nda/{token}/telegram", json=_widget(username="whoever")).status_code == 200

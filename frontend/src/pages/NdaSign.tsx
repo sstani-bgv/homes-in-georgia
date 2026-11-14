@@ -21,24 +21,24 @@ interface NdaView {
 type L = 'ka' | 'ru' | 'en';
 const LABEL: Record<L, string> = { ka: 'ქართული', ru: 'Русский', en: 'English' };
 const UI: Record<L, Record<string, string>> = {
-  ka: { title: 'კონფიდენციალურობის შეთანხმება (NDA)', read: 'გთხოვთ, ყურადღებით წაიკითხოთ შეთანხმება', toSign: 'ხელმოწერაზე გადასვლა ↓',
+  ka: { title: 'შეთანხმება პლატფორმასთან მიერთების შესახებ', read: 'გთხოვთ, ყურადღებით წაიკითხოთ შეთანხმება', toSign: 'ხელმოწერაზე გადასვლა ↓',
     step1: '1. დაადასტურეთ თქვენი ვინაობა Telegram-ით', tgBtn: 'Telegram-ით დადასტურება', tgHint: 'Telegram გთხოვთ დადასტურებას აპლიკაციაში.',
     tgOnly: 'მხოლოდ ანგარიში', tgOk: 'დადასტურებულია', step2: '2. მოაწერეთ ხელი თითით', clear: 'წაშლა',
-    agree: 'წავიკითხე შეთანხმება და ვეთანხმები მის პირობებს', send: 'ხელმოწერა', done: 'NDA ხელმოწერილია. გმადლობთ!',
+    agree: 'წავიკითხე შეთანხმება და ვეთანხმები მის პირობებს', send: 'ხელმოწერა', done: 'შეთანხმება ხელმოწერილია. გმადლობთ!',
     pdf: 'PDF-ის ჩამოტვირთვა', pdfWait: 'PDF მზადდება, განაახლეთ გვერდი ერთ წუთში.', sent: 'ხელმოწერილი PDF გამოგეგზავნათ Telegram-ში.',
-    you: 'მიმღები', test: 'დადასტურება (სატესტო რეჟიმი)', noTg: 'Telegram-ის ჩატვირთვა ვერ მოხერხდა. განაახლეთ გვერდი.' },
-  ru: { title: 'Соглашение о конфиденциальности (NDA)', read: 'Пожалуйста, внимательно прочитайте соглашение', toSign: 'К подписи ↓',
+    you: 'მონაწილე', test: 'დადასტურება (სატესტო რეჟიმი)', noTg: 'Telegram-ის ჩატვირთვა ვერ მოხერხდა. განაახლეთ გვერდი.' },
+  ru: { title: 'Соглашение о подключении к платформе', read: 'Пожалуйста, внимательно прочитайте соглашение', toSign: 'К подписи ↓',
     step1: '1. Подтвердите себя через Telegram', tgBtn: 'Подтвердить через Telegram', tgHint: 'Telegram попросит подтвердить вход в приложении.',
     tgOnly: 'Только аккаунт', tgOk: 'Подтверждено', step2: '2. Распишитесь пальцем', clear: 'Стереть',
-    agree: 'Я прочитал(а) соглашение и согласен(на) с его условиями', send: 'Подписать', done: 'NDA подписано. Спасибо!',
+    agree: 'Я прочитал(а) соглашение и согласен(на) с его условиями', send: 'Подписать', done: 'Соглашение подписано. Спасибо!',
     pdf: 'Скачать PDF', pdfWait: 'PDF готовится, обновите страницу через минуту.', sent: 'Подписанный PDF отправлен вам в Telegram.',
-    you: 'Получатель', test: 'Подтвердить (тестовый режим)', noTg: 'Не удалось загрузить Telegram. Обновите страницу.' },
-  en: { title: 'Non-Disclosure Agreement (NDA)', read: 'Please read the agreement carefully', toSign: 'Go to signing ↓',
+    you: 'Участник', test: 'Подтвердить (тестовый режим)', noTg: 'Не удалось загрузить Telegram. Обновите страницу.' },
+  en: { title: 'Platform Agreement', read: 'Please read the agreement carefully', toSign: 'Go to signing ↓',
     step1: '1. Confirm yourself with Telegram', tgBtn: 'Confirm with Telegram', tgHint: 'Telegram will ask you to confirm in the app.',
     tgOnly: 'Only the account', tgOk: 'Confirmed', step2: '2. Sign with your finger', clear: 'Clear',
-    agree: 'I have read the agreement and agree to its terms', send: 'Sign', done: 'NDA signed. Thank you!',
+    agree: 'I have read the agreement and agree to its terms', send: 'Sign', done: 'Agreement signed. Thank you!',
     pdf: 'Download PDF', pdfWait: 'The PDF is being prepared, refresh in a minute.', sent: 'The signed PDF was sent to you in Telegram.',
-    you: 'Recipient', test: 'Confirm (test mode)', noTg: 'Could not load Telegram. Refresh the page.' },
+    you: 'Participant', test: 'Confirm (test mode)', noTg: 'Could not load Telegram. Refresh the page.' },
 };
 
 type TgUser = Record<string, string | number>;

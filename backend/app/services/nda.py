@@ -30,7 +30,8 @@ from app.models import STAFF, SUPER, AgentNda, User
 from app.services import contracts as C, jobs
 from app.services.common import TZ, log_event, now
 from app.services.errors import DomainError, forbidden
-from app.services.nda_text import BLOCKS, COMPANY, LANG_CLAUSE, SIGNATURES, SUBTITLE, TITLE
+from app.services.nda_text import (APPENDIX, BLOCKS, COMPANY, EDITION, LEVELS, REQUISITES, ROLES, SHORT, SIGNATURES,
+                                   SUBTITLE, TITLE)
 
 log = logging.getLogger(__name__)
 LANGS = ("KA", "KA-RU", "KA-EN")
@@ -53,16 +54,22 @@ def _fill(s: str, f: dict) -> str:
     return s.format(**{k: f"**{v}**" if v and v != "—" else "—" for k, v in f.items()})
 
 
-CSS = """@page{size:A4;margin:16mm 15mm 18mm;@bottom-center{content:"Homes in Georgia · NDA · {lang} · " counter(page);
+CSS = """@page{size:A4;margin:16mm 15mm 18mm;@bottom-center{content:"Homes in Georgia · № {num} · {lang} · {edition} · " counter(page);
 font:7.5pt 'Noto Sans Georgian','DejaVu Sans',Arial,sans-serif;color:#888}}
 body{margin:0;font-family:'Noto Sans Georgian','DejaVu Sans',Arial,sans-serif;font-size:9.3pt;line-height:1.35;color:#111}
 h1{font-size:13pt;text-align:center;color:#1D3560;margin:0 0 2px}h1+h1{margin-top:0}.sub{text-align:center;color:#666;margin:2px 0 12px}
-h3{font-size:10.5pt;color:#2F5394;margin:9px 0 3px}p{margin:0 0 5px;text-align:justify}
+h2{font-size:12pt;color:#1D3560;margin:0 0 6px}h3{font-size:10.5pt;color:#2F5394;margin:9px 0 3px}p{margin:0 0 5px;text-align:justify}
 .cols{width:100%;border-collapse:collapse;table-layout:fixed}.cols>tbody>tr>td{vertical-align:top;padding:0 7px;width:50%}
-.cols>tbody>tr>td:first-child{padding-left:0}.cols>tbody>tr>td:last-child{padding-right:0}
+.cols>tbody>tr>td:first-child{padding-left:0}.cols>tbody>tr>td:last-child{padding-right:0}.cols>tbody>tr>td[colspan]{padding:0}
 .li{display:flex;gap:6px;margin:0 0 3px 8px}.li span:first-child{min-width:14px}
-.sig{width:100%;border-collapse:collapse;margin-top:6px;font-size:9pt}.sig th{background:#1D3560;color:#fff;padding:5px;font-weight:700}
-.sig td{border:1px solid #c8cfdb;padding:5px;vertical-align:middle;height:16px}.sig td:first-child{color:#444;width:28%}
+.cl{display:flex;gap:6px;margin:0 0 5px}.cl>span:first-child{min-width:26px;color:#2F5394;font-weight:700}
+.cl>span:last-child{flex:1}.page{break-before:page}
+.grid{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:8pt;line-height:1.25}
+.grid th{background:#1D3560;color:#fff;padding:4px 5px;font-weight:700;text-align:left;vertical-align:top}
+.grid td{border:1px solid #c8cfdb;padding:4px 5px;vertical-align:top;height:12px;overflow-wrap:break-word}.grid i{display:block;font-style:normal;opacity:.75;font-size:7.3pt}
+.grid th i{font-weight:400}.wrap{overflow-x:auto}
+.sig{width:100%;border-collapse:collapse;margin-top:6px;font-size:9pt;table-layout:fixed}.sig th{background:#1D3560;color:#fff;padding:5px;font-weight:700}
+.sig td{border:1px solid #c8cfdb;padding:5px;vertical-align:middle;height:16px;overflow-wrap:anywhere}.sig td:first-child{color:#444;width:28%}
 .sig img{height:13mm;max-width:100%}.slot{color:#777}
 .rec{break-before:page;font-size:9pt}.rec h2{font-size:12pt;text-align:center;color:#1D3560;margin:0 0 10px}
 .rec table{width:100%;border-collapse:collapse;margin:6px 0 12px}.rec td{border:1px solid #888;padding:4px 6px;vertical-align:top}
@@ -70,46 +77,87 @@ h3{font-size:10.5pt;color:#2F5394;margin:9px 0 3px}p{margin:0 0 5px;text-align:j
 @media screen and (max-width:700px){.cols>tbody>tr>td{display:block;width:auto;padding:0 0 8px}}"""
 
 
-def _sig_table(lang: str, company_name: str, recipient_name: str) -> str:
-    t = lambda k: H.escape(SIGNATURES[k][lang])  # noqa: E731
+def _sig_table(lang: str, f: dict) -> str:
+    """The parties' details and signatures (one table per language column): the Operator | the Participant."""
+    t = lambda k: H.escape((REQUISITES.get(k) or SIGNATURES[k])[lang])  # noqa: E731
+    e = lambda v: H.escape(v) if v else "—"  # noqa: E731
     slot = lambda name, text: f'<span class="slot" data-slot="{name}">{H.escape(text)}</span>'  # noqa: E731
+    contacts = " · ".join(v for v in (f["phone"], f["email"], f["telegram"]) if v and v != "—") or "—"
+    name = f["name_ka"] if lang == "ka" else f["name2"]
+    rows = [("name", COMPANY["name"][lang], name), ("ie", COMPANY["ie"], f["ie"]), ("pid", COMPANY["pid"], f["pid"]),
+            ("address", COMPANY["address"][lang], f["address"]), ("iban_gel", COMPANY["iban_gel"], f["iban_gel"]),
+            ("iban_usd", COMPANY["iban_usd"], f["iban_usd"]), ("contacts", COMPANY["contacts"], contacts)]
     return (f'<h3>{t("title")}</h3><table class="sig"><tr><th></th><th>{t("company")}</th><th>{t("recipient")}</th></tr>'
-            f'<tr><td>{t("name")}</td><td>{H.escape(company_name)}</td><td>{H.escape(recipient_name)}</td></tr>'
-            f'<tr><td>{t("signature")}</td><td>{slot("company-sig", SIGNATURES["pending"][lang])}</td>'
+            + "".join(f'<tr><td>{t(k)}</td><td>{e(a)}</td><td>{e(b)}</td></tr>' for k, a, b in rows)
+            + f'<tr><td>{t("signature")}</td><td>{slot("company-sig", SIGNATURES["pending"][lang])}</td>'
             f'<td>{slot("recipient-sig", SIGNATURES["pending"][lang])}</td></tr>'
             f'<tr><td>{t("time")}</td><td>{slot("company-time", SIGNATURES["auto"][lang])}</td>'
             f'<td>{slot("recipient-time", SIGNATURES["auto"][lang])}</td></tr></table>')
 
 
 def render(lang: str, f: dict) -> str:
-    """The agreement's HTML (A4 print CSS) for the recipient's fields f: date, name, pid, phone, telegram, role."""
+    """The agreement's HTML (A4 print CSS) for the participant's fields f (nda_text: {num} {date} {name_ka} {name2} …;
+    role_ka / role2 come from f["role"], a ROLES key)."""
     second = SECOND[lang]
     langs = ["ka"] + ([second] if second else [])
     f = {k: (str(v).strip() if v else "—") for k, v in f.items()}
+    role = ROLES.get(f.pop("role", ""), None)
+    per = {ln: {**f, "role_ka": role["ka"] if role else "—", "role2": role[ln if ln != "ka" else "ru"] if role else "—"}
+           for ln in ("ka", "ru", "en")}
+    fill = lambda texts, ln: _md(_fill(texts[ln], per[ln]))  # noqa: E731
 
-    def cell(kind: str, texts: dict, ln: str, n: int) -> str:
-        s = _md(_fill(texts[ln], f))
-        if kind == "h":
-            return f"<h3>{s}</h3>"
-        if kind == "li":
-            return f'<div class="li"><span>{n}.</span><span>{s}</span></div>'
-        return f"<p>{s}</p>"
+    def cell(b: dict, ln: str) -> str:
+        k = b["k"]
+        if k == "h":
+            return f'<h3>{H.escape(b["n"])}. {fill(b, ln)}</h3>'
+        if k == "sub":
+            return f"<h3>{fill(b, ln)}</h3>"
+        if k == "app":
+            return f'<h2>{H.escape(APPENDIX[ln])} {H.escape(b["n"])}. {fill(b, ln)}</h2>'
+        if k in ("n", "li"):
+            return f'<div class="cl"><span>{H.escape(b["n"])}</span><span>{fill(b, ln)}</span></div>' if b[ln] else \
+                f'<div class="cl"><span>{H.escape(b["n"])}</span><span></span></div>'
+        return f"<p>{fill(b, ln)}</p>"
 
-    rows, n = [], 0
-    blocks = list(BLOCKS) + ([("p", LANG_CLAUSE[lang])] if lang in LANG_CLAUSE else [])
-    for kind, texts in blocks:
-        n = n + 1 if kind == "li" else 0
-        rows.append([cell(kind, texts, ln, n) for ln in langs])
-    rec_name = f["name"]
-    rows.append([_sig_table(ln, COMPANY["name"][ln], rec_name) for ln in langs])
+    def grid(b: dict) -> str:
+        two = lambda c, tag: (f"{fill(c, 'ka')}" + (f"<i>{fill(c, second)}</i>" if second and c[second] != c["ka"] and c[second] else ""))  # noqa: E731
+        rows = b["rows"] or [[{"ka": "", "ru": "", "en": ""} for _ in b["head"]] for _ in range(2)]
+        return ('<div class="wrap"><table class="grid"><tr>' + "".join(f"<th>{two(c, 'th')}</th>" for c in b["head"]) + "</tr>"
+                + "".join("<tr>" + "".join(f"<td>{two(c, 'td')}</td>" for c in row) + "</tr>" for row in rows)
+                + "</table></div>")
+
+    # sections: the agreement, the parties' details + signatures, each appendix on a new page
+    sections: list[list[str]] = [[]]
+    sig_done = False
+    for b in BLOCKS:
+        if b.get("only") and lang not in b["only"].split():
+            continue
+        if b["k"] == "app":
+            if not sig_done:
+                sections.append([("sig", None)])
+                sig_done = True
+            sections.append([])
+        sections[-1].append(("t", grid(b)) if b["k"] == "t" else ("row", [cell(b, ln) for ln in langs]))
+    if not sig_done:
+        sections.append([("sig", None)])
+
+    def section(items, i) -> str:
+        cls = ' class="page"' if i and not any(kind == "sig" for kind, _ in items) else ""
+        if any(kind == "sig" for kind, _ in items):
+            cells = [_sig_table(ln, per[ln]) for ln in langs]
+            items = [("row", cells)]
+        if second:
+            trs = "".join(f'<tr><td colspan="2">{x}</td></tr>' if kind == "t" else f"<tr><td>{x[0]}</td><td>{x[1]}</td></tr>"
+                          for kind, x in items)
+            return f'<div{cls}><table class="cols"><tbody>{trs}</tbody></table></div>'
+        return f"<div{cls}>" + "".join(x if kind == "t" else x[0] for kind, x in items) + "</div>"
+
     head = f'<h1>{H.escape(TITLE["ka"])}</h1>' + (f'<h1>{H.escape(TITLE[second])}</h1>' if second else "") + \
-        f'<div class="sub">{H.escape(SUBTITLE)}</div>'
-    if second:
-        body = '<table class="cols"><tbody>' + "".join(f"<tr><td>{a}</td><td>{b}</td></tr>" for a, b in rows) + "</tbody></table>"
-    else:
-        body = "".join(r[0] for r in rows)
-    return (f'<!doctype html><html lang="ka"><head><meta charset="utf-8"><title>NDA · {H.escape(rec_name)}</title>'
-            f'<style>{CSS.replace("{lang}", lang)}</style></head><body>{head}{body}</body></html>')
+        f'<div class="sub">{H.escape(SUBTITLE)} · № {H.escape(f["num"])} · {H.escape(f["date"])}</div>'
+    body = "".join(section(items, i) for i, items in enumerate(sections) if items)
+    css = CSS.replace("{lang}", lang).replace("{num}", f["num"].replace('"', "")).replace("{edition}", EDITION)
+    return (f'<!doctype html><html lang="ka"><head><meta charset="utf-8"><title>{H.escape(SHORT["ka"])} · '
+            f'{H.escape(f["name2"])}</title><style>{css}</style></head><body>{head}{body}</body></html>')
 
 
 def doc_hash(page: str) -> str:
@@ -154,7 +202,8 @@ def out(db: Session, n: AgentNda, full: bool = False) -> dict:
          "path": path(n.token) if n.status == "sent" else None, "created_at": n.created_at.isoformat() if n.created_at else None,
          "created_by": {"id": by.id, "name": by.name} if by else None,
          "signed_at": n.signed_at.isoformat() if n.signed_at else None,
-         "tg_username": n.tg_username, "has_pdf": bool(n.pdf_path), "in_drive": bool(n.drive_file_id)}
+         "tg_username": n.tg_username, "has_pdf": bool(n.pdf_path), "in_drive": bool(n.drive_file_id),
+         "number": number(n), "details": n.details or {}}
     if full:
         d["html"] = n.html
     return d
@@ -164,26 +213,50 @@ def _clean(v, n=200) -> str:
     return re.sub(r"\s+", " ", str(v or "").replace("*", "")).strip()[:n]  # «*» would toggle bold in the text
 
 
+DETAILS = ("full_name_ka", "ie", "address", "email", "level", "access", "iban_gel", "iban_usd")  # → agent_ndas.details
+
+
+def _date(v) -> str:
+    """«2026-11-14» (a date input) or «14.11.2026» → «14.11.2026»; anything else as typed."""
+    v = _clean(v, 20)
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", v)
+    return f"{m.group(3)}.{m.group(2)}.{m.group(1)}" if m else v
+
+
+def number(n: AgentNda) -> str:
+    """The agreement's number: «2026-0007» (year made + id)."""
+    return f"{(n.created_at or now()).astimezone(TZ):%Y}-{n.id:04d}"
+
+
 def create(db: Session, body: dict, user: User) -> AgentNda:
     _staff(user)
     lang = body.get("lang") or "KA-RU"
     if lang not in LANGS:
         raise DomainError("bad_input", "Язык: KA, KA-RU или KA-EN")
-    f = {k: _clean(body.get(k)) for k in ("full_name", "personal_id", "phone", "telegram", "role")}
+    f = {k: _clean(body.get(k)) for k in ("full_name", "personal_id", "phone", "telegram")}
     f["telegram"] = f["telegram"].lstrip("@").split("/")[-1] or ""  # «@name» or «t.me/name» → «name»
     if not f["full_name"] or not f["personal_id"]:
-        raise DomainError("missing_fields", "Укажите ФИО и личный номер / паспорт агента")
+        raise DomainError("missing_fields", "Укажите ФИО и личный номер агента")
+    role = body.get("role") if body.get("role") in ROLES else "agent"
+    d = {k: _clean(body.get(k)) for k in DETAILS}
+    d["level"] = d["level"] if d["level"] in LEVELS else ("25" if role == "recruit" else "50")
+    d["access"] = _date(d["access"]) or now().astimezone(TZ).strftime("%d.%m.%Y")
+    d["role"] = role
     comp = company_signature()
     if not comp:
         raise DomainError("no_company_signature", "Сначала Давид должен один раз расписаться за компанию (NDA → «Подпись компании»)", 409)
-    day = now().astimezone(TZ).strftime("%d.%m.%Y")
-    page = render(lang, {"date": day, "name": f["full_name"], "pid": f["personal_id"], "phone": f["phone"],
-                         "telegram": f"@{f['telegram']}" if f["telegram"] else "", "role": f["role"]})
-    n = AgentNda(lang=lang, token=secrets.token_urlsafe(24), html=page, doc_sha256=doc_hash(page),
+    n = AgentNda(lang=lang, token=secrets.token_urlsafe(24), html="", doc_sha256="", details=d, role=ROLES[role]["ru"],
                  company_signature=comp["signature"], company_signed_at=now(), created_by=user.id,
                  **{k: (v or None) for k, v in f.items()})
     db.add(n)
-    db.flush()
+    db.flush()  # the id → the agreement's number
+    day = now().astimezone(TZ).strftime("%d.%m.%Y")
+    page = render(lang, {"num": number(n), "date": day, "name_ka": d["full_name_ka"] or f["full_name"],
+                         "name2": f["full_name"], "ie": d["ie"], "pid": f["personal_id"], "address": d["address"],
+                         "phone": f["phone"], "email": d["email"], "telegram": f"@{f['telegram']}" if f["telegram"] else "",
+                         "role": role, "level": d["level"], "access": d["access"], "iban_gel": d["iban_gel"],
+                         "iban_usd": d["iban_usd"]})
+    n.html, n.doc_sha256 = page, doc_hash(page)
     log_event(db, "nda", n.id, "created", user, label=f["full_name"], lang=lang)
     db.commit()
     return n
@@ -330,8 +403,8 @@ def _record(n: AgentNda, by: User | None) -> str:
     second = SECOND[n.lang] or "en"
     L = {"title": ("ელექტრონული ხელმოწერის ოქმი", {"ru": "Протокол электронного подписания", "en": "Electronic signature record"}),
          "doc": ("დოკუმენტი", {"ru": "Документ", "en": "Document"}), "hash": ("ტექსტის SHA-256", {"ru": "SHA-256 текста", "en": "Text SHA-256"}),
-         "rec": ("მიმღები", {"ru": "Получатель", "en": "Recipient"}), "comp": ("კომპანია", {"ru": "Компания", "en": "Company"}),
-         "name": ("სახელი, გვარი", {"ru": "ФИО", "en": "Full name"}), "pid": ("პირადი ნომერი / პასპორტი", {"ru": "Личный номер / паспорт", "en": "Personal ID / passport"}),
+         "rec": ("მონაწილე", {"ru": "Участник", "en": "Participant"}), "comp": ("ოპერატორი", {"ru": "Оператор", "en": "Operator"}),
+         "name": ("სახელი, გვარი", {"ru": "ФИО", "en": "Full name"}), "pid": ("პირადი ნომერი", {"ru": "Личный номер", "en": "Personal number"}),
          "phone": ("ტელეფონი", {"ru": "Телефон", "en": "Phone"}), "tg": ("Telegram (დადასტურებული)", {"ru": "Telegram (подтверждён)", "en": "Telegram (confirmed)"}),
          "code": ("დადასტურების კოდი", {"ru": "Код подтверждения", "en": "Confirmation code"}),
          "conf": ("დადასტურების დრო", {"ru": "Время подтверждения", "en": "Confirmed at"}),
@@ -342,14 +415,14 @@ def _record(n: AgentNda, by: User | None) -> str:
     e = lambda v: H.escape(str(v)) if v else "—"  # noqa: E731
     row = lambda k, v, cls="": f'<tr><td>{t(k)}</td><td{cls}>{v}</td></tr>'  # noqa: E731
     tg = f'@{e(n.tg_username)} · id {e(n.tg_id)}' + (f' · {e(n.tg_name)}' if n.tg_name else "")
-    return (f'<section class="rec"><h2>{t("title")}</h2><table>{row("doc", f"NDA #{n.id} · {e(n.lang)}")}'
+    return (f'<section class="rec"><h2>{t("title")}</h2><table>{row("doc", f"{e(SHORT[second])} № {number(n)} · {e(n.lang)} · {EDITION}")}'
             f'{row("hash", n.doc_sha256, " class=mono")}</table>'
             f'<table><tr><td colspan="2"><b>{t("rec")}</b></td></tr>{row("name", e(n.full_name))}{row("pid", e(n.personal_id))}'
             f'{row("phone", e(n.phone))}{row("tg", tg)}{row("code", e(n.tg_hash), " class=mono")}'
             f'{row("conf", _tbilisi(n.tg_auth_date) if n.tg_auth_date else "—")}{row("at", _tbilisi(n.signed_at))}'
             f'{row("ip", e(n.ip))}{row("ua", e(n.user_agent), " class=mono")}'
             f'{row("sig", f"<img src={chr(34)}{n.signature}{chr(34)} alt={chr(34)}{chr(34)}>")}</table>'
-            f'<table><tr><td colspan="2"><b>{t("comp")}</b></td></tr>{row("name", e(COMPANY["name"][second]) + " · " + COMPANY["personal_id"])}'
+            f'<table><tr><td colspan="2"><b>{t("comp")}</b></td></tr>{row("name", e(COMPANY["name"][second]) + " · IE " + COMPANY["ie"])}'
             f'{row("at", _tbilisi(n.company_signed_at) if n.company_signed_at else "—")}{row("sent", e(by and by.name))}'
             f'{row("sig", f"<img src={chr(34)}{n.company_signature}{chr(34)} alt={chr(34)}{chr(34)}>")}</table></section>')
 

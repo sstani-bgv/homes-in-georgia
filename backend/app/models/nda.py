@@ -1,4 +1,5 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, Text, func
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
 
@@ -20,7 +21,10 @@ class AgentNda(Base):
     personal_id = Column(Text, nullable=False)
     phone = Column(Text)
     telegram = Column(Text)  # @username without «@»: only this account may sign; empty = any confirmed account
-    role = Column(Text)
+    role = Column(Text)  # Рекрут / Агент / Наставник (details.role: the nda_text.ROLES key)
+    # the rest of the agreement's fields: full_name_ka, ie (IE number), address, email, level, access (date), iban_gel,
+    # iban_usd, role
+    details = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     html = Column(Text, nullable=False)
     doc_sha256 = Column(Text, nullable=False)
     company_signature = Column(Text)  # data:image/png at the moment the NDA was made

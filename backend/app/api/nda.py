@@ -20,7 +20,15 @@ class NdaIn(BaseModel):
     personal_id: str = Field(max_length=60)
     phone: str | None = Field(None, max_length=60)
     telegram: str | None = Field(None, max_length=100)
-    role: str | None = Field(None, max_length=100)
+    role: str | None = Field(None, max_length=100)  # nda_text.ROLES key: recruit | agent | mentor
+    full_name_ka: str | None = Field(None, max_length=200)  # the name in Georgian (else full_name)
+    ie: str | None = Field(None, max_length=60)  # IE registration number
+    address: str | None = Field(None, max_length=200)
+    email: str | None = Field(None, max_length=200)
+    level: str | None = Field(None, max_length=4)  # 25 | 50 | 70 | 90
+    access: str | None = Field(None, max_length=20)  # access start date: 2026-11-14 or 14.11.2026
+    iban_gel: str | None = Field(None, max_length=60)
+    iban_usd: str | None = Field(None, max_length=60)
 
 
 class SignatureIn(BaseModel):
