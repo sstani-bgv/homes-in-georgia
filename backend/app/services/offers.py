@@ -18,10 +18,11 @@ from app.config import settings as env
 from app.api.deps import paginate
 from app.models import Car, User, can_cars
 from app.services import properties as P
-from app.services import jobs, site_feed
+from app.services import car_post, jobs, site_feed
 from app.services.common import get_or_404, log_event, now
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify
+from app.telegram.client import conf
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,26 @@ FIELDS = {
     "car": ("deal", "title", "period", "deposit", "year", "gearbox", "fuel", "body", "seats", "mileage", "pickup", "lat", "lng",
             "price", "currency", "description", "is_exclusive", "post_url"),
 }
+
+
+def clean_post_fields(old: dict | None, new) -> dict:
+    """The generator's fields (car_post.ALL_FIELDS) merged over the stored ones; None / "" clears a field."""
+    out = dict(old or {})
+    for k, v in (new or {}).items() if isinstance(new, dict) else ():
+        if k not in car_post.ALL_FIELDS:
+            continue
+        if v in (None, "", []):
+            out.pop(k, None)
+        else:
+            out[k] = v
+    return out
+
+
+def _gearbox_of(data: dict) -> None:
+    """A sale's exact transmission (DCT, CVT...) sets the column the site filters on (auto | manual)."""
+    t = (data.get("post_fields") or {}).get("transmission") if isinstance(data.get("post_fields"), dict) else None
+    if t in car_post.TRANSMISSION and "gearbox" not in data:
+        data["gearbox"] = car_post.TRANSMISSION[t]
 
 
 def kind_of(model) -> str:
@@ -65,7 +86,9 @@ def _changed(db: Session, o, actor: User | None, action: str, **data):
 
 def create(db: Session, model, data: dict, actor: User) -> object:
     allowed = FIELDS[kind_of(model)]
-    o = model(**{k: v for k, v in data.items() if k in allowed}, agent_id=actor.id, status="draft")
+    _gearbox_of(data)
+    o = model(**{k: v for k, v in data.items() if k in allowed}, agent_id=actor.id, status="draft",
+              post_fields=clean_post_fields({}, data.get("post_fields")))
     if (aid := data.get("agent_id")) and _op(actor):
         o.agent_id = aid
     db.add(o)
@@ -76,9 +99,12 @@ def create(db: Session, model, data: dict, actor: User) -> object:
 
 def update(db: Session, model, oid: int, data: dict, actor: User) -> object:
     o = get_or_404(db, model, oid, "object", lock=True)
+    _gearbox_of(data)
     for k, v in data.items():
         if k in FIELDS[kind_of(model)] or (k == "agent_id" and _op(actor)):
             setattr(o, k, v)
+    if "post_fields" in data:
+        o.post_fields = clean_post_fields(o.post_fields, data["post_fields"])
     _changed(db, o, actor, "updated", fields=sorted(data))
     return o
 
@@ -153,49 +179,27 @@ def delete_file(db: Session, model, oid: int, key: str, actor: User) -> object:
 
 # ---------------------------------------------------------------- the Telegram post (as rent objects: notify.publish_post)
 
-GEARBOX = {"auto": "Automatic", "manual": "Manual"}
-FUEL = {"petrol": "Petrol", "diesel": "Diesel", "hybrid": "Hybrid", "electric": "Electric", "gas": "Gas"}
-BODY = {"sedan": "Sedan", "suv": "SUV", "hatchback": "Hatchback", "wagon": "Wagon", "coupe": "Coupe",
-        "minivan": "Minivan", "business": "Business", "pickup": "Pickup", "convertible": "Convertible"}
-CAR_PRICE_STEPS = (5000, 10000, 15000, 20000, 30000, 50000, 70000, 100000)
-
-
-def _money(v) -> str:
-    return f"{int(v):,}".replace(",", ".")
-
-
 def car_post_text(db: Session, c: Car) -> str:
-    """A car post in the generator's style: the model and year, #Rent / #Sale, a ✨ line of tags, the price with its tag."""
-    sale = c.deal == "sale"
-    cur = {"USD": "$", "GEL": "₾", "EUR": "€"}.get(c.currency or "USD", "$")
-    tag = lambda m, v: v and f"#{m.get(v, str(v).title().replace(' ', ''))}"  # noqa: E731
-    brand = re.sub(r"\W", "", (c.title or "").split()[0]) if c.title else ""
-    lines = [f"🚗 #{brand} {' '.join((c.title or '').split()[1:])}".strip() + (f" {c.year}" if c.year else ""), ""]
-    if c.is_exclusive:
-        lines += ["❗️#Exclusive", ""]
-    lines.append(f"🏁 #Car for {'#Sale' if sale else '#Rent'}")
-    style = [x for x in (tag(BODY, c.body), tag(GEARBOX, c.gearbox), tag(FUEL, c.fuel)) if x]
-    if style:
-        lines.append("✨ " + " | ".join(style))
-    spec = [x for x in (c.seats and f"{c.seats} Seats", sale and c.mileage and f"{_money(c.mileage)} km") if x]
-    if spec:
-        lines.append("🚘 " + " | ".join(spec))
-    if not sale and c.pickup:
-        lines.append(f"📍 {c.pickup}")
-    lines.append("")
-    if c.price is not None:
-        per = "" if sale else f"/{'month' if c.period == 'month' else 'day'}"
-        dep = f" + Deposit {_money(c.deposit)}{cur}" if not sale and c.deposit else ""
-        lines.append(f"💰 {_money(c.price)}{cur}{per}{dep}")
-    lines.append("0% Commission")
-    if sale and c.price is not None:
-        lines.append(next((f"#Price{lo}to{hi}" for lo, hi in zip((0,) + CAR_PRICE_STEPS, CAR_PRICE_STEPS)
-                           if c.price <= hi), f"#Price{CAR_PRICE_STEPS[-1]}plus"))
-    lines.append("#CarSale" if sale else "#CarRent")
-    agent = db.get(User, c.agent_id) if c.agent_id else None
-    lines += ["", f"📲 @David_Tibelashvili | \n{P.phone_line(agent)}", "", "📱 Instagram 🗳 FB 🎥 YouTube", "",
-              "CARS IN TBILISI🇬🇪"]
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    """The car's post in its channel's format (services/car_post.py)."""
+    return car_post.build(c)
+
+
+def preview_text(data: dict) -> str:
+    """The post of an unsaved form (POST /offers/car/preview): the same generator over a stand-in car."""
+    _gearbox_of(data)
+    cols = {c.name: None for c in Car.__table__.columns}
+    car = SimpleNamespace(**{**cols, "currency": "USD", "deal": "rent", "is_exclusive": False,
+                             **{k: v for k, v in data.items() if k in FIELDS["car"]},
+                             "post_fields": clean_post_fields({}, data.get("post_fields"))})
+    car.title = car.title or ""
+    return car_post.build(car)
+
+
+def car_channel(o) -> str:
+    """Where a car's post goes: CAR_SALE_CHAT_ID / CAR_RENT_CHAT_ID (a numeric id or @username), else the public car
+    channel itself (@CarsSaleInGeorgia / @CarsRentInGeorgia). The bot must be an admin of that channel."""
+    key = "CAR_SALE_CHAT_ID" if o.deal == "sale" else "CAR_RENT_CHAT_ID"
+    return conf(key, "").strip() or "@" + car_post.CHANNELS["sale" if o.deal == "sale" else "rent"]
 
 
 def post_text(db: Session, o) -> str:
@@ -220,7 +224,7 @@ def publish(db: Session, model, oid: int, actor: User, text: str | None = None, 
     if keys is not None and not set(keys) <= set(own):
         raise DomainError("not_found", "media not found")
     if tg:
-        post = SimpleNamespace(id=None, address=o.title, district=None, price=o.price, description=o.description,
+        post = SimpleNamespace(id=None, chat=car_channel(o), address=o.title, district=None, price=o.price, description=o.description,
                                owner_id=None, post_text=(text or "").strip() or post_text(db, o),
                                post_media_keys=[("video" if k == o.video else "photo", k) for k in (own if keys is None else keys)])
         try:
@@ -233,6 +237,10 @@ def publish(db: Session, model, oid: int, actor: User, text: str | None = None, 
             raise DomainError("publish_failed", "Telegram не принял пост", 502)
         if ref:
             o.post_url = ref[1] or o.post_url
+            # the importer meets this post in the channel and knows it is this car (services/car_import.py)
+            if m := re.search(r"t\.me/(?:c/)?([^/]+)/(\d+)", ref[1] or ""):
+                if not db.scalars(select(Car).where(Car.tg_channel == m[1], Car.tg_message_id == int(m[2]), Car.id != o.id)).first():
+                    o.tg_channel, o.tg_message_id = m[1], int(m[2])
         data.update(post_url=o.post_url, **({"dry_run": True} if dry_run else {}))
     if site:
         o.status = "published"

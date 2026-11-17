@@ -215,3 +215,21 @@ grep -h 'a1b2c3d4e5' $L/*.log*                                        # по к�
 
 Выкатка с версией: `GIT_COMMIT=$(git rev-parse --short HEAD) docker compose ... up -d --build` — коммит попадает в
 строку «api started, version …» и в `version` ошибок фронта (без него там время сборки).
+
+## Авто: каналы машин ⇄ CRM ⇄ сайт (17.11.2026)
+
+**Импорт из каналов.** Воркер каждые `CAR_IMPORT_MINUTES` (15) читает веб-версию публичных каналов
+`t.me/s/CarsSaleInGeorgia` и `t.me/s/CarsRentInGeorgia` (`backend/app/services/car_import.py`; без сессии и без прав
+бота) и ведёт «Авто» в CRM: новый пост → новая машина (`source=telegram`, фото копируются, сразу на сайте); правка
+поста → машина перечитывается; `#Sold` / `#Rented` / удалённый пост → архив; повторный пост той же арендной машины
+(модель, год, цена, период) — та же машина на новом посте. Посты, опубликованные из CRM, не дублируются.
+Первый прогон вручную (сначала без записи):
+
+    $C exec worker sh -c "cd backend && python -m app.services.car_import --dry-run"
+    $C exec worker sh -c "cd backend && python -m app.services.car_import"
+
+**Генератор постов** (`backend/app/services/car_post.py`) пишет точный формат каждого канала с хештегами
+(марка, кузов, десятилетие, топливо, двигатель, пробег, цена). Форма «Авто» показывает пост вживую.
+**Публикация** из CRM идёт в канал машины: `CAR_SALE_CHAT_ID` / `CAR_RENT_CHAT_ID`, по умолчанию
+`@CarsSaleInGeorgia` / `@CarsRentInGeorgia`. **Бот должен быть администратором этих каналов** (право публикации).
+Миграция **0029** (`alembic upgrade head`): `cars.post_fields`, `source`, `tg_channel`, `tg_message_id`, `source_text`.

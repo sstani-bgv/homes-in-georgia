@@ -268,6 +268,18 @@ def daily_rent_ical_tick():
         log.exception("daily rent ical sync failed")
 
 
+def car_import_tick():
+    """«Авто»: the car channels' new / edited / sold posts -> the CRM's cars -> the site (services/car_import.py)."""
+    from app.services import car_import
+    try:
+        with SessionLocal() as db:
+            r = car_import.run(db)
+            if any(v.get(k) for v in r.values() for k in ("created", "updated", "moved", "archived", "error")):
+                log.info("car import: %s", r)
+    except Exception:  # noqa: BLE001
+        log.exception("car import failed")
+
+
 def tick(limit: int = 50) -> dict:
     """One pass: claim due jobs one at a time (each in its own transaction, row-locked, SKIP LOCKED)."""
     stats: dict[str, int] = {}
@@ -297,6 +309,7 @@ def main():
     from app.telegram import login_bot
     login_bot.start_thread()  # staff invites: /start inv_<token> in the CRM sign-in bot
     last_ical = time.time() - env.DAILY_RENT_ICAL_MINUTES * 60 + 20  # first fetch 20 s after the start, as ApartFlow
+    last_cars = time.time() - env.CAR_IMPORT_MINUTES * 60 + 60  # first read a minute after the start
     last_avatars = time.time() - 23 * 3600  # first pass an hour after the start, then daily
     while True:
         from app import keys
@@ -310,6 +323,9 @@ def main():
         if env.DAILY_RENT_ICAL_MINUTES > 0 and time.time() - last_ical >= env.DAILY_RENT_ICAL_MINUTES * 60:
             last_ical = time.time()
             daily_rent_ical_tick()
+        if env.CAR_IMPORT_MINUTES > 0 and time.time() - last_cars >= env.CAR_IMPORT_MINUTES * 60:
+            last_cars = time.time()
+            car_import_tick()
         if time.time() - last_avatars >= 24 * 3600:  # team members still without a stored photo (telegram/avatars.py)
             last_avatars = time.time()
             try:

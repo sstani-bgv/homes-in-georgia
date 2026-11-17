@@ -41,6 +41,7 @@ class CarIn(_In):
     seats: int | None = Field(None, ge=1, le=60)
     mileage: int | None = Field(None, ge=0)
     pickup: str | None = None
+    post_fields: dict | None = None  # the post generator's fields (services/car_post.FIELDS)
 
 
 class StatusIn(BaseModel):
@@ -92,6 +93,12 @@ def offers_list(kind: Kind, status: Literal[OFFER_STATUSES] | None = None, q: st
 @router.post("/{kind}")
 def offers_create(kind: Kind, body: dict, db: Session = Db, user: User = Agent):
     return O.out(O.create(db, _model(kind), _body(kind, body, True), user))
+
+
+@router.post("/{kind}/preview")
+def offers_preview(kind: Kind, body: dict, db: Session = Db, user: User = Agent):
+    """The post the generator builds from the form as it is now (nothing saved): the form's live preview."""
+    return {"text": O.preview_text(_body(kind, body, False))}
 
 
 @router.get("/{kind}/{oid}")

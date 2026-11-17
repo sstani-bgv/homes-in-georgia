@@ -989,6 +989,11 @@ FOOTER_LINKS = (
 )
 
 
+def _cars_map_url() -> str:
+    """Our site's map with the rental cars on it (web/src/components/MapApp.tsx: ?from=<service>)."""
+    return conf("SITE_URL", "https://hge.ge").rstrip("/") + "/map?from=car-rent"
+
+
 def post_html(text, pid=None):
     """The post text as Telegram HTML: the address and footer lines become links; «APARTMENTS ON MAP» opens our site's
     map on the object pid (properties.hge_map_url), without it the whole map."""
@@ -998,6 +1003,8 @@ def post_html(text, pid=None):
     for plain, linked in FOOTER_LINKS:
         out = out.replace(plain, linked)
     from app.services.properties import hge_map_url
+    if "📍CARS ON MAP📍" in out:  # a rent car's post (services/car_post.py): the site's map of the rental cars
+        out = out.replace("📍CARS ON MAP📍", f'📍<b><a href="{html.escape(_cars_map_url())}">CARS ON MAP</a></b>📍')
     return out.replace("📍APARTMENTS ON MAP📍", f'📍<b><a href="{html.escape(hge_map_url(pid))}">APARTMENTS ON MAP</a></b>📍')
 
 
@@ -1176,6 +1183,8 @@ def publish_post(prop):
     _, album_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ALBUM")
     _, originals_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ORIGINALS")
     _, owner_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_OWNER")
+    if g(prop, "chat"):  # a car goes to its own channel (services/offers.car_channel): no topics, no originals / owner card
+        chat, album_topic, originals_topic, owner_topic = g(prop, "chat"), None, None, None
     keys = g(prop, "post_media_keys")  # [(photo|video, storage key)]: sale objects and cars keep keys in the row
     # a property (no keys) is on the site as o<id>; cars have no «APARTMENTS ON MAP»
     caption = post_html(g(prop, "post_text") or g(prop, "description") or prop_title(prop),

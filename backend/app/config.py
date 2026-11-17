@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # and extra hosts allowed for an imported iCal link besides Airbnb / Booking / VRBO / Google / iCloud
     DAILY_RENT_ICAL_MINUTES: int = 15
     DAILY_RENT_ICAL_HOSTS: str = ""
+    # «Авто» (services/car_import.py): how often the worker reads the car channels into the CRM (0 = never)
+    CAR_IMPORT_MINUTES: int = 15
     JWT_TTL_HOURS: int = 72
     PUBLIC_URL: str = "http://localhost:8000"
     # our site (web/): «APARTMENTS ON MAP» / «On the map» in the posts open its map on the object. The sslip host until
@@ -58,6 +60,9 @@ class Settings(BaseSettings):
     PUBLISH_TOPIC_ORIGINALS: str = ""
     PUBLISH_TOPIC_OWNER: str = ""
     PUBLISH_TOPIC_ALBUM: str = ""
+    # a car's «Опубликовать» in Telegram (services/offers.car_channel): empty = @CarsSaleInGeorgia / @CarsRentInGeorgia
+    CAR_SALE_CHAT_ID: str = ""
+    CAR_RENT_CHAT_ID: str = ""
     SUPERADMIN_TG_IDS: str = ""
     ADMIN_BOOTSTRAP_LOGIN: str = ""
     ADMIN_BOOTSTRAP_PASSWORD: str = ""

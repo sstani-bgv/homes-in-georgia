@@ -1,10 +1,10 @@
 // «Авто»: hge.ge's cars (backend api/offers.py, services/offers.py). Sales are objects now («Объекты» → Продажа).
 // The form follows the rent objects' generator (chips, the place on the map); photos and video sort and open as on an
 // object (MediaGrid + Lightbox); one «Опубликовать» to the checked targets: the site and / or Telegram (Stanislav 11-15).
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Plus, RotateCcw, Send, Upload } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Plus, RotateCcw, Send, Upload } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { Offer, OfferStatus } from '../../api/types';
@@ -21,13 +21,38 @@ const PATH = '/cars';
 const SITE: Record<OfferStatus, [string, 'ok' | 'grey' | 'warn']> = { draft: ['не на сайте', 'grey'], published: ['на сайте', 'ok'], archived: ['архив', 'warn'] };
 const CURRENCY = [{ value: 'USD', label: '$ USD' }, { value: 'GEL', label: '₾ GEL' }, { value: 'EUR', label: '€ EUR' }];
 const GEARBOX: Record<string, string> = { auto: 'Автомат', manual: 'Механика' };
-const FUEL: Record<string, string> = { petrol: 'Бензин', diesel: 'Дизель', hybrid: 'Гибрид', electric: 'Электро', gas: 'Газ' };
-const BODY: Record<string, string> = { sedan: 'Седан', suv: 'Внедорожник', hatchback: 'Хэтчбек', wagon: 'Универсал', coupe: 'Купе', minivan: 'Минивэн', business: 'Бизнес', pickup: 'Пикап', convertible: 'Кабриолет' };
+const FUEL: Record<string, string> = { petrol: 'Бензин', diesel: 'Дизель', hybrid: 'Гибрид', plugin_hybrid: 'Plug-in гибрид', electric: 'Электро', gas: 'Газ' };
+const BODY: Record<string, string> = { sedan: 'Седан', suv: 'Внедорожник', crossover: 'Кроссовер', hatchback: 'Хэтчбек', wagon: 'Универсал', coupe: 'Купе',
+  convertible: 'Кабриолет', minivan: 'Минивэн', cargo_van: 'Фургон', pickup: 'Пикап', business: 'Бизнес' };
+// the post generator's words (backend services/car_post.py): the value is the hashtag itself
+const tags = (...xs: string[]) => Object.fromEntries(xs.map((x) => [x, x]));
+const TRANSMISSION = { Automatic: 'Автомат', Manual: 'Механика', DCT: 'Робот DCT', AutomatedManual: 'Роботизированная', CVT: 'Вариатор', Robot: 'Робот' };
+const DRIVE = tags('4WD', 'AWD', 'FWD', 'RWD', '2WD');
+const CONDITION = { Excellent: 'Отличное', Good: 'Хорошее', Fair: 'Среднее', NeedsRepair: 'Требует ремонта' };
+const COLOR = { Black: 'Чёрный', White: 'Белый', Silver: 'Серебристый', Gray: 'Серый', Blue: 'Синий', Red: 'Красный', Green: 'Зелёный',
+  Brown: 'Коричневый', Beige: 'Бежевый', Yellow: 'Жёлтый', Orange: 'Оранжевый', Gold: 'Золотой', Purple: 'Фиолетовый' };
+const SALE_OPTIONS = tags('AC', 'ClimateControl', 'DualClimate', 'RearviewCamera', '360Camera', 'ParkingSensors', 'MultifunctionSteering', 'Sunroof',
+  'Panorama', 'HeatedSeats', 'VentilatedSeats', 'HeatedSteering', 'LeatherSeats', 'ElectricSeats', 'EcoMode', 'SportMode', 'MultimediaSystem',
+  'Display', 'Navigation', 'Bluetooth', 'CarPlay', 'AndroidAuto', 'LightSensor', 'RainSensor', 'CruiseControl', 'AdaptiveCruise', 'KeylessEntry',
+  'StartStop', 'AlloyWheels', 'LEDHeadlights', 'BlindSpot', 'LaneAssist');
+const SAFETY = tags('ABS', 'ESP', 'Airbags', 'TractionControl', 'HillAssist', 'ISOFIX', 'TPMS', 'EmergencyBraking');
+const RENT_OPTIONS: [string, Record<string, string>][] = [
+  ['🧊 Климат', tags('AC', 'ClimateControl', 'DualClimate', 'HeatedSeats', 'HeatedSteering', 'VentilatedSeats')],
+  ['📲 Мультимедиа', tags('Bluetooth', 'Multimedia', 'USB', 'AppleCarPlay', 'AndroidAuto', 'Navigation', 'TouchScreen')],
+  ['🛞 Помощники', tags('CruiseControl', 'AdaptiveCruise', 'EcoMode', 'SportMode', 'RearCamera', '360Camera', 'ParkingSensors', 'Panorama', 'Sunroof',
+    'KeylessEntry', 'StartStop', 'AlloyWheels', 'LargeTrunk')],
+];
+const CAR_CLASS = { EconomyClass: 'Эконом', ComfortClass: 'Комфорт', BusinessClass: 'Бизнес', PremiumClass: 'Премиум', LuxuryClass: 'Люкс' };
+const PETS = { allowed: 'Можно', no: 'Нельзя', agreement: 'По договорённости' };
+const EXTRAS: [string, string][] = [['child_seat', '👶 Детское кресло'], ['booster', '💺 Бустер'], ['chains', '🔗 Цепи'], ['winter_tires', '❄️ Зимняя резина'],
+  ['second_driver', '👥 Второй водитель'], ['with_driver', '🧑‍✈️ С водителем'], ['sim', '📶 SIM-карта']];
+const DELIVERY = 'Tbilisi / Airport / City Center';
 const MAX_PHOTO = 40;
 const TABS: { value: OfferStatus | 'all'; label: string }[] = [{ value: 'all', label: 'Все' }, { value: 'draft', label: 'Не на сайте' }, { value: 'published', label: 'На сайте' }, { value: 'archived', label: 'Архив' }];
 const siteUrl = (o: Offer) => `https://hge.ge/listing/${o.item_id}`;
 const shots = (o: Offer): Shot[] => [...o.photos.map((k) => ({ id: k, kind: 'photo' as const, room: null, src: k })), ...(o.video ? [{ id: o.video, kind: 'video' as const, room: null, src: o.video }] : [])];
 const what = (o: Offer | Draft) => [o.deal === 'sale' ? 'Продажа' : 'Аренда', BODY[String(o.body)]].filter(Boolean).join(' · ');
+const fromChannel = (o: Offer) => o.source === 'telegram';
 const priceOf = (o: Offer) => (o.price != null ? `${money(o.price, o.currency)}${o.deal === 'rent' ? ` / ${o.period === 'month' ? 'мес' : 'день'}` : ''}` : '—');
 
 export function OffersPage() {
@@ -54,7 +79,7 @@ export function OffersPage() {
                       <td style={{ width: 56 }}>{o.photos[0] ? (
                         <img src={thumbUrl(o.photos[0])} alt="" width={48} height={48} style={{ objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in' }}
                           onClick={(e) => { e.stopPropagation(); setView({ o, i: 0 }); }} />) : null}</td>
-                      <td><b>{o.title}</b>{o.year ? <small className="muted"> · {String(o.year)}</small> : null}</td>
+                      <td><b>{o.title}</b>{o.year ? <small className="muted"> · {String(o.year)}</small> : null}{fromChannel(o) && <> <Badge tone="blue">из канала</Badge></>}</td>
                       <td>{what(o)}</td>
                       <td>{priceOf(o)}</td>
                       <td>{o.public ? <a href={siteUrl(o)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><Badge tone="ok">на сайте</Badge></a> : <Badge tone={SITE[o.status][1]}>{SITE[o.status][0]}</Badge>}</td>
@@ -73,10 +98,21 @@ export function OffersPage() {
 }
 
 type Draft = Record<string, unknown>;
-const NEW: Draft = { deal: 'rent', period: 'day', currency: 'USD' };
+type PF = Record<string, unknown>;
+type Extra = { key: string; price: number | string };
+// the rent channel's usual terms; a sale gets the after-sale block
+const RENT_PF: PF = { insurance_basic: 10, insurance_full: 15, pets: 'allowed', unlimited_mileage: true, delivery: DELIVERY, drive: '4WD',
+  options: ['AC', 'ClimateControl', 'HeatedSeats', 'Bluetooth', 'Multimedia', 'USB', 'CruiseControl', 'EcoMode'],
+  extras: EXTRAS.slice(0, 5).map(([key]) => ({ key, price: 3 })) };
+const SALE_PF: PF = { after_sale: true };
+const NEW: Draft = { deal: 'rent', period: 'day', currency: 'USD', post_fields: RENT_PF };
 const KEYS = ['deal', 'title', 'period', 'deposit', 'year', 'gearbox', 'fuel', 'body', 'seats', 'mileage', 'pickup', 'lat', 'lng', 'price', 'currency', 'description', 'is_exclusive'];
 const NUM = new Set(['price', 'deposit', 'year', 'seats', 'mileage']);
+const PF_NUM = new Set(['hp', 'fuel_use', 'trunk', 'insurance_basic', 'insurance_full']);
 const s = (v: unknown) => (v == null ? '' : String(v));
+const pfOf = (d: Draft): PF => (d.post_fields as PF) || {};
+const lines = (v: unknown) => (Array.isArray(v) ? v.join('\n') : s(v));
+const toLines = (v: string) => v.split('\n').map((x) => x.replace(/^[✅•\-\s]+/, '').trim()).filter(Boolean);
 
 /** the form's values -> the request body (empty string = cleared field) */
 function body(d: Draft): Record<string, unknown> {
@@ -87,47 +123,187 @@ function body(d: Draft): Record<string, unknown> {
   }
   if (d.deal === 'sale') Object.assign(out, { period: null, deposit: null });
   else out.mileage = null;
+  const pf: PF = {};
+  for (const [k, v] of Object.entries(pfOf(d))) {
+    pf[k] = v === '' || v == null ? null : PF_NUM.has(k) ? Number(v)
+      : k === 'extras' ? (v as Extra[]).map((e) => ({ key: e.key, price: Number(e.price) || 0 })) : v;
+  }
+  out.post_fields = pf;
   return out;
+}
+
+/** Several values at once (options, safety): a tap toggles the hashtag. */
+function MultiChips({ options, value, onChange }: { options: Record<string, string>; value: string[]; onChange: (v: string[]) => void }) {
+  const on = new Set(value);
+  return (
+    <div className="row row-wrap gap-sm">
+      {Object.entries(options).map(([v, l]) => (
+        <button key={v} type="button" className={`chip ${on.has(v) ? 'active' : ''}`} aria-pressed={on.has(v)}
+          onClick={() => onChange(on.has(v) ? value.filter((x) => x !== v) : [...value, v])}>{on.has(v) ? <CheckCircle2 size={14} /> : null}{l}</button>
+      ))}
+    </div>
+  );
 }
 
 function CarForm({ d, set }: { d: Draft; set: (patch: Draft) => void }) {
   const rent = d.deal !== 'sale';
+  const pf = pfOf(d);
+  const setPf = (patch: PF) => set({ post_fields: { ...pf, ...patch } });
+  const list = (k: string) => (Array.isArray(pf[k]) ? (pf[k] as string[]) : []);
   const point = d.lat != null && d.lng != null ? { lat: Number(d.lat), lng: Number(d.lng) } : null;
+  const num = (label: string, k: string, hint?: string) => (
+    <Field label={label} hint={hint}><Input type="number" inputMode="decimal" value={s(pf[k])} onChange={(e) => setPf({ [k]: e.target.value })} /></Field>);
+  const extras = (Array.isArray(pf.extras) ? pf.extras : []) as Extra[];
+  const deal = (v: string) => set({ deal: v, post_fields: { ...(v === 'sale' ? SALE_PF : RENT_PF), ...pf } });
   return (
     <>
       <div className="gen-block">
         <span className="gen-title">1 · Основное</span>
-        <Seg value={rent ? 'rent' : 'sale'} onChange={(v) => set({ deal: v })} options={[{ value: 'rent', label: '🔑 Аренда' }, { value: 'sale', label: '💼 Продажа' }]} />
+        <Seg value={rent ? 'rent' : 'sale'} onChange={deal} options={[{ value: 'rent', label: '🔑 Аренда' }, { value: 'sale', label: '💼 Продажа' }]} />
         <Switch checked={!!d.is_exclusive} onChange={(v) => set({ is_exclusive: v })} label="❗️ Exclusive listing" />
         <div className="form-grid">
-          <Field label="Марка и модель *" hint="Первое слово — хештег марки: #Toyota"><Input value={s(d.title)} placeholder="Toyota Camry" onChange={(e) => set({ title: e.target.value })} /></Field>
+          <Field label="Марка и модель *" hint="Марка — хештег: #Toyota, Mercedes-Benz → #Mercedes"><Input value={s(d.title)} placeholder={rent ? 'Jeep Compass' : 'Ford Escape Titanium'} onChange={(e) => set({ title: e.target.value })} /></Field>
           <Field label="Год"><Input type="number" inputMode="numeric" value={s(d.year)} onChange={(e) => set({ year: e.target.value })} /></Field>
         </div>
       </div>
-      <div className="gen-block">
-        <span className="gen-title">2 · Авто</span>
-        <Field label="Кузов"><Chips options={BODY} value={s(d.body) || undefined} onChange={(v) => set({ body: v ?? '' })} /></Field>
-        <Field label="Коробка"><Chips options={GEARBOX} value={s(d.gearbox) || undefined} onChange={(v) => set({ gearbox: v ?? '' })} /></Field>
-        <Field label="Топливо"><Chips options={FUEL} value={s(d.fuel) || undefined} onChange={(v) => set({ fuel: v ?? '' })} /></Field>
-        <div className="form-grid">
-          <Field label="Мест"><Input type="number" inputMode="numeric" value={s(d.seats)} onChange={(e) => set({ seats: e.target.value })} /></Field>
-          {!rent && <Field label="Пробег, км"><Input type="number" inputMode="numeric" value={s(d.mileage)} onChange={(e) => set({ mileage: e.target.value })} /></Field>}
-        </div>
-      </div>
-      <div className="gen-block">
-        <span className="gen-title">3 · Цена</span>
-        <div className="form-grid">
-          <Field label="Цена"><Input type="number" inputMode="numeric" value={s(d.price)} onChange={(e) => set({ price: e.target.value })} /></Field>
-          <Field label="Валюта"><Select value={s(d.currency) || 'USD'} onChange={(e) => set({ currency: e.target.value })} options={CURRENCY} /></Field>
-          {rent && <Field label="Цена за"><Seg value={s(d.period) || 'day'} onChange={(v) => set({ period: v })} options={[{ value: 'day', label: 'день' }, { value: 'month', label: 'месяц' }]} /></Field>}
-          {rent && <Field label="Залог"><Input type="number" inputMode="numeric" value={s(d.deposit)} onChange={(e) => set({ deposit: e.target.value })} /></Field>}
-        </div>
-      </div>
-      <div className="gen-block">
-        <span className="gen-title">4 · {rent ? 'Где забрать' : 'Где посмотреть'}</span>
-        <AddressField value={s(d.pickup)} onChange={(v) => set({ pickup: v })} point={point} onPoint={(p) => set({ lat: p?.lat ?? null, lng: p?.lng ?? null })} />
-      </div>
+      {rent ? (
+        <>
+          <div className="gen-block">
+            <span className="gen-title">2 · Авто</span>
+            <Field label="Класс" hint="В заголовке поста: #BusinessClass; без класса — кузов"><Chips options={CAR_CLASS} value={s(pf.car_class) || undefined} onChange={(v) => setPf({ car_class: v ?? '' })} /></Field>
+            <Field label="Кузов"><Chips options={BODY} value={s(d.body) || undefined} onChange={(v) => set({ body: v ?? '' })} /></Field>
+            <Field label="Коробка"><Chips options={GEARBOX} value={s(d.gearbox) || undefined} onChange={(v) => set({ gearbox: v ?? '' })} /></Field>
+            <Field label="Топливо"><Chips options={FUEL} value={s(d.fuel) || undefined} onChange={(v) => set({ fuel: v ?? '' })} /></Field>
+            <Field label="Привод"><Chips options={DRIVE} value={s(pf.drive) || undefined} onChange={(v) => setPf({ drive: v ?? '' })} /></Field>
+            <div className="form-grid">
+              <Field label="Мест"><Input type="number" inputMode="numeric" value={s(d.seats)} onChange={(e) => set({ seats: e.target.value })} /></Field>
+              {num('Багажник, л', 'trunk')}
+              {num('Расход, л / 100 км', 'fuel_use')}
+            </div>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">3 · Опции</span>
+            {RENT_OPTIONS.map(([label, opts]) => (
+              <Field key={label} label={label}><MultiChips options={opts} value={list('options')} onChange={(v) => setPf({ options: v })} /></Field>
+            ))}
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">4 · Условия</span>
+            <Field label="🐶 Животные"><Chips options={PETS} value={s(pf.pets) || undefined} onChange={(v) => setPf({ pets: v ?? '' })} /></Field>
+            <Switch checked={pf.smoking === true} onChange={(v) => setPf({ smoking: v })} label="🚬 Курить можно" />
+            <Switch checked={pf.unlimited_mileage !== false} onChange={(v) => setPf({ unlimited_mileage: v })} label="❗️ Без лимита пробега (UnlimitedMileage)" />
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">5 · Цена</span>
+            <div className="form-grid">
+              <Field label="Цена"><Input type="number" inputMode="numeric" value={s(d.price)} onChange={(e) => set({ price: e.target.value })} /></Field>
+              <Field label="Валюта"><Select value={s(d.currency) || 'USD'} onChange={(e) => set({ currency: e.target.value })} options={CURRENCY} /></Field>
+              <Field label="Цена за"><Seg value={s(d.period) || 'day'} onChange={(v) => set({ period: v })} options={[{ value: 'day', label: 'день' }, { value: 'month', label: 'месяц' }]} /></Field>
+              <Field label="Залог"><Input type="number" inputMode="numeric" value={s(d.deposit)} onChange={(e) => set({ deposit: e.target.value })} /></Field>
+              {num('Базовая страховка', 'insurance_basic')}
+              {num('Полная страховка', 'insurance_full')}
+            </div>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">6 · Доп. услуги</span>
+            <div className="col gap-sm">
+              {EXTRAS.map(([key, label]) => {
+                const e = extras.find((x) => x.key === key);
+                const put = (next: Extra[]) => setPf({ extras: EXTRAS.map(([k]) => next.find((x) => x.key === k)).filter(Boolean) });
+                return (
+                  <div key={key} className="row gap-sm" style={{ alignItems: 'center' }}>
+                    <div style={{ flex: 1 }}><Switch checked={!!e} onChange={(on) => put(on ? [...extras, { key, price: 3 }] : extras.filter((x) => x.key !== key))} label={label} /></div>
+                    {e && <Input type="number" inputMode="numeric" style={{ width: 96 }} value={s(e.price)} placeholder="0 = Free"
+                      onChange={(ev) => put(extras.map((x) => (x.key === key ? { ...x, price: ev.target.value } : x)))} />}
+                    {e && <span className="muted" style={{ fontSize: 12 }}>/ день</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">7 · Где забрать</span>
+            <AddressField value={s(d.pickup)} onChange={(v) => set({ pickup: v })} point={point} onPoint={(p) => set({ lat: p?.lat ?? null, lng: p?.lng ?? null })} />
+            <Field label="📍 FREE Pick-up & drop-off" hint="Пусто — строки не будет">
+              <Input value={pf.delivery === '-' ? '' : s(pf.delivery)} placeholder={DELIVERY} onChange={(e) => setPf({ delivery: e.target.value || '-' })} />
+            </Field>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="gen-block">
+            <span className="gen-title">2 · Двигатель и коробка</span>
+            <Field label="Топливо"><Chips options={FUEL} value={s(d.fuel) || undefined} onChange={(v) => set({ fuel: v ?? '' })} /></Field>
+            <div className="form-grid">
+              <Field label="Двигатель" hint="Первое слово — хештег: I4 → #I4, V8 → #V8"><Input value={s(pf.engine)} placeholder="I4 2.0L EcoBoost Turbocharged" onChange={(e) => setPf({ engine: e.target.value })} /></Field>
+              {num('Мощность, HP', 'hp')}
+            </div>
+            <Field label="Коробка"><Chips options={TRANSMISSION} value={s(pf.transmission) || undefined}
+              onChange={(v) => set({ gearbox: v ? (v === 'Manual' ? 'manual' : 'auto') : '', post_fields: { ...pf, transmission: v ?? '' } })} /></Field>
+            <Field label="Привод"><Chips options={DRIVE} value={s(pf.drive) || undefined} onChange={(v) => setPf({ drive: v ?? '' })} /></Field>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">3 · Кузов и пробег</span>
+            <Field label="Кузов"><Chips options={BODY} value={s(d.body) || undefined} onChange={(v) => set({ body: v ?? '' })} /></Field>
+            <Field label="Цвет"><Chips options={COLOR} value={s(pf.color) || undefined} onChange={(v) => setPf({ color: v ?? '' })} /></Field>
+            <div className="form-grid">
+              <Field label="Пробег, км" hint="Хештег пробега: #From200000"><Input type="number" inputMode="numeric" value={s(d.mileage)} onChange={(e) => set({ mileage: e.target.value })} /></Field>
+              <Field label="Мест"><Input type="number" inputMode="numeric" value={s(d.seats)} onChange={(e) => set({ seats: e.target.value })} /></Field>
+            </div>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">4 · Опции и безопасность</span>
+            <Field label="✨ OPTIONS"><MultiChips options={SALE_OPTIONS} value={list('options')} onChange={(v) => setPf({ options: v })} /></Field>
+            <Field label="🛡 SAFETY"><MultiChips options={SAFETY} value={list('safety')} onChange={(v) => setPf({ safety: v })} /></Field>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">5 · Состояние</span>
+            <Field label="🔧 CONDITION"><Chips options={CONDITION} value={s(pf.condition) || undefined} onChange={(v) => setPf({ condition: v ?? '' })} /></Field>
+            <Field label="Описание состояния" hint="Абзац под CONDITION; он же — описание на сайте">
+              <Textarea rows={4} value={s(d.description)} placeholder="The engine runs well, the transmission shifts smoothly…" onChange={(e) => set({ description: e.target.value })} />
+            </Field>
+            <Field label="✅ Что сделано" hint="Каждая строка — отдельный пункт ✅">
+              <Textarea rows={3} value={lines(pf.maintenance)} placeholder="Recent maintenance includes an oil change" onChange={(e) => setPf({ maintenance: toLines(e.target.value) })} />
+            </Field>
+            <Field label="Cosmetic imperfections" hint="Каждая строка — пункт •">
+              <Textarea rows={3} value={lines(pf.cosmetic)} placeholder="Minor chips on the alloy wheels" onChange={(e) => setPf({ cosmetic: toLines(e.target.value) })} />
+            </Field>
+            <Field label="🔎 VIN"><Input value={s(pf.vin)} maxLength={20} style={{ textTransform: 'uppercase' }} onChange={(e) => setPf({ vin: e.target.value.toUpperCase() })} /></Field>
+            <Switch checked={pf.after_sale !== false} onChange={(v) => setPf({ after_sale: v })} label="🛠 Блок AFTER-SALE SERVICES" />
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">6 · Цена</span>
+            <div className="form-grid">
+              <Field label="Цена" hint="Хештеги цены: #Price5000to10000"><Input type="number" inputMode="numeric" value={s(d.price)} onChange={(e) => set({ price: e.target.value })} /></Field>
+              <Field label="Валюта"><Select value={s(d.currency) || 'USD'} onChange={(e) => set({ currency: e.target.value })} options={CURRENCY} /></Field>
+            </div>
+          </div>
+          <div className="gen-block">
+            <span className="gen-title">7 · Где посмотреть</span>
+            <AddressField value={s(d.pickup)} onChange={(v) => set({ pickup: v })} point={point} onPoint={(p) => set({ lat: p?.lat ?? null, lng: p?.lng ?? null })} />
+          </div>
+        </>
+      )}
     </>
+  );
+}
+
+/** The post as it will look in the channel, rebuilt from the form while typing (POST /offers/car/preview, nothing saved). */
+function PostPreview({ d }: { d: Draft }) {
+  const [text, setText] = useState('');
+  const [err, setErr] = useState(false);
+  const json = JSON.stringify(body(d));
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api.offers.preview(KIND, JSON.parse(json)).then((r) => { setText(r.text); setErr(false); }, () => setErr(true));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [json]);
+  return (
+    <Card label={d.deal === 'sale' ? 'Канал CarsSaleInGeorgia' : 'Канал CarsRentInGeorgia'} title="Предпросмотр поста">
+      {err ? <div className="alert alert-warn">Не удалось собрать пост — проверьте поля</div>
+        : <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, margin: 0 }}>{text || '…'}</pre>}
+    </Card>
   );
 }
 
@@ -260,14 +436,16 @@ export function OfferCardPage() {
         actions={o && <><Badge tone={SITE[o.status][1]}>{SITE[o.status][0]}</Badge>{o.post_url && <Badge tone="blue">в Telegram</Badge>}</>} />
       <Card>
         <div className="col gap-lg">
+          {o && fromChannel(o) && <div className="alert">Авто из канала{o.post_url ? <> (<a href={o.post_url} target="_blank" rel="noreferrer">пост</a>)</> : null}: правка поста в канале обновит карточку при следующей синхронизации (каждые 15 минут).</div>}
           <CarForm d={d} set={set} />
-          <Field label="Описание"><Textarea rows={5} value={s(d.description)} onChange={(e) => set({ description: e.target.value })} /></Field>
+          {d.deal !== 'sale' && <Field label="Описание для сайта" hint="В пост не входит"><Textarea rows={4} value={s(d.description)} onChange={(e) => set({ description: e.target.value })} /></Field>}
           <div className="row gap-sm row-wrap">
             <Button size="lg" loading={save.isPending} disabled={!ready || (!isNew && !draft)} onClick={() => save.mutate()}>Сохранить</Button>
             {!ready && <span className="faint" style={{ fontSize: 12, alignSelf: 'center' }}>Укажите модель</span>}
           </div>
         </div>
       </Card>
+      <PostPreview d={d} />
       {isNew ? <Empty text="Фото, видео и публикация — после сохранения" /> : o && <>
         <Media o={o} onChange={fresh} />
         <Publish o={o} dirty={!!draft} onChange={fresh} />

@@ -266,12 +266,14 @@ def test_car_telegram_post_and_failure(db, client, sent, monkeypatch):
                       "price": 14500, "gearbox": "auto", "fuel": "hybrid", "body": "sedan", "seats": 5, "mileage": 76538,
                       "is_exclusive": True}).json()["id"]
     text = client.get(f"/api/offers/car/{cid}/post", headers=auth(op)).json()["text"]
-    assert text.startswith("🚗 #Toyota Camry 2018") and "🏁 #Car for #Sale" in text and "✨ #Sedan | #Automatic | #Hybrid" in text
-    assert "5 Seats | 76.538 km" in text and "💰 14.500$" in text and "#Price10000to15000" in text and "#CarSale" in text
+    # the CarsSaleInGeorgia format (services/car_post.py; the full format: tests/test_car_channels.py)
+    assert text.startswith("🚘 Toyota Camry | 2018💰$14,500❗️#Exclusive\n0% Commission") and "#Automatic" in text
+    assert "🛣 76,538km · Sedan" in text and "#Hybrid #From50000to100000 #Price10000to20000" in text
+    assert text.endswith("#CarsSaleInGeorgia #CarsRentInGeorgia")
     rent = client.post("/api/offers/car", headers=auth(op), json={"deal": "rent", "title": "Kia Rio", "price": 40, "period": "day",
                        "deposit": 200, "pickup": "Airport"}).json()["id"]
     t2 = client.get(f"/api/offers/car/{rent}/post", headers=auth(op)).json()["text"]
-    assert "💰 40$/day + Deposit 200$" in t2 and "📍 Airport" in t2 and "#CarRent" in t2
+    assert "💰 40$/ day" in t2 and "Deposit: 200$" in t2 and t2.startswith("#Kia Rio 🚙📍 Airport") and t2.endswith("📍CARS ON MAP📍")
     agent = make_user(db, "agent")
     assert client.post(f"/api/offers/car/{cid}/publish", headers=auth(op), json={}).status_code == 400  # no photo
     up(client, auth(op), "car", cid)

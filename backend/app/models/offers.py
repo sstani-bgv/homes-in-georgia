@@ -39,7 +39,8 @@ class Car(_Offer, Base):
     __tablename__ = "cars"
     __table_args__ = (Index("cars_status_idx", "status"),
                       CheckConstraint(f"status IN {OFFER_STATUSES}", name="cars_status_check"),
-                      CheckConstraint(f"deal IN {CAR_DEALS}", name="cars_deal_check"))
+                      CheckConstraint(f"deal IN {CAR_DEALS}", name="cars_deal_check"),
+                      Index("cars_tg_post_idx", "tg_channel", "tg_message_id", unique=True))
     deal = Column(Text, nullable=False)  # rent | sale
     period = Column(Text)  # rent: day | month
     deposit = Column(Numeric(12, 2))
@@ -50,3 +51,9 @@ class Car(_Offer, Base):
     seats = Column(Integer)
     mileage = Column(Integer)
     pickup = Column(Text)  # rent: where the car is handed over
+    # the post generator's fields beyond the columns (services/car_post.py FIELDS): engine, hp, drive, color, options...
+    post_fields = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    source = Column(Text, nullable=False, server_default="crm")  # crm | telegram (services/car_import.py)
+    tg_channel = Column(Text)  # the car channel's username of the post it came from / was published to
+    tg_message_id = Column(Integer)
+    source_text = Column(Text)  # the channel post as read by the importer

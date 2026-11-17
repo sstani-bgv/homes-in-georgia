@@ -158,6 +158,8 @@ export const api = {
     order: (kind: OfferKind, id: number, keys: string[]) => http.put<Offer>(`/offers/${kind}/${id}/media/order`, { keys }),
     deleteFile: (kind: OfferKind, id: number, key: string) => http.del<Offer>(`/offers/${kind}/${id}/media?key=${encodeURIComponent(key)}`),
     post: (kind: OfferKind, id: number) => http.get<{ text: string }>(`/offers/${kind}/${id}/post`),
+    /** the post of the form as it is now, nothing saved (the generator's live preview) */
+    preview: (kind: OfferKind, b: Record<string, unknown>) => http.post<{ text: string }>(`/offers/${kind}/preview`, b),
     publish: (kind: OfferKind, id: number, b: { text?: string; tg: boolean; site: boolean; keys?: string[] }) => http.post<Offer>(`/offers/${kind}/${id}/publish`, b),
   },
 

@@ -883,6 +883,7 @@ on('DELETE', '/offers/:kind/:id/media', (m, _b, q) => {
   if (k === o.video) o.video = null; else o.photos = o.photos.filter((x) => x !== k);
   return offerOut(m[1], o);
 });
+on('POST', '/offers/:kind/preview', (m, b) => ({ text: offerPost(m[1], offerBase(0, { ...(b as Partial<MockOffer>), title: String(b.title ?? '') })) }));
 on('GET', '/offers/:kind/:id/post', (m) => ({ text: offerPost(m[1], getOffer(m[1], Number(m[2]))) }));
 on('POST', '/offers/:kind/:id/publish', (m, b) => {
   const o = getOffer(m[1], Number(m[2]));
