@@ -427,6 +427,10 @@ def object_to_client(cl, listing_id):
     photos = [x for x in (p if os.path.isabs(p) else os.path.join(bot_dir(), p) for p in i.get("photos") or []) if os.path.exists(x)]
     if photos:
         send_group(chat, None, [("photo", x) for x in photos[:core.ALBUM_PHOTOS]])
+    from app.db import SessionLocal
+    from app.services import site_feed
+    with SessionLocal() as db:
+        i["site_pid"] = site_feed.site_pid(db, listing_id)  # «📍 На карте»: the object on our site's map
     markup = core.card_keyboard(i, lang, like=like_button(cl, i["id"], core.t(lang, "like")))
     return tg.send(chat, core.card(i, None, lang=lang), markup, html=False)
 

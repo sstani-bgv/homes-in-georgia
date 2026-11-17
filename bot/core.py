@@ -226,9 +226,17 @@ CLIENT_ELIGIBLE = (f"(({CLIENT_SEARCH}) OR (l.status != 'rejected' AND EXISTS (S
                    "p.fast_track_at IS NOT NULL AND p.status NOT IN ('archived', 'rented'))))))")
 
 
+# the CRM object behind a listing when our site shows it (site_feed.public_filter: published, not «Снять с сайта», a photo)
+SITE_PID = ("(SELECT p.id FROM properties p WHERE ('obj' || p.id = l.id OR p.listing_id = l.id) AND p.status = 'published' "
+            "AND NOT p.site_hidden AND EXISTS (SELECT 1 FROM property_media m WHERE m.property_id = p.id AND m.kind = 'photo' "
+            "AND m.path NOT LIKE 'private/%') ORDER BY p.id LIMIT 1)")
+
+
 def client_listing(lid):
+    """The listing a client may get as a card (+ site_pid: its object on our site, for «📍 На карте»), or None."""
     with db.tx() as c:
-        return db.row(c.execute(f"SELECT l.* FROM listings l WHERE l.id = ? AND {CLIENT_ELIGIBLE}", (lid,)).fetchone())
+        return db.row(c.execute(f"SELECT l.*, {SITE_PID} AS site_pid FROM listings l WHERE l.id = ? AND {CLIENT_ELIGIBLE}",
+                                (lid,)).fetchone())
 
 
 def published():
@@ -862,15 +870,41 @@ def pin_link(i, base=None, lang="ru"):
     return f"{base}/map?{q}" if q and base else None
 
 
-def card_keyboard(i, lang="ru", base=None, liked=False, like=None):
+def site_url():
+    """Our site (web/, env SITE_URL; the backend's default when unset), '' = none."""
+    u = os.environ.get("SITE_URL")
+    if u is None:
+        try:
+            from app.config import settings
+            u = settings.SITE_URL
+        except Exception:  # noqa: BLE001  the bot without the backend package
+            u = ""
+    return (u or "").strip().rstrip("/")
+
+
+def site_map_link(i, site=None, lang="ru"):
+    """«📍 На карте» on our site's map (Stanislav 11-17): an object the site shows opens on its card there (?q=o<id>, as in
+    the channel posts: properties.hge_map_url); any other listing (a fast-tracked object, a catalog ad) as a pin on the
+    same map (?pin=lat,lng&title=…). None without a site or coordinates."""
+    site = site_url() if site is None else site
+    if not site:
+        return None
+    if i.get("site_pid"):
+        return f"{site}/map?q=o{i['site_pid']}"
+    q = pin_query(i, lang)
+    return f"{site}/map?{q}" if q else None
+
+
+def card_keyboard(i, lang="ru", base=None, liked=False, like=None, site=None):
     """Client card buttons (Bot API JSON): ❤️/👎 (or "sent" after a like) and, when possible, "📍 On the map"
-    (a web_app button: private chats only, which is where clients are). like: the ❤️ button (notify.like_button: the
-    operator DM link for a client who never contacted the operator), default the callback like:<id>."""
+    (a web_app button: private chats only, which is where clients are) — our site's map (site_map_link); site="" or no
+    site: the old pin map on PUBLIC_URL (pin_link). like: the ❤️ button (notify.like_button: the operator DM link for a
+    client who never contacted the operator), default the callback like:<id>."""
     rows = [[{"text": t(lang, "sent"), "callback_data": "noop"}] if liked else
             [like or {"text": t(lang, "like"), "callback_data": f"like:{i['id']}"},
              {"text": t(lang, "dislike"), "callback_data": f"no:{i['id']}"}]]
     extra = facts.media_links(i, lang)  # 🎥 video / 🧊 3D tour links, only on hosts that don't reveal the source
-    if url := pin_link(i, base, lang):
+    if url := site_map_link(i, site, lang) or pin_link(i, base, lang):
         extra.insert(0, {"text": t(lang, "on_map"), "web_app": {"url": url}})
     if extra:
         rows.append(extra)

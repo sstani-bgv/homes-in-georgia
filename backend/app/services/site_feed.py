@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Car, Property, PropertyMedia, User
@@ -165,6 +165,15 @@ def public_filter():
     has_photo = exists().where(PropertyMedia.property_id == Property.id, PropertyMedia.kind == "photo",
                                ~PropertyMedia.path.startswith(P.PRIVATE_PREFIX))
     return (Property.status == "published", ~Property.site_hidden, has_photo)
+
+
+def site_pid(db: Session, listing_id) -> int | None:
+    """The object the site shows for a listing (the bot card's «📍 На карте» opens it on the site's map), else None.
+    A catalog row of an object is «obj<id>»; an outside ad is linked by properties.listing_id."""
+    lid = str(listing_id or "")
+    own = int(lid[3:]) if lid.startswith("obj") and lid[3:].isdigit() else None
+    return db.scalar(select(Property.id).where(or_(Property.listing_id == lid, Property.id == own), *public_filter())
+                     .order_by(Property.id).limit(1))
 
 
 def _offer_filter(m):

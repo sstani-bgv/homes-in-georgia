@@ -345,19 +345,32 @@ class ClientMapTest(unittest.TestCase):
         self.assertIsNone(core.pin_link(self.I, "", "ru"))
         self.assertIsNone(core.pin_link({**self.I, "lat": None}, self.BASE))
 
+    SITE = "https://site.example"
+
+    def test_site_map_link(self):
+        from urllib.parse import parse_qs, urlparse
+        self.assertEqual(core.site_map_link({**self.I, "site_pid": 42}, self.SITE), self.SITE + "/map?q=o42")  # on the site
+        url = core.site_map_link(self.I, self.SITE, "ru")  # not on the site: a pin on the site's map
+        self.assertTrue(url.startswith(self.SITE + "/map?pin="))
+        self.assertEqual(parse_qs(urlparse(url).query)["pin"], ["41.709123,44.761234"])
+        self.assertIsNone(core.site_map_link(self.I, ""))
+        self.assertIsNone(core.site_map_link({**self.I, "lat": None}, self.SITE))
+        kb = core.card_keyboard({**self.I, "site_pid": 42}, "ru", self.BASE, site=self.SITE)
+        self.assertEqual(kb["inline_keyboard"][1][0]["web_app"]["url"], self.SITE + "/map?q=o42")
+
     def test_card_keyboard(self):
         def texts(kb):
             return [b["text"] for row in kb["inline_keyboard"] for b in row]
-        kb = core.card_keyboard(self.I, "ru", self.BASE)
+        kb = core.card_keyboard(self.I, "ru", self.BASE, site="")
         self.assertEqual(texts(kb), ["❤️ Нравится", "👎 Не то", "📍 На карте"])
         self.assertEqual(kb["inline_keyboard"][1][0]["web_app"]["url"], core.pin_link(self.I, self.BASE, "ru"))
-        self.assertEqual(texts(core.card_keyboard(self.I, "en", self.BASE)), ["❤️ I like it", "👎 Not this", "📍 On the map"])
-        self.assertEqual(texts(core.card_keyboard(self.I, "ru", "")), ["❤️ Нравится", "👎 Не то"])  # no public URL
-        self.assertEqual(texts(core.card_keyboard({**self.I, "lat": None}, "ru", self.BASE)), ["❤️ Нравится", "👎 Не то"])
-        self.assertEqual(texts(core.card_keyboard(self.I, "ru", self.BASE, liked=True)), ["✅ Передано агенту", "📍 На карте"])
+        self.assertEqual(texts(core.card_keyboard(self.I, "en", self.BASE, site="")), ["❤️ I like it", "👎 Not this", "📍 On the map"])
+        self.assertEqual(texts(core.card_keyboard(self.I, "ru", "", site="")), ["❤️ Нравится", "👎 Не то"])  # no public URL
+        self.assertEqual(texts(core.card_keyboard({**self.I, "lat": None}, "ru", self.BASE, site="")), ["❤️ Нравится", "👎 Не то"])
+        self.assertEqual(texts(core.card_keyboard(self.I, "ru", self.BASE, liked=True, site="")), ["✅ Передано агенту", "📍 На карте"])
         from unittest.mock import patch
         with patch.dict(os.environ, {"PUBLIC_URL": "", "AGENT_APP_URL": ""}):
-            self.assertEqual(texts(core.card_keyboard(self.I, "ru")), ["❤️ Нравится", "👎 Не то"])
+            self.assertEqual(texts(core.card_keyboard(self.I, "ru", site="")), ["❤️ Нравится", "👎 Не то"])
 
 
 class AgentMapTest(Base):

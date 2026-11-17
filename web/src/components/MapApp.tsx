@@ -174,10 +174,23 @@ export default function MapApp({ items }: { items: Item[] }) {
       lib.current = { L, map, layer };
       setReady(true);
       const s = state.current;
+      // ?pin=lat,lng&title=…: one place that may not be among the listings here (the bot's «📍 On the map» for an object
+      // the site doesn't show yet) — its own marker above the others, the map opens on it.
+      const url = new URLSearchParams(location.search);
+      const at = (url.get('pin') || '').split(',').map(Number);
+      const pin = at.length === 2 && at.every(Number.isFinite) && Math.abs(at[0]) <= 90 && Math.abs(at[1]) <= 180 ? at as [number, number] : null;
+      if (pin) {
+        const title = (url.get('title') || '').replace(/[&<>"]/g, '').slice(0, 80);
+        L.marker(pin, {
+          interactive: false, keyboard: false, zIndexOffset: 50000,
+          icon: L.divIcon({ className: 'cm cm-active', iconSize: undefined, html: `<div style="--c:var(--brand-strong)"><i>${iconHtml('pin')}</i>${title}</div>` }),
+        }).addTo(map);
+        if (!saved.center) map.setView(pin, 16, { animate: false });
+      }
       if (saved.card) {
         const p = s.visible.find(q => q.x.id === saved.card);
         if (p) requestAnimationFrame(() => selectRef.current(p));
-      } else if ((s.scoped || s.filtered) && s.all.length && !saved.center) {
+      } else if (!pin && (s.scoped || s.filtered) && s.all.length && !saved.center) {
         map.fitBounds(L.latLngBounds(s.all.map(p => [p.x.lat!, p.x.lon!] as [number, number])), {
           paddingTopLeft: isDesktop() ? [340, 80] : [36, 170], paddingBottomRight: [36, 36], maxZoom: 15, animate: false,
         });
