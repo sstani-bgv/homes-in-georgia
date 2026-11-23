@@ -1,6 +1,13 @@
 // detail: Russian (the key, shown as is for ru) → [Georgian, English]
 // PropertyDetail.tsx: the property card
 export const D: Record<string, [ka: string, en: string]> = {
+  "Где ещё выложен: {n}": ["სხვაგან განთავსებულია: {n}", "Also listed elsewhere: {n}"],
+  "Попросить снять": ["მოთხოვნა: წაშლა", "Ask to take down"],
+  "Попросили снять {d}": ["წაშლა მოითხოვეს {d}", "Takedown asked {d}"],
+  "Задача агенту: попросить снять": ["აგენტის დავალება: წაშლის მოთხოვნა", "Agent's task: ask to take it down"],
+  "Отмечено: не дубль": ["მონიშნულია: არ არის დუბლი", "Marked: not a duplicate"],
+  "привязано": ["მიბმულია", "linked"],
+  "возможно": ["შესაძლოა", "maybe"],
   "Добавьте бота админом с правами публикации и удаления.": ["დაამატეთ ბოტი ადმინად გამოქვეყნების და წაშლის უფლებით.", "Add the bot as an admin with post and delete rights."],
   "Не получилось: {step} — {error}": ["ვერ მოხერხდა: {step} — {error}", "Failed: {step} — {error}"],
   "Скачиваем фото и видео из хранилища…": ["ფოტოებს და ვიდეოებს საცავიდან ვტვირთავთ…", "Downloading photos and videos from storage…"],

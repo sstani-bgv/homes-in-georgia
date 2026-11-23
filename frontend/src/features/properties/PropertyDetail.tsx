@@ -926,26 +926,42 @@ function Ads({ p }: { p: Property }) {
 
 const srcName = (s?: string | null) => SOURCE_LABEL[s || ''] || s || t('другой сайт');
 
-/** Exclusive still advertised elsewhere: the agent asks the owner to take the ad down, the operator checks and presses
- * «Проверено: снято» (manual on purpose: ss.ge / myhome block server checks). Until then it can't go out as an exclusive. */
-function ExclusiveConflict({ p }: { p: Property }) {
+/** «Где ещё выложен» (David 11-23, any object): its outside ads and the copies the duplicate search found, with the site,
+ * the match and who posted it. «Попросить снять» is the agent's task (contact whoever posted it / the owner); the operator
+ * checks and presses «Проверено: снято» (manual on purpose: ss.ge / myhome block server checks); «Не дубль» drops it.
+ * An exclusive's linked ads block its publication until checked; nothing else blocks anything. */
+function WhereElse({ p }: { p: Property }) {
   const confirm = useConfirm();
   const { isStaff } = useAuth();
-  const { toast, set } = useProp(p.id);
-  const removed = useMutation({
-    mutationFn: (lid: string) => api.properties.adRemoved(p.id, lid),
-    onSuccess: (r) => { set(r); toast(t('Отмечено: объявление снято')); },
+  const { toast, set, qc } = useProp(p.id);
+  const done = (msg: string) => (r: Property) => { set(r); toast(msg); };
+  const removed = useMutation({ mutationFn: (lid: string) => api.properties.adRemoved(p.id, lid), onSuccess: done(t('Отмечено: объявление снято')), onError: (e) => toast(errText(e), true) });
+  const ask = useMutation({ mutationFn: (lid: string) => api.properties.adTakedown(p.id, lid), onSuccess: done(t('Задача агенту: попросить снять')), onError: (e) => toast(errText(e), true) });
+  const notDup = useMutation({
+    mutationFn: (lid: string) => api.similar.decide(`p:${p.id}`, `l:${lid}`, 'different'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['property', p.id] }); qc.invalidateQueries({ queryKey: ['similar'] }); toast(t('Отмечено: не дубль')); },
     onError: (e) => toast(errText(e), true),
   });
-  const ads = p.exclusive_conflict || [];
+  const ads = p.copies || [];
   if (!ads.length) return null;
+  const blocking = ads.filter((a) => a.blocking);
+  const title = blocking.length ? t('Эксклюзив висит на {s}', { s: [...new Set(blocking.map((a) => a.where))].join(', ') }) : t('Где ещё выложен: {n}', { n: ads.length });
   return (
-    <Card label={t('Эксклюзив')} title={t('Эксклюзив висит на {s}', { s: [...new Set(ads.map((a) => srcName(a.source)))].join(', ') })}>
-      <div className="alert alert-warn">{t('Задача агенту: попросить собственника снять объявление. Публикация как эксклюзив закрыта, пока оператор не проверит, что объявление снято.')}</div>
+    <Card label={t('Дубли')} title={title}>
+      {blocking.length > 0 && <div className="alert alert-warn">{t('Задача агенту: попросить собственника снять объявление. Публикация как эксклюзив закрыта, пока оператор не проверит, что объявление снято.')}</div>}
       {ads.map((a) => (
-        <div className="list-row" key={a.listing_id}>
-          <div className="grow" style={{ fontWeight: 700 }}>{srcName(a.source)}</div>
+        <div className="list-row" key={a.listing_id} style={{ flexWrap: 'wrap' }}>
+          <div className="grow">
+            <div className="row gap-sm" style={{ fontWeight: 700 }}>
+              {a.where}
+              {a.level === 'linked' ? <Badge tone="grey">{t('привязано')}</Badge> : <Badge tone={a.level === 'confirmed' ? 'red' : 'warn'}>{a.pct != null ? `${Math.round(a.pct)}%` : a.level === 'confirmed' ? t('дубль') : t('возможно')}</Badge>}
+              {a.who && <Badge tone="grey">{t(a.who)}</Badge>}
+            </div>
+            {a.asked && <div className="muted" style={{ fontSize: 12 }}>{t('Попросили снять {d}', { d: fmtDateTime(a.asked.at) })}{a.asked.by ? ` · ${a.asked.by}` : ''}</div>}
+          </div>
           {a.url && <a className="btn btn-secondary btn-sm" href={a.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t('Открыть')}</a>}
+          {!a.asked && <Button size="sm" variant="secondary" loading={ask.isPending && ask.variables === a.listing_id} onClick={() => ask.mutate(a.listing_id)}>{t('Попросить снять')}</Button>}
+          {a.level !== 'linked' && <Button size="sm" variant="secondary" loading={notDup.isPending && notDup.variables === a.listing_id} onClick={() => notDup.mutate(a.listing_id)}>{t('Не дубль')}</Button>}
           {isStaff && (
             <Button size="sm" loading={removed.isPending && removed.variables === a.listing_id}
               onClick={async () => { if (await confirm(t('Вы открыли ссылку и убедились, что объявление снято с сайта?'))) removed.mutate(a.listing_id); }}>
@@ -1860,7 +1876,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {p.change_requests.map((r) => <RequestRow key={r.id} r={r} showObject={false} />)}
             </Card>
           )}
-          <ExclusiveConflict p={p} />
+          <WhereElse p={p} />
           {!(p.status === 'review' && isStaff) && (
             <Card label={t('Дубли')} title={t('Похожие объекты')} actions={<MyhomeCopies p={p} />}>
               <DupScan p={p} />

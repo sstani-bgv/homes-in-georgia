@@ -152,6 +152,7 @@ export const api = {
     transferRequest: (id: number, agent_id: number, reason?: string) => http.post<{ change_request: ChangeRequest | null }>(`/properties/${id}/transfer-request`, { agent_id, reason }),
     elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
     similar: (id: number) => http.get<{ items: SimilarItem[] }>(`/properties/${id}/similar`),
+    adTakedown: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/takedown`), normProperty),
     adRemoved: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/removed`), normProperty),
     refused: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/refused`, { comment }),
     thinking: (id: number, until: string, comment?: string) => http.post<Property>(`/properties/${id}/thinking`, { until, comment }),

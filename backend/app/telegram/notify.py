@@ -982,6 +982,24 @@ def exclusive_duplicates(prop, n, strong):
     to_operators("exclusive_duplicates", pid, text, lambda private: kb([[app_btn("🏠 Открыть объект", links.property_app(pid), private)]]))
 
 
+@safe
+def object_copies(prop, copies):
+    """David 11-23: the duplicate search found new ads of the object elsewhere → its agent, one message per scan
+    (only the ones not reported before). The card's «Где ещё выложен» has «Попросить снять» on each."""
+    pid = g(prop, "id")
+    ag = store.user(g(prop, "agent_id")) or {}
+    if not ag.get("tg_id"):
+        return
+    def line(c):
+        pct = f" · {round(c['pct'])}%" if c.get("pct") is not None else ""
+        return f"• {e(c.get('where') or 'другой сайт')}{pct}" + (f"\n{e(c['url'])}" if c.get("url") else "")
+    more = f"\n…и ещё {len(copies) - 10}" if len(copies) > 10 else ""
+    text = (f"📍 <b>Объект #{pid} выложен ещё где-то: {len(copies)}</b>\n{e(prop_title(prop))}\n\n"
+            + "\n".join(line(c) for c in copies[:10]) + more
+            + "\n\nВ карточке → «Где ещё выложен»: «Попросить снять» или «Не дубль».")
+    tg.send(ag["tg_id"], text, kb([[app_btn("🏠 Открыть объект", links.property_app(pid))]]))
+
+
 CHDUP_DONE = {"deleted": "🗑 Новый пост удалён, объект #{drop} объединён с #{keep}", "kept": "✅ Отмечено: не дубль",
               "gone": "Один из постов уже снят — ничего не делаю"}
 

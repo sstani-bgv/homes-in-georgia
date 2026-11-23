@@ -840,3 +840,10 @@ def properties_transfer_request(pid: int, body: TransferIn, db: Session = Depend
     """An agent's «Запрос оператору» to move the object's owner to another agent (staff: transferred right away)."""
     cr = CR.request_transfer(db, pid, body.agent_id, user, body.reason)
     return {"change_request": CR.outs(db, [cr])[0] if cr else None}
+
+
+@router.post("/properties/{pid}/listings/{listing_id}/takedown")
+def properties_ad_takedown(pid: int, listing_id: str, db: Session = Depends(get_db, scope="function"),
+                           user: User = Depends(current_user)):
+    """«Попросить снять» on a copy in «Где ещё выложен»: the agent's task to have it taken down."""
+    return P.out(db, P.ad_takedown(db, pid, listing_id, user), user, full=True)

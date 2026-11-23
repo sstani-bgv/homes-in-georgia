@@ -1038,14 +1038,25 @@ def scan_exclusive(db: Session, pid: int, trigger: str = "exclusive") -> dict | 
     gate_open = w is not None and w.status == "pending" and not (w.payload or {}).get("dups")
     if trigger == "new_ads" and prev.get("sig") == sig and not gate_open:  # new photos change the reasons: always
         return None
-    log_event(db, "property", pid, "duplicate_scan", None, n=len(items), strong=strong[:20], trigger=trigger, sig=sig)
+    # «Где ещё выложен» (David 11-23, any object): the outside ads it is confirmed / probably the same as
+    copies = [{"key": x["key"], "listing_id": x["listing_id"], "where": x["where"], "url": x["url"], "pct": x.get("pct"),
+               "level": dup_level(x)} for x in items if x["kind"] == "ad" and dup_level(x) in P.COPY_LEVELS][:50]
+    log_event(db, "property", pid, "duplicate_scan", None, n=len(items), strong=strong[:20], trigger=trigger, sig=sig,
+              copies=copies)
     gate = no_esign_gate(db, p, w, items, trigger == "dup_recheck")
     db.commit()
     if gate:
         P._notify("exclusive_dups_gate", p, *gate)
     fresh = [s for s in strong if s["key"] not in prev_keys]
+    told = set()
     if fresh and not gate and p.is_exclusive:  # the gate's message lists them already
         P._notify("exclusive_duplicates", p, len(items), fresh)
+        told = {s["key"] for s in fresh}
+    # new copies → one message to the object's agent; a scan before 11-23 stored none: it is the baseline, not news
+    if not prev or "copies" in prev:
+        was = {c["key"] for c in prev.get("copies") or []} | told
+        if new := [c for c in copies if c["key"] not in was]:
+            P._notify("object_copies", p, new)
     return {"n": len(items), "strong": strong, "fresh": fresh, "gate": gate[0] if gate else None}
 
 

@@ -111,6 +111,12 @@ export interface Listing {
 export interface ListingMatch { property_id: number; address?: string | null; score: number; reasons: string[] }
 /** a live outside ad of an exclusive object (url hidden unless you may see the owner contacts) */
 export interface ExternalAd { listing_id: string; source?: string | null; url?: string | null }
+/** «Где ещё выложен» (backend properties.copies): a linked outside ad (level linked; an exclusive's block its publication)
+ * or one the duplicate search calls confirmed / probable. */
+export interface CopyAd {
+  listing_id: string; where: string; url?: string | null; pct?: number | null; level: 'linked' | 'confirmed' | 'probable';
+  who?: 'собственник' | 'агент' | null; blocking: boolean; asked?: { at: string; by?: string | null } | null;
+}
 export interface Elsewhere extends ExternalAd { verdict: 'linked' | 'same' | 'similar'; reasons: string[] }
 
 /** «Похожие объекты» (backend services/similar.py): our object or a live outside ad that may be the same flat. */
@@ -235,6 +241,7 @@ export interface Property {
   deals?: PropertyDeal[];
   /** exclusive objects: live outside ads → «Эксклюзив висит на …», publishing as exclusive is blocked */
   exclusive_conflict?: ExternalAd[];
+  copies?: CopyAd[];
   /** stage 6: the operator's first approve / publish; after it locked_fields go through «Запрос оператору» for the agent */
   verified_at?: string | null;
   /** stage 10: «Собственник согласен показать клиентам» */

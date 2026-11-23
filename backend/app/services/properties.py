@@ -1675,7 +1675,7 @@ def dup_scan(db: Session, pid: int) -> dict | None:
         return {"pending": True} if pending else None
     d = ev.data or {}
     return {"n": d.get("n", 0), "strong": d.get("strong") or [], "trigger": d.get("trigger"), "at": ev.at.isoformat(),
-            "sig": d.get("sig"), "pending": pending}
+            "sig": d.get("sig"), "pending": pending, **({"copies": d["copies"]} if "copies" in d else {})}
 
 
 def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: User) -> PropertyMedia:
@@ -2591,12 +2591,80 @@ def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
     p = _prop(db, pid, lock=True)
     link = db.scalar(select(PropertyListing).where(PropertyListing.property_id == p.id,
                                                    PropertyListing.listing_id == listing_id))
-    if link is None:
+    copy = None if link else next((c for c in copies(db, p) if c["listing_id"] == listing_id), None)
+    if link is None and copy is None:  # a copy found by the duplicate search (David 11-23): not linked, its event says so
         raise DomainError("not_found", "the ad is not linked to this object")
-    link.removed_checked_at, link.removed_checked_by = now(), actor.id
-    log_event(db, "property", p.id, "ad_removed_checked", actor, listing_id=listing_id, source=link.source, url=link.url)
+    if link:
+        link.removed_checked_at, link.removed_checked_by = now(), actor.id
+    source, url = (link.source, link.url) if link else (copy["where"], copy["url"])
+    log_event(db, "property", p.id, "ad_removed_checked", actor, listing_id=listing_id, source=source, url=url)
     db.commit()
-    _notify("prop_event", p, f"✅ <b>Проверено: объявление на {link.source or 'сайте'} снято</b>", actor.id, None, False, link.url)
+    _notify("prop_event", p, f"✅ <b>Проверено: объявление на {source or 'сайте'} снято</b>", actor.id, None, False, url)
+    return p
+
+
+# ---------------------------------------------------------------- «Где ещё выложен» (David 11-23: any object)
+
+COPY_LEVELS = ("confirmed", "probable")  # similar.dup_level of an ad the duplicate search found: listed as a copy
+
+
+def _who(l: Listing, competitors: set[str]) -> str | None:
+    """Who posted the ad, as far as we know: a competitor's / agency channel or the bot's agent check → агент, an ad
+    that passed the bot's owner check → собственник; a copy found on a site (myhome / ss / korter search) is unknown."""
+    if l.source in competitors or l.source == "agency" or l.agent_suspect or (l.agent_reasons or "[]") != "[]":
+        return "агент"
+    return "собственник" if l.status in ("published", "pending_review") else None
+
+
+def copies(db: Session, p: Property) -> list[dict]:
+    """Where else the object is advertised: its linked outside ads (an exclusive's «висит на …», they block its
+    publication) + the ads its last duplicate search (similar.scan_exclusive → event data «copies») calls confirmed /
+    probable. Without ads gone from the feed, checked as removed by an operator or marked «Не дубль».
+    -> [{listing_id, where, url, pct, level linked|confirmed|probable, who, asked {at, by}, blocking}], linked first."""
+    from app.services import similar  # local: similar imports this module
+    linked = external_ads(db, [p.id]).get(p.id, [])
+    ev = db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                        Event.action == "duplicate_scan").order_by(Event.id.desc())).first()
+    found = [c for c in ((ev.data or {}).get("copies") or [] if ev else []) if c["listing_id"] not in {a["listing_id"] for a in linked}]
+    if not linked and not found:
+        return []
+    asked, removed = {}, set()
+    for e_ in db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                             Event.action.in_(("ad_takedown_asked", "ad_removed_checked"))).order_by(Event.id)):
+        lid = (e_.data or {}).get("listing_id")
+        if e_.action == "ad_removed_checked":
+            removed.add(lid)
+        else:
+            asked[lid] = {"at": e_.at.isoformat(), "by": e_.actor_id}
+    names = dict(db.execute(select(User.id, User.name).where(User.id.in_({a["by"] for a in asked.values() if a["by"]}))).all()) if asked else {}
+    different = {k for k, d in similar._decisions(db, similar.key("p", p.id)).items() if d["verdict"] == "different"}
+    ls = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([a["listing_id"] for a in linked + found])))}
+    competitors = set(db.scalars(competitor_sources()))
+    out = []
+    for c, level in [(a, "linked") for a in linked] + [(c, c["level"]) for c in found]:
+        l = ls.get(c["listing_id"])
+        if l is None or (level != "linked" and (l.status == "gone" or l.id in removed or similar.key("l", l.id) in different)):
+            continue
+        a = asked.get(l.id)
+        out.append({"listing_id": l.id, "where": similar._ad_source(l, competitors), "url": c.get("url") or (jload(l.urls, []) or [None])[0],
+                    "pct": c.get("pct"), "level": level, "who": _who(l, competitors), "blocking": level == "linked" and p.is_exclusive,
+                    "asked": {"at": a["at"], "by": names.get(a["by"])} if a else None})
+    return out
+
+
+def ad_takedown(db: Session, pid: int, listing_id: str, actor: User) -> Property:
+    """«Попросить снять»: a task for the object's agent — contact whoever posted the ad (or the owner) to take it down;
+    the operator checks it later («Проверено: снято»). A history event + a message to the agent."""
+    p = _prop(db, pid)
+    _require_owner(p, actor)
+    c = next((x for x in copies(db, p) if x["listing_id"] == listing_id), None)
+    if c is None:
+        raise DomainError("not_found", "no such ad among the object's copies")
+    log_event(db, "property", p.id, "ad_takedown_asked", actor, listing_id=listing_id, source=c["where"], url=c["url"])
+    db.commit()
+    who = "собственником" if c["who"] == "собственник" else "тем, кто выложил, или с собственником"
+    _notify("prop_event", p, f"📣 <b>Попросить снять объявление на {html_.escape(c['where'])}</b>\nСвяжитесь с {who}; оператор потом "
+            "проверит, что его нет", actor.id if p.agent_id != actor.id else None, None, True, c["url"])
     return p
 
 
@@ -2800,6 +2868,8 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
         cache[k] = external_ads(db, [p.id]).get(p.id, [])
     visible = can_see_owner(p, user)  # ad links lead to the owner's phone
     d["exclusive_conflict"] = [{**a, "url": a["url"] if visible else None} for a in cache.get(k, [])] if p.is_exclusive else []
+    if full:
+        d["copies"] = [{**c, "url": c["url"] if visible else None} for c in copies(db, p)]
     if full:
         d["media"] = [{"id": m.id, "kind": m.kind, "room": ROOM_ALIAS.get(m.room, m.room), "position": m.position, "url": f"/api/media/{m.path}",
                        "preview": f"/api/media/{m.path}?p=1"}
