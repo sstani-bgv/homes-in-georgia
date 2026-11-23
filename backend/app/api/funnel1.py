@@ -564,8 +564,8 @@ def properties_originals(pid: int, db: Session = Depends(get_db, scope="function
 
     from app import storage
     from app.models import PropertyMedia
-    if not at_least(user, "operator"):  # Irakli 11-22: superadmin, admin and operators only
-        raise forbidden("operators only")
+    from app.services import perms
+    perms.check(db, user, "originals", "r")  # «Права»; default: superadmin, admin and operators (Irakli 11-22)
     p = P.get_visible(db, pid, user)
     keys = db.scalars(select(PropertyMedia.path).where(PropertyMedia.property_id == p.id, PropertyMedia.kind == "photo")
                       .order_by(PropertyMedia.position, PropertyMedia.id)).all()

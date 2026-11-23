@@ -63,6 +63,7 @@ class UserPatch(BaseModel):
     agent_tag: str | None = None
     works_as_agent: bool | None = None
     ie_number: str | None = None
+    custom_role_id: int | None = None  # «Права»: superadmin only (services/perms.check_assign); null = as the role
 
 
 class PromoteIn(BaseModel):

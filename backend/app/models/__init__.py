@@ -1,5 +1,5 @@
 from app.db import Base
-from app.models.people import (ADMINS, CARS_ONLY, CARS_ROLES, DAILY_RENT_ONLY, DAILY_RENT_ROLES, FIELD, FIELD_SQL, LEVELS, ROLES, STAFF, SUPER, Invite, User,
+from app.models.people import (ADMINS, CARS_ONLY, CARS_ROLES, DAILY_RENT_ONLY, DAILY_RENT_ROLES, FIELD, FIELD_SQL, LEVELS, ROLES, STAFF, SUPER, CustomRole, Invite, RolePermission, User,
                                at_least, can_cars, can_daily_rent, is_field, role_level)
 from app.models.catalog import (LEAD_STATUSES, ChannelVideo, Client, ClientView, InlineCard, JourneyAnswer, Lead, LeadEvent, LeadSlot,
                                 Listing, Message, Reaction, Search, Setting, Source, TgFile)

@@ -144,6 +144,46 @@ def _key_changes(db: Session) -> dict[str, tuple]:
     return out
 
 
+# «Права» (Управление, superadmin): the role × section matrix of services/perms.py and its change history
+@router.get("/admin/permissions")
+def permissions_get(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("superadmin"))):
+    from app.services import perms
+    return perms.matrix(db)
+
+
+@router.put("/admin/permissions")
+def permissions_put(body: dict[str, dict[str, str]], db: Session = Depends(get_db, scope="function"),
+                    user: User = Depends(require_level("superadmin"))):
+    from app.services import perms
+    return perms.save(db, body, user)
+
+
+class CustomRoleIn(BaseModel):
+    label: str
+    base: str
+
+
+@router.post("/admin/permissions/roles")
+def permissions_role_create(body: CustomRoleIn, db: Session = Depends(get_db, scope="function"),
+                            user: User = Depends(require_level("superadmin"))):
+    from app.services import perms
+    return perms.create_role(db, body.label, body.base, user)
+
+
+@router.delete("/admin/permissions/roles/{cid}")
+def permissions_role_delete(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("superadmin"))):
+    from app.services import perms
+    return perms.delete_role(db, cid, user)
+
+
+@router.get("/admin/permissions/history")
+def permissions_history(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("superadmin"))):
+    from app.models import Event
+    return [{"at": e.at.isoformat(), "by": e.actor_label, "role": e.entity_id, "action": e.action, "changes": (e.data or {}).get("changes", {}),
+             "label": (e.data or {}).get("role_label"), "base": (e.data or {}).get("base")}
+            for e in db.scalars(select(Event).where(Event.entity == "permissions").order_by(Event.at.desc(), Event.id.desc()).limit(200))]
+
+
 @router.get("/keys")
 def keys_list(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     """Known + added keys: where the value comes from (crm / env / none), settings in full, secrets masked, last change."""

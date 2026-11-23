@@ -9,6 +9,7 @@ import type { Invite, InviteStatus, Role, Settings, Source, User } from '../api/
 import { ADMIN_ROLES, SUPER_ROLES, atLeast } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { KeysPage } from './AdminKeys';
+import { PermsPage } from './AdminPerms';
 import { errText, useToast } from '../components/toast';
 import { Avatar, Badge, Button, Card, Checkbox, Drawer, Empty, ErrorBox, Field, Input, Loading, Modal, PageHead, Seg, Select, Switch, Tabs } from '../components/ui';
 import { ROLE_LABEL, ago, fmtDateTime, phoneBlur, phoneFocus, phoneInput } from '../lib/format';
@@ -27,12 +28,15 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
   const isSuper = useAuth().hasRole(...SUPER_ROLES);  // backend: only a superadmin grants admin roles
   const [f, setF] = useState<Partial<User>>(user ? { ...user } : { role: 'agent', level: 50, is_active: true, districts: [] });
   const set = <K extends keyof User>(k: K, v: User[K]) => setF((x) => ({ ...x, [k]: v }));
+  // «Права»: the superadmin's roles made on the basis of this one (Оператор → «Оператор фото»)
+  const custom = useQuery({ queryKey: ['perms'], queryFn: api.perms.get, enabled: isSuper && !!user }).data?.custom.filter((c) => c.base === f.role) ?? [];
   const save = useMutation({
     mutationFn: () => {
       const body = { first_name: f.first_name?.trim(), last_name: f.last_name?.trim(), role: f.role, level: f.level, is_active: f.is_active, districts: f.districts, mentor_id: f.mentor_id || null,
         tg_id: f.tg_id ? Number(f.tg_id) : null, username: f.username, phone: f.phone, plans: f.plans,
         birth_date: f.birth_date || null, email: f.email?.trim() || null, ie_number: f.ie_number?.trim() || null,
-        agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent };  // login / password: Telegram-only sign-in, not shown
+        agent_tag: f.agent_tag || '', works_as_agent: !!f.works_as_agent,
+        ...(isSuper && user ? { custom_role_id: f.custom_role_id ?? null } : {}) };  // login / password: Telegram-only sign-in, not shown
       return user ? api.users.update(user.id, body) : api.users.create(body);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast(t('Сохранено')); onDone(); },
@@ -52,7 +56,9 @@ function UserForm({ user, all, onDone }: { user?: User; all: User[]; onDone: () 
         <Field label={t('Фамилия *')}><Input value={f.last_name || ''} placeholder={t('Беридзе')} onChange={(e) => set('last_name', e.target.value)} /></Field>
         <Field label={t('Дата рождения *')}><Input type="date" value={f.birth_date || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set('birth_date', e.target.value || null)} /></Field>
         <Field label={t('Email *')} hint={t('Видят только администраторы')}><Input type="email" inputMode="email" value={f.email || ''} placeholder="name@mail.com" onChange={(e) => set('email', e.target.value)} /></Field>
-        <Field label={t('Роль')}><Select value={f.role} onChange={(e) => { const r = e.target.value as Role; setF((x) => ({ ...x, role: r, ...(FIELDLESS.includes(r) ? { level: null, works_as_agent: false } : {}) })); }} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        <Field label={t('Роль')}><Select value={f.role} onChange={(e) => { const r = e.target.value as Role; setF((x) => ({ ...x, role: r, ...(isSuper ? { custom_role_id: null } : {}), ...(FIELDLESS.includes(r) ? { level: null, works_as_agent: false } : {}) })); }} options={ROLES.filter((r) => isSuper || !ADMIN_ROLES.includes(r) || r === user?.role).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} /></Field>
+        {custom.length > 0 && <Field label={t('Права')} hint={t('Роль из «Управление → Права»')}><Select value={f.custom_role_id ?? ''} onChange={(e) => set('custom_role_id', e.target.value ? Number(e.target.value) : null)}
+          options={[{ value: '', label: t('Как у роли') }, ...custom.map((c) => ({ value: c.id, label: c.label }))]} /></Field>}
         {f.role && FIELDLESS.includes(f.role) ? <div /> : <Field label={t('Уровень')}><Seg value={f.level ?? 0} onChange={(v) => set('level', v || null)} options={[{ value: 0, label: '—' }, { value: 50, label: '50%' }, { value: 70, label: '70%' }, { value: 90, label: '90%' }]} /></Field>}
         <Field label="Telegram ID"><Input value={f.tg_id ?? ''} onChange={(e) => set('tg_id', e.target.value ? Number(e.target.value) : null)} inputMode="numeric" /></Field>
         <Field label="@username"><Input value={f.username || ''} onChange={(e) => set('username', e.target.value)} /></Field>
@@ -182,6 +188,8 @@ function Users() {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['users', 'admin', role], queryFn: () => api.users.list({ role: role || undefined }) });
   const all = useQuery({ queryKey: ['users', 'admin', ''], queryFn: () => api.users.list({}) });
+  const isSuper = useAuth().hasRole(...SUPER_ROLES);
+  const custom = useQuery({ queryKey: ['perms'], queryFn: api.perms.get, enabled: isSuper }).data?.custom ?? [];
   const toggle = useMutation({ mutationFn: (u: User) => api.users.update(u.id, { is_active: !u.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
   const toast = useToast();
   const remove = useMutation({ mutationFn: (u: User) => api.users.remove(u.id),
@@ -201,7 +209,7 @@ function Users() {
                       {u.birthday && <div className="faint" style={{ fontSize: 12 }}>🎂 {birthdayLabel(u.birthday)}</div>}
                       {!!u.profile_missing?.length && <div><Badge tone="warn">{t('нет: {list}', { list: u.profile_missing.map((k) => MISSING[k]).join(', ') })}</Badge></div>}
                     </div></div></td>
-                  <td><Badge tone={ADMIN_ROLES.includes(u.role) ? 'solid' : 'blue'}>{ROLE_LABEL[u.role]}</Badge></td>
+                  <td><Badge tone={ADMIN_ROLES.includes(u.role) ? 'solid' : 'blue'}>{custom.find((c) => c.id === u.custom_role_id && c.base === u.role)?.label ?? ROLE_LABEL[u.role]}</Badge></td>
                   <td className="num">{u.level ? `${u.level}%` : '—'}</td>
                   <td className="muted">{u.agent_tag ? `#${u.agent_tag}` : '—'}</td>
                   <td className="hide-mobile muted">{u.username ? `@${u.username}` : u.tg_id || '—'}</td>
@@ -543,7 +551,8 @@ function SettingsAdmin() {
 }
 
 export function AdminPage() {
-  const [tab, setTab] = useState<'users' | 'sources' | 'ticker' | 'settings' | 'keys'>('users');
+  const isSuper = useAuth().hasRole(...SUPER_ROLES);
+  const [tab, setTab] = useState<'users' | 'sources' | 'ticker' | 'settings' | 'keys' | 'perms'>('users');
   return (
     <>
       <PageHead label={t('Только для администраторов')} title={t('Управление')} />
@@ -551,12 +560,14 @@ export function AdminPage() {
         { value: 'users', label: t('Пользователи') }, { value: 'sources', label: t('Источники') },
         { value: 'ticker', label: t('Бегущая строка') }, { value: 'settings', label: t('Настройки') },
         { value: 'keys', label: t('Ключи') },
+        ...(isSuper ? [{ value: 'perms' as const, label: t('Права') }] : []),
       ]} />
       {tab === 'users' && <Users />}
       {tab === 'sources' && <Sources />}
       {tab === 'ticker' && <TickerAdmin />}
       {tab === 'settings' && <SettingsAdmin />}
       {tab === 'keys' && <KeysPage />}
+      {tab === 'perms' && isSuper && <PermsPage />}
     </>
   );
 }

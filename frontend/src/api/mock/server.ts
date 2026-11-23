@@ -17,7 +17,9 @@ function currentUser(): User {
   const id = Number(t.replace('mock-', ''));
   const u = F.users.find((x) => x.id === id);
   if (!u) throw new ApiError(401, 'Требуется вход');
-  return u;
+  // «Права» defaults (backend services/perms.py SECTIONS)
+  const ladder = ['superadmin', 'admin', 'operator', 'agent', 'recruit'].includes(u.role);
+  return { ...u, perms: { contracts: ladder ? 'rcu' : '', originals: STAFF_ROLES.includes(u.role) ? 'r' : '' } };
 }
 const isStaff = (u: User) => STAFF_ROLES.includes(u.role);
 

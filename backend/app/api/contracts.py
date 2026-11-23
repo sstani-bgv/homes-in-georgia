@@ -7,14 +7,16 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, paginate, require_level
+from app.api.deps import current_user, paginate, require
 from app.db import get_db
 from app.models import User
 from app.services import contracts as C, esign as E
 from app.services.errors import DomainError
 from app.telegram import client as tg
 
-router = APIRouter(tags=["contracts"], dependencies=[Depends(require_level("recruit"))])  # recruits too (Irakli 11-22; 11-12 had them out)
+# «Договоры» in the «Права» matrix (services/perms.py): read / create / update per endpoint below
+router = APIRouter(tags=["contracts"])
+READ, CREATE, UPDATE = (Depends(require("contracts", a)) for a in "rcu")
 public = APIRouter(tags=["contracts"])
 
 
@@ -23,7 +25,7 @@ class ContractFileIn(BaseModel):
     html: str = Field(max_length=2_000_000)
 
 
-@router.post("/contracts/send")
+@router.post("/contracts/send", dependencies=[READ])
 def contract_send(body: ContractFileIn, user: User = Depends(current_user)):
     if not user.tg_id:
         raise DomainError("no_telegram", "Telegram не привязан к аккаунту: откройте CRM из бота", 409)
@@ -96,7 +98,7 @@ def _pdf(data: bytes, name: str, download: bool) -> Response:
         "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex"})
 
 
-@router.get("/contracts")
+@router.get("/contracts", dependencies=[READ])
 def contracts_list(status: str | None = None, lead_id: int | None = None, deal_id: int | None = None,
                    property_id: int | None = None, agent_id: int | None = None, q: str | None = None, limit: int = 50, offset: int = 0,
                    db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
@@ -104,34 +106,34 @@ def contracts_list(status: str | None = None, lead_id: int | None = None, deal_i
     return paginate(db, C.query(db, user, status, lead_id, q, deal_id, agent_id, property_id), lambda c: C.out(db, c), limit, offset)
 
 
-@router.get("/properties/{pid}/contract")
+@router.get("/properties/{pid}/contract", dependencies=[CREATE])
 def property_contract(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """The wizard's prefill from the object card («Оформить договор аренды», Irakli 11-15), as GET /leads/{id}/contract:
     address, cadastral code, floor, area, price, owner. Another agent's object: refused, as in the deal form."""
     return C.property_prefill(db, pid, user)
 
 
-@router.post("/contracts/draft")
+@router.post("/contracts/draft", dependencies=[CREATE])
 def contracts_autosave(body: DraftIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.autosave(db, body.model_dump(), user), full=True)
 
 
-@router.post("/contracts")
+@router.post("/contracts", dependencies=[CREATE])
 def contracts_create(body: ContractIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.create(db, body.model_dump(), user), full=True)
 
 
-@router.get("/contracts/{cid}")
+@router.get("/contracts/{cid}", dependencies=[READ])
 def contracts_get(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.get(db, cid, user), full=True)
 
 
-@router.put("/contracts/{cid}")
+@router.put("/contracts/{cid}", dependencies=[UPDATE])
 def contracts_update(cid: int, body: ContractIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.update(db, cid, body.model_dump(), user), full=True)
 
 
-@router.get("/contracts/{cid}/pdf")
+@router.get("/contracts/{cid}/pdf", dependencies=[READ])
 def contracts_pdf(cid: int, signed: bool = False, download: bool = False, version: int | None = None,
                   db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """version: an earlier generated PDF (the contract's `versions`, 0 = the first)."""
@@ -140,7 +142,7 @@ def contracts_pdf(cid: int, signed: bool = False, download: bool = False, versio
     return _pdf(C.pdf_bytes(c, signed, version), name if version is None else name.replace(".pdf", f" v{version + 1}.pdf"), download)
 
 
-@router.get("/contracts/{cid}/extract")
+@router.get("/contracts/{cid}/extract", dependencies=[READ])
 def contracts_extract(cid: int, download: bool = False, db: Session = Depends(get_db, scope="function"),
                       user: User = Depends(current_user)):
     """The registry extract saved with the contract (data.extract_file, registry.store_extract)."""
@@ -153,47 +155,47 @@ def contracts_extract(cid: int, download: bool = False, db: Session = Depends(ge
     return _pdf(data, f"Выписка из реестра, договор {cid}.pdf", download)
 
 
-@router.post("/contracts/{cid}/sign")
+@router.post("/contracts/{cid}/sign", dependencies=[UPDATE])
 async def contracts_sign(cid: int, file: UploadFile | None = File(None), db: Session = Depends(get_db, scope="function"),
                          user: User = Depends(current_user)):
     """«Договор подписан»: multipart with an optional `file` (the signed scan, PDF)."""
     return C.out(db, C.sign(db, cid, user, await file.read() if file else None), full=True)
 
 
-@router.post("/contracts/{cid}/link")
+@router.post("/contracts/{cid}/link", dependencies=[UPDATE])
 def contracts_link(cid: int, body: LinkIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """«Привязать к заявке»: a contract created without a lead / deal (11-13)."""
     return C.out(db, C.link(db, cid, body.model_dump(), user), full=True)
 
 
-@router.post("/contracts/{cid}/deal-lead")
+@router.post("/contracts/{cid}/deal-lead", dependencies=[UPDATE])
 def contracts_deal_lead(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """«Оформить сделку» on a signed contract: its lead (found or made from the contract) for the deal form (11-18)."""
     return C.out(db, C.deal_lead(db, cid, user), full=True)
 
 
-@router.post("/contracts/{cid}/esign")
+@router.post("/contracts/{cid}/esign", dependencies=[UPDATE])
 def contracts_esign(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """«Подписать электронно»: a signing link for the owner and one for the tenant (services/esign.py)."""
     return C.out(db, E.start(db, cid, user), full=True)
 
 
-@router.post("/contracts/{cid}/esign/cancel")
+@router.post("/contracts/{cid}/esign/cancel", dependencies=[UPDATE])
 def contracts_esign_cancel(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, E.cancel(db, cid, user), full=True)
 
 
-@router.post("/contracts/{cid}/close")
+@router.post("/contracts/{cid}/close", dependencies=[UPDATE])
 def contracts_close(cid: int, body: CloseIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.close(db, cid, user, body.reason, body.comment), full=True)
 
 
-@router.post("/contracts/{cid}/share")
+@router.post("/contracts/{cid}/share", dependencies=[UPDATE])
 def contracts_share(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.share(db, cid, user))
 
 
-@router.post("/contracts/{cid}/send")
+@router.post("/contracts/{cid}/send", dependencies=[READ])
 def contracts_send_pdf(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """Mini App: the PDF to the user's Telegram chat (the webview can't download files)."""
     c = C.get(db, cid, user)
@@ -206,7 +208,7 @@ def contracts_send_pdf(cid: int, db: Session = Depends(get_db, scope="function")
     return {"ok": True}
 
 
-@router.post("/contracts/{cid}/send-client")
+@router.post("/contracts/{cid}/send-client", dependencies=[UPDATE])
 def contracts_send_client(cid: int, body: SendClientIn, db: Session = Depends(get_db, scope="function"),
                           user: User = Depends(current_user)):
     """«Отправить клиенту в Telegram»: PDF + the registry extract from the operator's account (11-13)."""

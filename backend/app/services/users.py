@@ -12,7 +12,8 @@ from app.services.common import get_or_404, log_event
 from app.services.errors import DomainError
 
 EDITABLE = ("name", "first_name", "last_name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
-            "birth_date", "email", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent", "ie_number")
+            "birth_date", "email", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent", "ie_number",
+            "custom_role_id")
 # the employee profile Irakli asked for (11-12): «чтобы дни рождения не пропускали»
 PROFILE = ("first_name", "last_name", "birth_date", "phone", "email")
 IE_RE = re.compile(r"\d{9}|\d{11}")  # ი/მ: the personal number (11 digits) or an older 9-digit identification code
@@ -255,6 +256,9 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None, full_pr
             raise DomainError("conflict", "login already taken")
     if "agent_tag" in data:
         data["agent_tag"] = clean_agent_tag(db, data["agent_tag"], u.id)
+    if "custom_role_id" in data and data["custom_role_id"] != u.custom_role_id:
+        from app.services import perms
+        perms.check_assign(db, actor, data["custom_role_id"], data.get("role") or u.role)
     changed = {}
     for k, v in data.items():
         if k in EDITABLE and getattr(u, k) != v:

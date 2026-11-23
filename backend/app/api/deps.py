@@ -87,6 +87,17 @@ def require_level(role: str):
     return dep
 
 
+def require(section: str, action: str):
+    """The role's «Права» flag (services/perms.py): the section-by-section successor of require_level."""
+    from app.services import perms
+    assert section in perms.SECTIONS and action in perms.ACTIONS, (section, action)
+
+    def dep(user: User = Depends(current_user), db: Session = Depends(get_db, scope="function")) -> User:
+        perms.check(db, user, section, action)
+        return user
+    return dep
+
+
 def paginate(db: Session, stmt, mapper, limit: int = 50, offset: int = 0) -> dict:
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(max(1, min(limit, 500))).offset(max(0, offset)))

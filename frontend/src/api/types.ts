@@ -4,6 +4,20 @@ export type Role = 'superadmin' | 'admin' | 'operator' | 'agent' | 'recruit' | '
 /** Hierarchical RBAC (backend models/people.py LEVELS): every role inherits all rights of the lower ones. */
 export const ROLE_LEVEL: Record<Role, number> = { recruit: 1, agent: 2, operator: 3, admin: 4, superadmin: 5, daily_rent_manager: 0, car_operator: 0 };
 export const atLeast = (u: { role: Role } | null | undefined, role: Role) => !!u && (ROLE_LEVEL[u.role] ?? 0) >= ROLE_LEVEL[role];
+/** «Права» (Управление, backend services/perms.py): the user's actions per section, from /auth/me «perms»:
+ * r read, c create, u update, d delete. The section-by-section successor of atLeast. */
+export type PermSection = 'contracts' | 'originals';
+export type PermAction = 'r' | 'c' | 'u' | 'd';
+export const can = (u: { perms?: Partial<Record<PermSection, string>> } | null | undefined, s: PermSection, a: PermAction = 'r') => !!u?.perms?.[s]?.includes(a);
+export interface PermMatrix {
+  sections: { key: PermSection; label: string; actions: string }[];
+  roles: Role[];
+  /** the superadmin's roles made on the basis of a ladder one; key «c<id>»; users: someone has it */
+  custom: { key: string; id: number; label: string; base: Role; users: boolean }[];
+  matrix: Record<string, Record<string, string>>;
+  defaults: Record<string, Record<string, string>>;
+}
+export interface PermChange { at: string; by: string | null; role: string; action: 'updated' | 'role_created' | 'role_deleted'; changes: Record<string, { from: string; to: string }>; label?: string | null; base?: Role | null }
 export const SUPER_ROLES: Role[] = ['superadmin'];
 export const ADMIN_ROLES: Role[] = [...SUPER_ROLES, 'admin'];
 export const STAFF_ROLES: Role[] = [...ADMIN_ROLES, 'operator'];
@@ -56,6 +70,10 @@ export interface User {
   works_as_agent?: boolean;
   /** works as an agent: agent / recruit, or staff with works_as_agent */
   field?: boolean;
+  /** /auth/me: «Права» per section (can()) */
+  perms?: Partial<Record<PermSection, string>>;
+  /** «Права»: a custom role of this role (superadmin-made), null = the role's own flags */
+  custom_role_id?: number | null;
   next_level_at?: number | null;
   created_at?: string;
   last_login_at?: string | null;

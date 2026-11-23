@@ -6,7 +6,7 @@ import {
   Car, Settings, Trophy, UsersRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ADMIN_ROLES, CARS_ONLY, CARS_ROLES, DAILY_RENT_ONLY, DAILY_RENT_ROLES, STAFF_ROLES, SUPER_ROLES, atLeast } from '../api/types';
+import { ADMIN_ROLES, CARS_ONLY, CARS_ROLES, DAILY_RENT_ONLY, DAILY_RENT_ROLES, STAFF_ROLES, SUPER_ROLES, atLeast, can, type PermSection } from '../api/types';
 import { api } from '../api';
 import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
@@ -16,14 +16,13 @@ import { Avatar, Badge, Drawer, Modal, Seg } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 import { LANG, LANGS, setLang, t } from '../lib/i18n';
 
-interface NavItem { to: string; label: string; icon: LucideIcon; roles?: Role[]; also?: string[] }  // also: sibling pages of one item
+interface NavItem { to: string; label: string; icon: LucideIcon; roles?: Role[]; perm?: PermSection; also?: string[] }  // perm: «Права» read  // also: sibling pages of one item
 const STAFF = STAFF_ROLES;
-const LADDER: Role[] = [...STAFF_ROLES, 'agent', 'recruit'];  // contracts: recruits too (Irakli 11-22)
 export const NAV: NavItem[] = [
   { to: '/', label: t('Главная'), icon: Home },
   { to: '/objects', label: t('Объекты'), icon: Building2 },
   { to: '/leads', label: t('Заявки'), icon: Inbox },
-  { to: '/contracts', label: t('Договоры'), icon: FileText, roles: LADDER },
+  { to: '/contracts', label: t('Договоры'), icon: FileText, perm: 'contracts' },  // «Права»; default: recruits too (Irakli 11-22)
   { to: '/calendar', label: t('Календарь'), icon: CalendarDays },
   // hge.ge's cars (sales are objects: «Объекты» → Продажа, Stanislav 11-15)
   { to: '/cars', label: t('Авто'), icon: Car, roles: CARS_ROLES },
@@ -37,10 +36,10 @@ export const NAV: NavItem[] = [
 ];
 
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
-const QUICK: { to: string; title: string; sub: string; icon: LucideIcon; agent?: boolean }[] = [
+const QUICK: { to: string; title: string; sub: string; icon: LucideIcon; agent?: boolean; perm?: PermSection }[] = [  // perm: «Права» create
   { to: '/objects?new=1', title: t('Объект'), sub: t('Завести вручную'), icon: Plus },
   { to: '/deals/new', title: t('Сделку'), sub: t('Расчёт и День 0'), icon: Handshake, agent: true },  // Irakli 2026-11-11: back in «Добавить»
-  { to: '/contracts?new=1', title: t('Договор'), sub: t('Создать договор'), icon: FileText },
+  { to: '/contracts?new=1', title: t('Договор'), sub: t('Создать договор'), icon: FileText, perm: 'contracts' },
   { to: '/reports?kind=general', title: t('Отчёт'), sub: t('Общий отчёт'), icon: ClipboardList },
   { to: '/reports?kind=showing', title: t('Показ'), sub: t('Отчёт о показе'), icon: Eye },
   { to: '/reports?tab=check', title: t('Проверку'), sub: t('Найти дубликат'), icon: Search },
@@ -51,7 +50,7 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <Modal open={open} onClose={onClose} title={t('Добавить')}>
       <div className="add-grid">
-        {QUICK.filter((q) => !q.agent || atLeast(user, 'agent')).map((q) => (
+        {QUICK.filter((q) => (!q.agent || atLeast(user, 'agent')) && (!q.perm || can(user, q.perm, 'c'))).map((q) => (
           <button key={q.to} type="button" className="add-item" onClick={() => { onClose(); navigate(q.to); }}>
             <q.icon size={20} /><span><b>{q.title}</b><small>{q.sub}</small></span>
           </button>
@@ -95,7 +94,7 @@ export function AppLayout() {
   // «Оператор авто» likewise only «Авто» (Stanislav 11-16)
   const only = user?.role === DAILY_RENT_ONLY ? '/daily-rent' : user?.role === CARS_ONLY ? '/cars' : null;
   const items = only ? NAV.filter((n) => n.to === only)
-    : NAV.filter((n) => !n.roles || (user && n.roles.includes(user.role)));
+    : NAV.filter((n) => (!n.roles || (user && n.roles.includes(user.role))) && (!n.perm || can(user, n.perm)));
   if (only && !loc.pathname.startsWith(only)) return <Navigate to={only} replace />;
   const bottom = items.slice(0, 4);
   const rest = items.slice(4);

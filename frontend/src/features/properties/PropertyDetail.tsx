@@ -9,7 +9,7 @@ import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronD
 import { api, type PublishProgress } from '../../api';
 import { ApiError, itemsOf, mediaUrl, thumbUrl, withKeepalive } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
-import { FIELD_FILTER, atLeast } from '../../api/types';
+import { FIELD_FILTER, can } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
@@ -842,7 +842,7 @@ function Gallery({ p }: { p: Property }) {
   const fromAd = (p.listing?.photos || []).map((src, i): Shot => ({ id: `l${i}`, kind: 'photo', src }));
   const toast = useToast();
   const { user } = useAuth();
-  const staffOnly = atLeast(user, 'operator');  // Irakli 11-22: superadmin, admin, operators
+  const staffOnly = can(user, 'originals');  // «Права»; default: superadmin, admin, operators (Irakli 11-22)
   const [busy, setBusy] = useState(false);
   const originals = async () => {  // the photos as uploaded, without the channel watermark: for myhome / ss by hand
     setBusy(true);
@@ -1759,7 +1759,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
         <div className="divider" />
         <Stepper current={step} />
         {/* Irakli 11-15: the same wizard as «Новый договор», the object chosen and prefilled; the object turns «Сдано» on its deal's confirm */}
-        {canWork && p.status !== 'archived' && (  // recruits too (Irakli 11-22)
+        {canWork && can(user, 'contracts', 'c') && p.status !== 'archived' && (  // «Права»; default: recruits too (Irakli 11-22)
           <div className="row mt"><Link className="btn btn-secondary" to={`${compact ? '/m' : ''}/contracts?property_id=${p.id}`}><FileText size={16} />{t('Оформить договор аренды')}</Link></div>
         )}
       </div>
