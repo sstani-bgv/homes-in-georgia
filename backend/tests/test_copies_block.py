@@ -16,6 +16,8 @@ def test_copies_of_any_object_ask_check_and_not_a_dup(db, client, sent):
                  address="Kazbegi 30", photo_hashes=json.dumps([H[0] ^ 1, H[1], H[2]]), text="Сдаю")
     make_listing(db, "ss7002", urls=json.dumps(["https://ss.ge/7002"]), address="Kazbegi 30",
                  photo_hashes=json.dumps([H[0], H[1]]), text="Сдаю, собственник")
+    make_listing(db, "tg7003", source="tg:rent_channel", urls=json.dumps(["https://t.me/rent_channel/7003"]),
+                 address="Kazbegi 30", photo_hashes=json.dumps([H[0], H[1], H[2]]), text="Сдаю")  # a TG post: not a site
     assert not db.get(properties.Property, pid).is_exclusive
     similar.scan_exclusive(db, pid, "daily")
     card = client.get(f"/api/properties/{pid}", headers=auth(vika)).json()

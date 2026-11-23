@@ -34,7 +34,17 @@ function mockPhones(list: unknown, main: unknown, old?: { phone?: string | null;
     .filter((r) => !seen.has(r.phone) && !!seen.add(r.phone));
 }
 
+// «Где ещё выложен» (backend properties.copies): the found copies of a card on the sites
+const COPIES: NonNullable<Property['copies']> = [
+  { listing_id: 'mh26740808', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26740808/', pct: null, level: 'linked', who: 'собственник', blocking: false, asked: null },
+  { listing_id: 'mh26738483', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26738483/', pct: 96, level: 'confirmed', who: 'агент', blocking: false, asked: null },
+  { listing_id: 'mh26720465', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26720465/', pct: 91, level: 'confirmed', who: 'агент', blocking: false,
+    asked: { at: new Date(Date.now() - 3 * 3600e3).toISOString(), by: 'Вика' } },
+  { listing_id: 'ss31877412', where: 'ss.ge', url: 'https://home.ss.ge/ka/udzravi-qoneba/31877412', pct: 88, level: 'confirmed', who: null, blocking: false, asked: null },
+  { listing_id: 'kr1073432', where: 'korter', url: 'https://korter.ge/en/1073432', pct: 72, level: 'probable', who: null, blocking: false, asked: null },
+];
 function propOut(p: Property, u: User): Property {
+  if (!p.copies) p.copies = COPIES.map((c) => ({ ...c, blocking: c.level === 'linked' && !!p.is_exclusive }));
   const canPhone = isStaff(u) || p.agent_id === u.id;
   return { ...p, photo: p.photo ?? p.media?.find((m) => m.kind === 'photo')?.path ?? null, owner: p.owner ? { ...p.owner, phone: canPhone ? p.owner.phone : null, phones: canPhone ? p.owner.phones : null } : null };
 }
@@ -224,6 +234,16 @@ on('GET', '/listings/:id', (m) => {
 });
 on('GET', '/listings/:id/similar', () => ({ items: [] }));
 on('GET', '/properties/:id/similar', (m) => ({ items: getProp(Number(m[1])).duplicate_scan?.n ? DUPS : [] }));
+on('POST', '/properties/:id/listings/:lid/takedown', (m) => {
+  const p = getProp(Number(m[1]));
+  p.copies = (p.copies || []).map((c) => c.listing_id === m[2] ? { ...c, asked: { at: new Date().toISOString(), by: currentUser().name } } : c);
+  return propOut(p, currentUser());
+});
+on('POST', '/properties/:id/listings/:lid/removed', (m) => {
+  const p = getProp(Number(m[1]));
+  p.copies = (p.copies || []).filter((c) => c.listing_id !== m[2]);
+  return propOut(p, currentUser());
+});
 on('POST', '/similar/decide', (_m, b) => ({ ok: true, verdict: (b as { verdict?: string }).verdict || 'different', linked_to: null }));
 const dealOf = (p: Property) => (p.post_fields?.deal === 'Sale' ? 'sale' : 'rent');
 const dealOk = (q: URLSearchParams) => (p: Property) => !q.get('deal') || dealOf(p) === q.get('deal');

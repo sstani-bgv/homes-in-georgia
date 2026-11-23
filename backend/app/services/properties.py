@@ -1635,34 +1635,17 @@ def contract_done(db: Session, p: Property) -> bool:
 
 # David 11-23: not only exclusives — an object taken into work or published looks for its copies and duplicates too
 DUP_LIVE = (*AGENT_MEDIA_STATUSES, "review", "published")
-DUP_DAILY_DAYS = 30   # the daily search: objects published / taken in the last 30 days (agents copy new ads)
-DUP_DAILY_BATCH = 20  # per hourly pass: ≤ 480 a day, the myhome requests and the ss.ge Apify runs spread out
-
-
-def schedule_daily_dup_scans(db: Session) -> int:
-    """The worker's hourly pass: live objects (DUP_LIVE, exclusives too) of the last DUP_DAILY_DAYS whose copies were
-    not searched for a day get a dup_scan (myhome + ss.ge copies, then the duplicates). Commits -> how many.
-    ponytail: a 30-day window caps the Apify spend (~0.003 $ a search); widen it or add a weekly tier for older ones."""
-    since = now() - timedelta(days=DUP_DAILY_DAYS)
-    fresh = select(Event.entity_id).where(Event.entity == "property", Event.action == "myhome_copies",
-                                          Event.at > now() - timedelta(hours=24))
-    from app.models import Job
-    queued = select(Job.ref).where(Job.kind == "dup_scan", Job.done_at.is_(None))
-    rows = list(db.scalars(select(Property).where(
-        Property.status.in_(DUP_LIVE), func.coalesce(Property.published_at, Property.taken_at, Property.created_at) > since,
-        cast(Property.id, Text).not_in(fresh), cast(Property.id, Text).not_in(queued))
-        .order_by(Property.id.desc()).limit(DUP_DAILY_BATCH)))
-    for p in rows:
-        jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": "daily"}, replace=False)
-    db.commit()
-    return len(rows)
+SITE_TRIGGERS = ("published", "compare_link", "manual")  # dup_scan triggers that search the sites too (Stanislav 11-23)
 
 
 def schedule_dup_scan(db: Session, p: Property, trigger: str) -> None:
     """«При эксклюзиве — сразу поиск дублей везде» (Irakli 11-18): the worker runs similar.scan_exclusive within ~30 s
     (a whole-base search takes a second or two, not for a save request). No commit."""
-    if not jobs.pending(db, "dup_scan", p.id):  # one is waiting already: it runs the same search
-        jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": trigger}, replace=False)
+    pend = jobs.pending(db, "dup_scan", p.id)
+    sites = lambda t: t in SITE_TRIGGERS  # noqa: E731
+    # one waiting already runs the same search — unless this one searches the sites and that one only the base
+    if not pend or (sites(trigger) and not any(sites((j.payload or {}).get("trigger")) for j in pend)):
+        jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": trigger}, replace=bool(pend))
 
 
 def dup_scan(db: Session, pid: int) -> dict | None:
@@ -2606,18 +2589,23 @@ def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
 # ---------------------------------------------------------------- «Где ещё выложен» (David 11-23: any object)
 
 COPY_LEVELS = ("confirmed", "probable")  # similar.dup_level of an ad the duplicate search found: listed as a copy
+COPY_SITES = ("myhome", "ss", "livo", "korter")  # Stanislav 11-23: the block lists the sites only, not TG / FB posts
 
 
 def _who(l: Listing, competitors: set[str]) -> str | None:
     """Who posted the ad, as far as we know: a competitor's / agency channel or the bot's agent check → агент, an ad
-    that passed the bot's owner check → собственник; a copy found on a site (myhome / ss / korter search) is unknown."""
+    that passed the bot's owner check → собственник; a myhome copy by myhome's user_type; other copies are unknown."""
+    d = jload(l.details, {}) or {}
+    ut = d.get("user_type") if isinstance(d, dict) else None
+    if ut:  # myhome's own mark on a copy: physical | agent | broker
+        return "собственник" if ut == "physical" else "агент"
     if l.source in competitors or l.source == "agency" or l.agent_suspect or (l.agent_reasons or "[]") != "[]":
         return "агент"
     return "собственник" if l.status in ("published", "pending_review") else None
 
 
 def copies(db: Session, p: Property) -> list[dict]:
-    """Where else the object is advertised: its linked outside ads (an exclusive's «висит на …», they block its
+    """Where else the object is advertised on MyHome / SS / Livo / Korter: its linked outside ads (an exclusive's «висит на …», they block its
     publication) + the ads its last duplicate search (similar.scan_exclusive → event data «copies») calls confirmed /
     probable. Without ads gone from the feed, checked as removed by an operator or marked «Не дубль».
     -> [{listing_id, where, url, pct, level linked|confirmed|probable, who, asked {at, by}, blocking}], linked first."""
@@ -2643,7 +2631,8 @@ def copies(db: Session, p: Property) -> list[dict]:
     out = []
     for c, level in [(a, "linked") for a in linked] + [(c, c["level"]) for c in found]:
         l = ls.get(c["listing_id"])
-        if l is None or (level != "linked" and (l.status == "gone" or l.id in removed or similar.key("l", l.id) in different)):
+        if l is None or source_type_of(l) not in COPY_SITES or (level != "linked" and (
+                l.status == "gone" or l.id in removed or similar.key("l", l.id) in different)):
             continue
         a = asked.get(l.id)
         out.append({"listing_id": l.id, "where": similar._ad_source(l, competitors), "url": c.get("url") or (jload(l.urls, []) or [None])[0],

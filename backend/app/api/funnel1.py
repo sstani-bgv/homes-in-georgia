@@ -540,13 +540,13 @@ async def public_exclusive_sign(token: str, request: Request, file: UploadFile =
 
 @router.post("/properties/{pid}/myhome-copies")
 def properties_myhome_copies(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    """«Найти копии на myhome» (David 11-22): the worker searches myhome within a minute; «Похожие» then shows them."""
+    """«Найти копии» (David 11-22): the worker searches myhome / ss.ge / korter (by the link's photos too) within a
+    minute, then the duplicates; «Где ещё выложен» shows the copies."""
     from app.services import jobs
     from app.services.common import now
     p = P.get_visible(db, pid, user)
-    if not jobs.pending(db, "myhome_copies", p.id):
-        jobs.schedule(db, "myhome_copies", p.id, now(), replace=False)
-        db.commit()
+    jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": "manual"})  # replaces a pending base-only scan
+    db.commit()
     return {"ok": True}
 
 

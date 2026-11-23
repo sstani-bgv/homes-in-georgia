@@ -798,21 +798,20 @@ export function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder, off, o
   );
 }
 
-/** «Найти копии на myhome» (David 11-22): agents' copies of the object, searched by its district, street, rooms and
- * area; the worker takes about a minute, then «Похожие объекты» shows them. */
+/** «Найти копии» (David 11-22): agents' copies of the object on myhome / ss.ge / korter — by its district, street,
+ * rooms and area, and by the photos of its linked ad; a few minutes, then «Где ещё выложен» shows them. */
 function MyhomeCopies({ p }: { p: Property }) {
   const qc = useQueryClient();
   const toast = useToast();
   const run = useMutation({
     mutationFn: () => api.properties.myhomeCopies(p.id),
     onSuccess: () => {
-      toast(t('Ищем копии на myhome и ss.ge — через пару минут список обновится'));
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 75_000);
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 180_000);
+      toast(t('Ищем копии на myhome, ss.ge и korter — через пару минут список обновится'));
+      for (const ms of [75_000, 180_000, 300_000]) setTimeout(() => { qc.invalidateQueries({ queryKey: ['similar'] }); qc.invalidateQueries({ queryKey: ['property', p.id] }); }, ms);
     },
     onError: (e) => toast(errText(e), true),
   });
-  return <Button variant="secondary" size="sm" loading={run.isPending} onClick={() => run.mutate()}>{t('Найти копии на myhome и ss.ge')}</Button>;
+  return <Button variant="secondary" size="sm" loading={run.isPending} onClick={() => run.mutate()}>{t('Найти копии')}</Button>;
 }
 
 /** «Сравнить по ссылке» (David 11-22): an ad of a competitor / an owner on myhome / ss.ge / livo / korter scored against the object. */

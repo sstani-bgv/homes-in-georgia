@@ -294,14 +294,14 @@ def dup_purge(db: Session, job: Job):
 
 @handler("dup_scan")
 def dup_scan(db: Session, job: Job):
-    """An object became exclusive / got its contract / took a «Дубль» in, new ads look like it, or the daily pass of the
-    live objects (properties.schedule_daily_dup_scans, any object in work): search its duplicates everywhere
+    """An object was published, got a link («Сравнить по ссылке»), «Найти копии» was pressed (the sites are searched
+    then), became exclusive / got its contract / took a «Дубль» in, new ads look like it: search its duplicates
     (similar.scan_exclusive)."""
-    from app.services import myhome_copies, similar
+    from app.services import myhome_copies, properties, similar
     trigger = (job.payload or {}).get("trigger") or "exclusive"
-    # agents' copies on myhome first (David 11-22), once a day; not on the mass re-scans (new photo vectors, new ads:
-    # 613 queued 11-22 would have been 613 myhome searches in a row)
-    if trigger not in ("photo_vectors", "new_ads") and not myhome_copies.recent(db, _ref_id(job)):
+    # the sites (myhome, ss.ge, korter) only on publishing, a pasted link and «Найти копии» (Stanislav 11-23: no daily
+    # pass); the other triggers search what the base has
+    if trigger in properties.SITE_TRIGGERS:
         try:
             myhome_copies.run(db, _ref_id(job))
         except Exception:  # noqa: BLE001 — myhome down / changed: the scan of what we have still runs
@@ -313,9 +313,9 @@ def dup_scan(db: Session, job: Job):
 
 @handler("myhome_copies")
 def myhome_copies_job(db: Session, job: Job):
-    """The card's «Найти копии на myhome»: agents' copies of the object (services/myhome_copies.py)."""
-    from app.services import myhome_copies
-    return f"saved {myhome_copies.run(db, _ref_id(job))}"
+    """Old queued «Найти копии» jobs: the same as a dup_scan «manual» now."""
+    job.payload = {"trigger": "manual"}
+    return dup_scan(db, job)
 
 
 @handler("dup_recheck")
@@ -486,7 +486,6 @@ def main():
     login_bot.start_thread()  # staff invites: /start inv_<token> in the CRM sign-in bot
     last_ical = time.time() - env.DAILY_RENT_ICAL_MINUTES * 60 + 20  # first fetch 20 s after the start, as ApartFlow
     last_avatars = time.time() - 23 * 3600  # first pass an hour after the start, then daily
-    last_dups = time.time() - 3000  # the daily duplicate search (properties.schedule_daily_dup_scans): 10 min after the start
     last_posts = time.time() - 3000  # «сверка с каналом» (services/post_sync.py): 10 min after the start, then hourly
     importer = None
     last_import = time.time() - 25 * 60  # channel posts → objects (services/channel_import.py): 5 min after the start, every 30 min
@@ -509,15 +508,6 @@ def main():
                 avatars.run(out=log.info)
             except Exception:  # noqa: BLE001
                 log.exception("avatar sync failed")
-        if time.time() - last_dups >= 3600:  # David 11-23: copies / duplicates of every live object, once a day each
-            last_dups = time.time()
-            try:
-                from app.services import properties
-                with SessionLocal() as db:
-                    if n := properties.schedule_daily_dup_scans(db):
-                        log.info("daily dup scans queued: %s", n)
-            except Exception:  # noqa: BLE001
-                log.exception("daily dup scans failed")
         if time.time() - last_posts >= 3600:
             last_posts = time.time()
             try:

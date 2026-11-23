@@ -6,17 +6,16 @@ from app import worker
 from app.models import Event, Property
 from app.services import myhome_copies, properties, similar
 from app.services.common import log_event
-from tests.conftest import make_listing, make_user
+from tests.conftest import auth, make_listing, make_user
 from tests.test_similar import H, _object
 
 
-def test_live_non_exclusive_is_searched_daily_without_alerts(db, client, sent, monkeypatch):
+def test_sites_are_searched_on_publish_link_and_button_only_without_alerts(db, client, sent, monkeypatch):
+    """Stanislav 11-23: the sites only on publishing, a link and «Найти копии»; no daily pass."""
     runs = []
 
     def fake_run(db_, pid, pause=1.0):
         runs.append(pid)
-        log_event(db_, "property", pid, "myhome_copies", None, saved=0)
-        db_.commit()
         return 0
     monkeypatch.setattr(myhome_copies, "run", fake_run)
     vika = make_user(db, "agent", "Вика")
@@ -24,22 +23,22 @@ def test_live_non_exclusive_is_searched_daily_without_alerts(db, client, sent, m
     make_listing(db, "mh7101", source="myhome", urls=json.dumps(["https://myhome.ge/7101"]), address="Kazbegi 30",
                  photo_hashes=json.dumps([H[0] ^ 1, H[1]]), text="Сдаю")
     p = db.get(Property, pid)
-    assert not p.is_exclusive
-    p.status = "taken"  # not in work yet: not searched
-    db.commit()
-    assert properties.schedule_daily_dup_scans(db) == 0 and similar.scan_exclusive(db, pid) is None
-
+    assert not p.is_exclusive and not hasattr(properties, "schedule_daily_dup_scans")
     p.status = "published"
     db.commit()
-    assert properties.schedule_daily_dup_scans(db) == 1
-    assert properties.schedule_daily_dup_scans(db) == 0  # queued already
+    from app.services import jobs
+    for trigger in ("media", "new_ads", "published"):
+        jobs.schedule(db, "dup_scan", pid, properties.now(), {"trigger": trigger})
+        db.commit()
+        worker.tick()
+    assert runs == [pid]  # the base only on media / new ads
+    assert client.post(f"/api/properties/{pid}/myhome-copies", headers=auth(vika)).json() == {"ok": True}
+    assert jobs.pending(db, "dup_scan", pid)[0].payload == {"trigger": "manual"}
     worker.tick()
-    assert runs == [pid]
+    assert runs == [pid, pid]
     scan = properties.out(db, db.get(Property, pid), vika, full=True)["duplicate_scan"]
-    assert scan["trigger"] == "daily" and [s["key"] for s in scan["strong"]] == ["l:mh7101"]
-    assert not sent.of("exclusive_duplicates")  # no exclusive to defend: the card and «Похожие» only
-    assert properties.schedule_daily_dup_scans(db) == 0  # searched today
-    assert db.query(Event).filter_by(entity_id=str(pid), action="duplicate_scan").count() == 1
+    assert [s["key"] for s in scan["strong"]] == ["l:mh7101"]
+    assert not sent.of("exclusive_duplicates")  # no exclusive to defend
 
 
 def test_publishing_queues_the_search(db):

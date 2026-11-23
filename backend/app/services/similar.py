@@ -1040,7 +1040,8 @@ def scan_exclusive(db: Session, pid: int, trigger: str = "exclusive") -> dict | 
         return None
     # «Где ещё выложен» (David 11-23, any object): the outside ads it is confirmed / probably the same as
     copies = [{"key": x["key"], "listing_id": x["listing_id"], "where": x["where"], "url": x["url"], "pct": x.get("pct"),
-               "level": dup_level(x)} for x in items if x["kind"] == "ad" and dup_level(x) in P.COPY_LEVELS][:50]
+               "level": dup_level(x)} for x in items if x["kind"] == "ad" and dup_level(x) in P.COPY_LEVELS
+              and P.source_type_of(Listing(id=x["listing_id"], source="")) in P.COPY_SITES][:50]
     log_event(db, "property", pid, "duplicate_scan", None, n=len(items), strong=strong[:20], trigger=trigger, sig=sig,
               copies=copies)
     gate = no_esign_gate(db, p, w, items, trigger == "dup_recheck")

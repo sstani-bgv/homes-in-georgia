@@ -176,3 +176,16 @@ def test_korter_search_falls_back_to_the_city(monkeypatch):
              '{"apartments": [{"objectId": 9, "section": "rent"}, {"objectId": 8, "section": "sale"}]}}</script>'}
     monkeypatch.setattr(M, "_kr_get", lambda path: pages.get(path))
     assert [i["objectId"] for i in _KR_SEARCH("lisi", "min_area=1", pause=0)] == [9]
+
+
+def test_copies_by_the_link_photos_with_a_second_round(monkeypatch):
+    """Stanislav 11-23: the link's photos against the thumbnails of a wide search; a copy leading with a shot the link
+    lacks is caught through another copy's photos."""
+    A, B, C = 0x0F0F0F0F0F0F0F0F, 0x123456789ABCDEF0, 0x5555AAAA5555AAAA
+    h = {"a1": A ^ 1, "a2": A, "b": B, "b2": B ^ 2, "c": C}
+    monkeypatch.setattr(M, "_hashes", lambda urls: [h[u] for u in urls[:M.PHOTOS]])
+    rows = [{"id": "mh1", "thumbs": ["a1"], "photos": ["a2", "b"]},     # shares the link's photo
+            {"id": "mh2", "thumbs": ["b2"], "photos": ["b2"]},          # only mh1's other photo: round two
+            {"id": "mh3", "thumbs": ["c"], "photos": ["c"]}]            # another flat
+    assert [r["id"] for r in M.by_photos(rows, [A])] == ["mh1", "mh2"]
+    assert M.by_photos(rows, []) == []
