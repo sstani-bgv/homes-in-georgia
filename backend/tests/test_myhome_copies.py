@@ -189,3 +189,22 @@ def test_copies_by_the_link_photos_with_a_second_round(monkeypatch):
             {"id": "mh3", "thumbs": ["c"], "photos": ["c"]}]            # another flat
     assert [r["id"] for r in M.by_photos(rows, [A])] == ["mh1", "mh2"]
     assert M.by_photos(rows, []) == []
+
+
+def test_wide_search_learns_the_street_from_the_district(monkeypatch):
+    """#15509 11-23: the city search of 120 had no ad on Ramishvili, so only Vake's newest were searched (0 copies).
+    The street's id comes from the district's ads too."""
+    from types import SimpleNamespace
+    seen = []
+
+    def fake(q, pause=1.0):
+        seen.append(q)
+        if q.startswith("urbans=38"):
+            return [{"id": 5, "urban_id": 38, "urban_name": "Vake", "street_id": 1212, "address": "რამიშვილი ნ. ქ. 3"}]
+        if q.startswith("streets=1212"):
+            return [{"id": 6, "urban_id": 38, "urban_name": "Vake", "street_id": 1212, "address": "Ramishvili St 3"}]
+        return [{"id": 4, "urban_id": 38, "urban_name": "Vake", "street_id": 77, "address": "Chavchavadze Ave 1"}]
+    monkeypatch.setattr(M, "search", fake)
+    c = SimpleNamespace(address="რამიშვილი ნ. ქ. ", district="Ваке", area=56, floor=8, rooms=None, bedrooms=1)
+    assert {r["id"] for r in M.wide_mh(c, 0)} == {"mh4", "mh5", "mh6"}
+    assert seen[1:] == ["urbans=38&room_types=1,2,3", "streets=1212&room_types=1,2,3"]

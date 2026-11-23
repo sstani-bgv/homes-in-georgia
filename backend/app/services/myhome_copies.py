@@ -405,29 +405,38 @@ def _rooms(c) -> str:
 
 
 def wide_mh(c, pause: float = 1.0) -> list[dict]:
-    """myhome rentals in the district and on the street of c (the link's ad), rooms ±1, any area / floor -> rows."""
+    """myhome rentals in the district and on the street of c (the link's ad), rooms ±1, any area / floor -> rows.
+    myhome's ids of them come from a city search (rooms, area), the street's from the district's ads too: a city search
+    of 120 rarely has the street (#15509 11-23 searched Vake's newest only, 0 of 21 copies found)."""
     tag, street = districts.tag(c.district), _street(c.address)
-    seed = search(_filters(c), pause)  # tells myhome's ids of the district and the street
-    urbans = list({i["urban_id"] for i in seed if tag and i.get("urban_id") and districts.tag(i.get("urban_name")) == tag})
-    streets = list({i["street_id"] for i in seed if street and i.get("street_id") and _same_street(street, _street(i.get("address")))})
-    found, rq = {i["id"]: i for i in seed}, _rooms(c)
-    for q in [f"streets={x}" for x in streets[:WIDE_STREETS]] + [f"urbans={x}" for x in urbans[:WIDE_URBANS]]:
-        found.update({i["id"]: i for i in search(f"{q}&{rq}" if rq else q, pause)})
+    rq = _rooms(c)
+    with_rooms = lambda q: f"{q}&{rq}" if rq else q  # noqa: E731
+    found = {i["id"]: i for i in search(_filters(c), pause)}
+    urbans = list({i["urban_id"] for i in found.values() if tag and i.get("urban_id") and districts.tag(i.get("urban_name")) == tag})
+    for x in urbans[:WIDE_URBANS]:
+        found.update({i["id"]: i for i in search(with_rooms(f"urbans={x}"), pause)})
+    streets = list({i["street_id"] for i in found.values() if street and i.get("street_id")
+                    and _same_street(street, _street(i.get("address")))})
+    for x in streets[:WIDE_STREETS]:
+        found.update({i["id"]: i for i in search(with_rooms(f"streets={x}"), pause)})
     return [_mh_row(i) for i in found.values()]
 
 
 def wide_ss(c) -> list[dict]:
-    """ss.ge rentals in the district and on the street of c, any area / floor / rooms -> rows (2 Apify runs)."""
+    """ss.ge rentals in the district and on the street of c, any area / floor / rooms -> rows (3 Apify runs: the city by
+    area for the district's id, the district for the street's, the street)."""
     tag, street = districts.tag(c.district), _street(c.address)
     a = float(c.area) if c.area else None
-    first = ss_search([{"areaFrom": int(a * (1 - AREA_TOL)), "areaTo": int(a * (1 + AREA_TOL)) + 1}] if a else [{}])
     addr = lambda i: i.get("address") or {}  # noqa: E731
-    subs = list({addr(i)["subdistrictId"] for i in first if tag and addr(i).get("subdistrictId")
+    found = {i["applicationId"]: i for i in ss_search([{"areaFrom": int(a * (1 - AREA_TOL)), "areaTo": int(a * (1 + AREA_TOL)) + 1}] if a else [{}])}
+    subs = list({addr(i)["subdistrictId"] for i in found.values() if tag and addr(i).get("subdistrictId")
                  and districts.tag(addr(i).get("subdistrictTitle")) == tag})[:WIDE_URBANS]
-    streets = list({addr(i)["streetId"] for i in first if street and addr(i).get("streetId")
+    if subs:
+        found.update({i["applicationId"]: i for i in ss_search([{"subdistrictIds": subs}])})
+    streets = list({addr(i)["streetId"] for i in found.values() if street and addr(i).get("streetId")
                     and _same_street(street, _street(addr(i).get("streetTitle")))})[:WIDE_STREETS]
-    qs = [{"streetIds": streets}] * bool(streets) + [{"subdistrictIds": subs}] * bool(subs)
-    found = {i["applicationId"]: i for i in first + (ss_search(qs) if qs else [])}
+    if streets:
+        found.update({i["applicationId"]: i for i in ss_search([{"streetIds": streets}])})
     return [_ss_row(i) for i in found.values()]
 
 
