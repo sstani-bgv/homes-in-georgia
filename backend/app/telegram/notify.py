@@ -1590,3 +1590,13 @@ def contract_event(contract, head, actor=None, ops=True, note=None):
     who = " · ".join(e(x) for x in (g(contract, "address"), g(contract, "client_name")) if x)
     staff_event(f"{head} · договор #{cid}" + (f"\n🏠 {who}" if who else "") + (f" · заявка #{ld['id']}" if ld else "") + _note(note),
                 "contract", cid, [agent], actor, ops)
+
+
+@safe
+def deal_overdue(contract, agents):
+    """24 h after both parties signed and no deal (David 11-23): the agent / recruit and the operators."""
+    cid = g(contract, "id")
+    who = " · ".join(e(x) for x in (g(contract, "address"), g(contract, "client_name")) if x)
+    staff_event(f"⛔ <b>Оформите сделку по договору #{cid}</b>" + (f"\n🏠 {who}" if who else "")
+                + "\n\nДоговор подписан обеими сторонами больше 24 часов назад, а сделки нет. "
+                  "Пока сделка не оформлена, остальная работа в CRM закрыта.", "contract", cid, agents)

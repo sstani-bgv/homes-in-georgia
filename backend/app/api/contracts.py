@@ -199,6 +199,12 @@ def contracts_close(cid: int, body: CloseIn, db: Session = Depends(get_db, scope
     return C.out(db, C.close(db, cid, user, body.reason, body.comment), full=True)
 
 
+@router.post("/contracts/{cid}/deal-due/lift")
+def contracts_deal_due_lift(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
+    """«Снять блокировку»: the agent's 24 h lock for this contract's deal is lifted (the contract is cancelled, …)."""
+    return C.out(db, C.lift_deal_due(db, cid, user), full=True)
+
+
 @router.post("/contracts/{cid}/share")
 def contracts_share(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.share(db, cid, user))

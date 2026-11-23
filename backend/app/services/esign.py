@@ -330,6 +330,7 @@ def finalize(db: Session, cid: int) -> str:
     pdf = C.render_pdf(signed_html(c, rows))
     c.signed_pdf_path = C._store_pdf(c, pdf, signed=True)
     c.status, c.signed_at, c.signed_by, c.drive_file_id, c.updated_at = "signed", now(), None, None, now()
+    C.start_deal_due(db, c)
     jobs.schedule(db, "contract_drive", c.id, now())
     log_event(db, "contract", c.id, "signed", None, label="Электронная подпись", esign=True,
               pdf_sha256=hashlib.sha256(pdf).hexdigest())

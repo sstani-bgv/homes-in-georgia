@@ -24,6 +24,8 @@ export interface Plans { photo: number; showing: number; stickers: number; renta
 
 export interface User {
   id: number;
+  /** /auth/me: a signed contract whose 24 h for the deal ran out — the CRM opens only that deal (features/contracts/DealLock) */
+  deal_overdue?: { id: number; address: string | null; client_name: string | null; lead_id: number | null; due_at: string } | null;
   tg_id?: number | null;
   username?: string | null;
   name: string;
@@ -426,6 +428,7 @@ export interface Contract extends ContractSummary {
   lead_status?: string | null;
   /** the lead's deal while it is pending (deal_id comes with its confirm) */
   lead_deal_id?: number | null;
+  deal_due_at?: string | null;  // signed: the deal is due by then, else the agent's CRM is locked (David 11-23)
   /** the wizard's CxData + _step/_dep/_end, _edits = clause edits (templates.ts CxEdits) (full payloads) */
   data?: Record<string, string | number | boolean | object | null> | null;
   title?: string | null;

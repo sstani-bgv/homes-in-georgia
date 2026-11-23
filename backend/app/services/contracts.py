@@ -180,7 +180,7 @@ def out(db: Session, c: Contract, full: bool = False) -> dict:
          "title": c.title, "cadastral": c.cadastral, "address": c.address, "client_name": c.client_name,
          "owner_name": c.owner_name, "lead_id": c.lead_id, "deal_id": c.deal_id, "property_id": c.property_id,
          "created_by": _name(db, c.created_by), "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at),
-         "signed_at": _iso(c.signed_at), "signed_by": _name(db, c.signed_by), "has_signed_pdf": bool(c.signed_pdf_path),
+         "signed_at": _iso(c.signed_at), "deal_due_at": _iso(c.deal_due_at), "signed_by": _name(db, c.signed_by), "has_signed_pdf": bool(c.signed_pdf_path),
          "close_reason": c.close_reason, "close_reason_label": CONTRACT_CLOSE_REASONS.get(c.close_reason or ""),
          "close_comment": c.close_comment, "closed_at": _iso(c.closed_at), "closed_by": _name(db, c.closed_by),
          "in_drive": bool(c.drive_file_id), "filename": filename(c),
@@ -555,6 +555,7 @@ def sign(db: Session, cid: int, user: User, pdf: bytes | None = None) -> Contrac
         c.drive_file_id = None  # the scan replaces what Drive got
     if c.status == "draft":
         c.status, c.signed_at, c.signed_by = "signed", now(), user.id
+        start_deal_due(db, c)
         notify_later(db, "contract_event", c, "✍️ <b>Договор подписан</b> (вручную)", user.id)
     c.updated_at = now()
     jobs.schedule(db, "contract_drive", c.id, now())
@@ -575,10 +576,69 @@ def close(db: Session, cid: int, user: User, reason: str, comment: str | None = 
         raise DomainError("bad_input", "Причина «Другое»: напишите комментарий")
     c.status, c.close_reason, c.close_comment = "closed_no_deal", reason, comment
     c.closed_at, c.closed_by, c.updated_at = now(), user.id, now()
-    c.share_token = c.share_expires_at = None
+    c.share_token = c.share_expires_at = c.deal_due_at = None
+    jobs.cancel(db, "deal_due", c.id)
     log_event(db, "contract", c.id, "closed_no_deal", user, reason=reason, comment=comment)
     notify_later(db, "contract_event", c, f"❌ <b>Договор закрыт без сделки: {CONTRACT_CLOSE_REASONS[reason]}</b>", user.id,
                  True, comment)
+    db.commit()
+    return c
+
+
+DEAL_DUE_HOURS = 24
+DEAL_OVERDUE = "deal_overdue"
+
+
+def start_deal_due(db: Session, c: Contract) -> None:
+    """Both parties signed («Договор подписан» or the e-signature): the deal is due in 24 h (David 11-23); at the
+    deadline the worker's deal_due warns the agent and the operator, and overdue_for locks the agent's CRM."""
+    c.deal_due_at = now() + timedelta(hours=DEAL_DUE_HOURS)
+    jobs.schedule(db, "deal_due", c.id, c.deal_due_at)
+
+
+def owes_deal(db: Session, c: Contract) -> bool:
+    """A signed contract with no deal entered yet (a pending one counts as entered)."""
+    if c.status != "signed" or c.deal_id:
+        return False
+    if c.lead_id:
+        mine = Deal.lead_id == c.lead_id
+    elif c.property_id and c.signed_at:
+        mine = (Deal.property_id == c.property_id) & (Deal.created_at >= c.signed_at)
+    else:
+        return True
+    return db.scalar(select(Deal.id).where(mine, Deal.status != "cancelled").limit(1)) is None
+
+
+def deal_owers(db: Session, c: Contract) -> list[int]:
+    """Who must enter the deal: the lead's agent and the contract's author (an agent or a recruit), never staff."""
+    lead = db.get(Lead, c.lead_id) if c.lead_id else None
+    ids = dict.fromkeys(x for x in (lead.agent_id if lead else None, c.created_by) if x)
+    return [u.id for u in (db.get(User, i) for i in ids) if u and not at_least(u, "operator")]
+
+
+def overdue_for(db: Session, user: User) -> Contract | None:
+    """The user's signed contract whose 24 h for the deal ran out: until the deal is entered his CRM opens only it."""
+    if at_least(user, "operator"):
+        return None
+    mine = or_(Contract.created_by == user.id, Contract.lead_id.in_(select(Lead.id).where(Lead.agent_id == user.id)))
+    for c in db.scalars(select(Contract).where(Contract.status == "signed", Contract.deal_due_at <= now(), mine)
+                        .order_by(Contract.deal_due_at)):
+        if owes_deal(db, c) and user.id in deal_owers(db, c):
+            return c
+    return None
+
+
+def overdue_out(c: Contract | None) -> dict | None:
+    return c and {"id": c.id, "address": c.address, "client_name": c.client_name, "lead_id": c.lead_id,
+                  "due_at": c.deal_due_at.isoformat()}
+
+
+def lift_deal_due(db: Session, cid: int, user: User) -> Contract:
+    """The operator lifts the lock (the contract was cancelled, the deal is entered elsewhere, …)."""
+    c = get(db, cid, user, lock=True)
+    c.deal_due_at, c.updated_at = None, now()
+    jobs.cancel(db, "deal_due", c.id)
+    log_event(db, "contract", c.id, "deal_due_lifted", user)
     db.commit()
     return c
 

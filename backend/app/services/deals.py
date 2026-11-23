@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.config import settings as env
-from app.models import Client, Deal, Evaluation, Lead, Owner, Property, User, at_least, is_field
+from app.models import Client, Contract, Deal, Evaluation, Lead, Owner, Property, User, at_least, is_field
 from app.services import evaluations, jobs, leads, users
 from app.services.common import TZ, clean_cadastral, get_or_404, log_event, notify_later, now
 from app.services.errors import DomainError, forbidden
@@ -309,6 +309,8 @@ def create(db: Session, data: dict, actor: User | None, commit: bool = True, not
         t0_ev = evaluations.create(db, {"deal_id": deal.id, "kind": "t0", "author": "agent", **t0}, actor, commit=False)
     if lead:
         leads.attach_deal(db, lead, deal.id, actor)
+        for cid in db.scalars(select(Contract.id).where(Contract.lead_id == lead.id)):  # the 24 h for the deal: met
+            jobs.cancel(db, "deal_due", cid)
     log_event(db, "deal", deal.id, "created", actor, price=nums["price"], commission=nums["commission_total"])
     if commit:
         db.commit()

@@ -176,8 +176,9 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db, scope="
 
 
 @router.get("/me")
-def me(user: User = Depends(current_user)):
-    return user_out(user)
+def me(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    from app.services import contracts as C  # the 24 h for a signed contract's deal ran out: the frontend locks to it
+    return {**user_out(user), "deal_overdue": C.overdue_out(C.overdue_for(db, user))}
 
 
 @router.get("/media-token")

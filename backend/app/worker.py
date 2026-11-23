@@ -180,6 +180,18 @@ def contract_drive(db: Session, job: Job):
     return contracts.drive_upload(db, _ref_id(job))
 
 
+@handler("deal_due")
+def deal_due(db: Session, job: Job):
+    """24 h after both parties signed (services/contracts.start_deal_due): no deal yet → ⛔ to the agent and the operator."""
+    from app.models import Contract
+    from app.services import contracts as C
+    c = db.get(Contract, _ref_id(job))
+    if not c or not c.deal_due_at or not C.owes_deal(db, c):
+        return "stale"
+    notify.deal_overdue(c, C.deal_owers(db, c))
+    log_event(db, "contract", c.id, C.DEAL_OVERDUE, None, "bot")
+
+
 @handler("birthdays")
 def birthdays_job(db: Session, job: Job):
     """09:00 Tbilisi: today's birthdays → the team, tomorrow's → a reminder to admins (services/birthdays.py)."""

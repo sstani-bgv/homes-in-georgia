@@ -12,6 +12,7 @@ import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
 import { useAuth, useTgBackButton } from '../auth/AuthContext';
 import { useScrollMemory } from './back';
+import { DealLock } from '../features/contracts/DealLock';
 import { Avatar, Badge, Drawer, Modal, Seg } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 import { LANG, LANGS, setLang, t } from '../lib/i18n';
@@ -142,7 +143,7 @@ export function AppLayout() {
           {!only && <button className="btn btn-sm" onClick={() => setAdd(true)} aria-label={t('Добавить')}><Plus size={16} /><span className="hide-mobile">{t('Добавить')}</span></button>}
         </header>
         <main className="content">
-          <Outlet />
+          <DealLock><Outlet /></DealLock>
         </main>
       </div>
       <nav className="bottom-nav">

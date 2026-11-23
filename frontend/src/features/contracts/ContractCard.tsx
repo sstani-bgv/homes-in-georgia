@@ -5,7 +5,7 @@ import { useConfirm } from '../../components/ActionDialog';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Copy, Download, ExternalLink, FileText, Handshake, Pencil, PenLine, Send, Share2, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Download, ExternalLink, FileText, Handshake, Pencil, PenLine, Send, Share2, Unlock, Upload, XCircle } from 'lucide-react';
 import { api } from '../../api';
 import { itemsOf } from '../../api/client';
 import type { Contract, ContractCloseReason, ContractStatus } from '../../api/types';
@@ -13,6 +13,7 @@ import { insideTelegram, tgWebApp } from '../../auth/AuthContext';
 import { errText, useToast } from '../../components/toast';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Modal, Select, Tabs, Textarea } from '../../components/ui';
 import { CONTRACT_STAGES, fmtDate, fmtDateTime } from '../../lib/format';
+import { useAuth } from '../../auth/AuthContext';
 import { t } from '../../lib/i18n';
 
 export const CLOSE_REASONS: Record<ContractCloseReason, string> = {
@@ -46,6 +47,7 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
   const toast = useToast();
   const qc = useQueryClient();
   const tg = insideTelegram();
+  const { isStaff } = useAuth();
   const [signOpen, setSignOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const done = (x: Contract, msg: string) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); toast(msg); };
@@ -77,7 +79,12 @@ export function ContractActions({ c, onChange }: { c: Contract; onChange: (c: Co
         {c.status === 'draft' && !c.pdf_stale && <Button variant="ok" onClick={() => setSignOpen(true)}><CheckCircle2 size={16} />{t('Договор подписан')}</Button>}
         {(c.status === 'signed' || c.status === 'deal') && !c.has_signed_pdf && <Button variant="ghost" onClick={() => setSignOpen(true)}><Upload size={16} />{t('Прикрепить скан')}</Button>}
         {(c.status === 'draft' || c.status === 'signed') && <Button variant="ghost" onClick={() => setCloseOpen(true)}><XCircle size={16} />{t('Сделка не состоялась')}</Button>}
+        {isStaff && c.status === 'signed' && c.deal_due_at && !c.lead_deal_id && new Date(c.deal_due_at).getTime() < Date.now()
+          && <Button variant="ghost" loading={busy.isPending} onClick={() => busy.mutate(async () => done(await api.contracts.liftDealDue(c.id), t('Блокировка агента снята')))}>
+            <Unlock size={16} />{t('Снять блокировку агента')}</Button>}
       </div>
+      {c.status === 'signed' && c.deal_due_at && !c.lead_deal_id && <div className="muted" style={{ fontSize: 13 }}>
+        {new Date(c.deal_due_at).getTime() < Date.now() ? '⛔ ' + t('Срок оформления сделки истёк: CRM агента закрыта до сделки') : '⏳ ' + t('Сделку нужно оформить до {at}', { at: fmtDateTime(c.deal_due_at) })}</div>}
       {!closed && <SendToClient c={c} onChange={onChange} />}
       <ESignBlock c={c} onChange={(x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); }} />
       <SignModal c={c} open={signOpen} onClose={() => setSignOpen(false)} onDone={(x) => { setSignOpen(false); done(x, t('Отмечено: договор подписан')); }} />
