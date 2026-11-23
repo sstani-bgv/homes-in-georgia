@@ -701,10 +701,21 @@ def step2():
     post = one_post("2 скидка агентом → перевыкладка", pid)
     t = text_of(post or {})
     check("2 пост с ценой 750", "750", t[:120], "750" in t)
+    # Stanislav 11-24: one «Редактировать пост» → the object's form; its «Обновить пост» = the edit (if any) + publish
     mark = FAKE.mark()
-    A["agent"].post(f"/properties/{pid}/publish", json={"channel": "tg", "tg": True, "site": True})  # «Обновить пост» агентом
-    post = one_post("2 «Обновить пост» агентом: один пост", pid)
+    A["agent"].post(f"/properties/{pid}/publish", json={"channel": "tg", "tg": True, "site": True})  # nothing changed: «поднять»
+    post = one_post("2 «Редактировать пост» → «Обновить пост» без правок (поднять): один пост", pid)
+    check("2 поднять: новый пост", "≠ прежнего", post and post["message_id"], post and post["message_id"] != old)
     audience("2 «Обновить пост» агентом → оператору", mark, "Агент перевыложил", {"op"}, {"agent"})
+    before = post and post["message_id"]
+    A["agent"].patch(f"/properties/{pid}", json={"area": 77})  # the form's save, then its publish — as EditModal does
+    A["agent"].post(f"/properties/{pid}/publish", json={"channel": "tg", "tg": True, "site": True})
+    post = one_post("2 «Обновить пост» с правкой: один пост", pid)
+    mid = post and post["message_id"]
+    work()
+    post = one_post("2 «Обновить пост» с правкой: после воркера всё ещё один, без второй перевыкладки", pid)
+    eq("2 «Обновить пост» с правкой: воркер не перевыложил ещё раз", mid, post and post["message_id"])
+    check("2 «Обновить пост» с правкой: в посте 77 м²", "77", text_of(post or {})[:200], "77" in text_of(post or {}) and mid != before)
     STATE["post_mid"] = post and post["message_id"]
 
 

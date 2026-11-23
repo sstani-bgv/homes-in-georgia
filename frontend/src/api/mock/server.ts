@@ -1122,6 +1122,8 @@ on('POST', '/offers/:kind/:id/publish', (m, b) => {
 on('GET', '/geo/search', (_m, _b, q) => ({ point: false, items: (q.get('q') || '').length < 3 ? [] : [{ label: `${q.get('q')}, Тбилиси`, lat: 41.7105, lng: 44.7612 }] }));
 on('GET', '/geo/point', (_m, _b, q) => ({ district: 'Ваке', address: `Ilia Chavchavadze Avenue ${Math.abs(Math.round(Number(q.get('lat')) * 10000)) % 90 + 1}, Tbilisi`, metro: 'Rustaveli', metro_m: 640 }));
 on('POST', '/properties/:id/site', (m, b) => { const u = currentUser(); const p = getProp(Number(m[1])); p.site_hidden = !b.on; return propOut(p, u); });
+on('POST', '/properties/:id/unpost', (m) => { const p = getProp(Number(m[1])); p.post_url = null; return propOut(p, currentUser()); });
+on('POST', '/properties/:id/unpublish', (m) => { const p = getProp(Number(m[1])); Object.assign(p, { status: 'archived' as PropertyStatus, archive_reason: 'unpublished', post_url: null }); return propOut(p, currentUser()); });
 
 async function formToBody(fd: FormData): Promise<Record<string, unknown>> {
   const files: { name: string; url: string }[] = [];

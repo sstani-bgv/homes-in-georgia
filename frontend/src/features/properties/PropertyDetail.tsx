@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api, type PublishProgress } from '../../api';
 import { ApiError, itemsOf, mediaUrl, thumbUrl, withKeepalive } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -1372,24 +1372,10 @@ function ReviewStep({ p }: { p: Property }) {
   );
 }
 
-/** A published object (David 11-23): «Обновить пост» posts it again as it is (the old post is deleted), «Редактировать
- * пост» opens the object's «Править» form (Stanislav 11-23: no free text; saving a post field reposts by itself);
- * without a post — «Опубликовать в Telegram» (the generator: photos and targets). */
+/** A published object with a post (Stanislav 11-24): one «Редактировать пост» — the object's form, its «Обновить пост»
+ * saves the changes and reposts (nothing changed: just reposts, «поднять пост»). No post: «Вернуть публикацию». */
 function Republish({ p, onEdit }: { p: Property; onEdit: () => void }) {
-  const { toast, set } = useProp(p.id);
-  const [open, setOpen] = useState(false);
-  const again = useMutation({
-    mutationFn: () => api.properties.publish(p.id, { channel: 'tg', tg: true, site: !p.site_hidden }),
-    onSuccess: (r) => { set(r); toast(t('Пост перевыложен: старый удалён')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  if (open) return <div className="col"><div className="divider" /><PostComposer p={p} /></div>;
-  return p.post_url
-    ? <div className="row row-wrap gap-sm">
-      <Button variant="secondary" loading={again.isPending} onClick={() => again.mutate()}><RotateCcw size={16} />{t('Обновить пост')}</Button>
-      <Button variant="secondary" disabled={again.isPending} onClick={onEdit}><Pencil size={16} />{t('Редактировать пост')}</Button>
-    </div>
-    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />{t('Выложить в канал')}</Button>;
+  return p.post_url ? <div><Button variant="secondary" onClick={onEdit}><Pencil size={16} />{t('Редактировать пост')}</Button></div> : null;
 }
 
 /** «Скидка»: the new price and ❗️#Discount in the post; the post is reposted by itself (backend apply_update → tg_repost). */
@@ -1436,41 +1422,57 @@ function PublishedActions({ p, onArchive }: { p: Property; onArchive: (reason: s
   );
 }
 
-/** «Опубликовать на сайте» (staff, a Telegram-only object) and «Снять с публикации» (David 11-23, staff and the
- * object's agent): off the site and the channel at once (backend properties.unpublish), back by «Опубликовать снова». */
+/** «Снять с публикации» / «Вернуть публикацию» (Stanislav 11-24): a modal with a checkbox per place — the site hge.ge
+ * and the Telegram channel. Off from every place it is in = «Снят с публикации» (archive, backend unpublish); from one
+ * = only there (site / unpost), the status stays. Back: the places it is missing from (site on / publish tg). */
 function SiteButton({ p }: { p: Property }) {
-  const confirm = useConfirm();
-  const { toast, set } = useProp(p.id);
-  const m = useMutation({
-    mutationFn: () => api.properties.site(p.id, true),
-    onSuccess: (r) => { set(r); toast(t('Опубликовано на сайте')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const [part, setPart] = useState(false);
-  const siteOff = useMutation({
-    mutationFn: () => api.properties.site(p.id, false),
-    onSuccess: (r) => { set(r); setPart(false); toast(t('Снято с сайта · канал и статус без изменений')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const tgOff = useMutation({
-    mutationFn: () => api.properties.unpost(p.id),
-    onSuccess: (r) => { set(r); setPart(false); toast(t('Пост удалён из канала · сайт и статус без изменений')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const off = useMutation({
-    mutationFn: () => api.properties.unpublish(p.id),
-    onSuccess: (r) => { set(r); toast(t('Снято с публикации: сайт и канал')); },
-    onError: (e) => toast(errText(e), true),
-  });
+  const [mode, setMode] = useState<'off' | 'on' | null>(null);
+  const onSite = !p.site_hidden, onTg = !!p.post_url;
   return <>
-    {p.site_hidden
-      ? <Button variant="ok" loading={m.isPending} onClick={() => m.mutate()}><Globe size={16} />{t('Вернуть на сайт')}</Button>
-      : <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>}
-    <Button variant="ghost" loading={off.isPending} onClick={async () => { if (await confirm(t('Снять объект с публикации? Он уйдёт с сайта hge.ge и из канала, вернуть — «Опубликовать снова».'))) off.mutate(); }}>{t('Снять с публикации')}</Button>
-    {(p.post_url || !p.site_hidden) && <Button variant="ghost" size="sm" onClick={() => setPart(!part)}>{t('Частично')}<ChevronDown size={14} /></Button>}
-    {part && !p.site_hidden && <Button variant="secondary" size="sm" loading={siteOff.isPending} onClick={() => siteOff.mutate()}>{t('Снять только с сайта')}</Button>}
-    {part && p.post_url && <Button variant="secondary" size="sm" loading={tgOff.isPending} onClick={async () => { if (await confirm(t('Удалить пост из канала? Объект останется опубликованным на сайте, выложить снова — «Выложить в канал».'))) tgOff.mutate(); }}>{t('Снять только из канала')}</Button>}
+    {onSite && <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>}
+    {(onSite || onTg) && <Button variant="ghost" onClick={() => setMode('off')}>{t('Снять с публикации')}</Button>}
+    {(!onSite || !onTg) && <Button variant="ok" onClick={() => setMode('on')}><RotateCcw size={16} />{t('Вернуть публикацию')}</Button>}
+    {mode && <PlacesModal p={p} off={mode === 'off'} onClose={() => setMode(null)} />}
   </>;
+}
+
+function PlacesModal({ p, off, onClose }: { p: Property; off: boolean; onClose: () => void }) {
+  const { toast, set } = useProp(p.id);
+  const has = { site: !p.site_hidden, tg: !!p.post_url };
+  const places = (['site', 'tg'] as const).filter((k) => has[k] === off);
+  const [pick, setPick] = useState<Record<string, boolean>>({ site: true, tg: true });
+  const chosen = places.filter((k) => pick[k]);
+  const m = useMutation({
+    mutationFn: async () => {
+      if (off) {
+        if (chosen.length === places.length) return api.properties.unpublish(p.id);
+        return chosen[0] === 'site' ? api.properties.site(p.id, false) : api.properties.unpost(p.id);
+      }
+      if (chosen.includes('tg')) return api.properties.publish(p.id, { channel: 'tg', tg: true, site: has.site || chosen.includes('site') });
+      return api.properties.site(p.id, true);
+    },
+    onSuccess: (r) => {
+      set(r); onClose();
+      toast(off ? (chosen.length === places.length ? t('Снято с публикации · вернуть — «Опубликовать снова» в архиве')
+        : chosen[0] === 'site' ? t('Снято с сайта · канал и статус без изменений') : t('Пост удалён из канала · сайт и статус без изменений'))
+        : t('Публикация возвращена'));
+    },
+    onError: (e) => toast(errText(e), true),
+  });
+  const label = { site: t('Сайт hge.ge'), tg: t('Telegram-канал') };
+  return (
+    <Modal open onClose={onClose} title={off ? t('Снять с публикации') : t('Вернуть публикацию')}>
+      <div className="col gap-lg">
+        <span className="muted">{off ? t('Откуда снять объект:') : t('Куда вернуть объект:')}</span>
+        <div className="col gap-sm">{places.map((k) => <Checkbox key={k} checked={pick[k]} onChange={(x) => setPick({ ...pick, [k]: x })}>{label[k]}</Checkbox>)}</div>
+        {off && chosen.length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>{chosen.length === places.length
+          ? t('Объект уйдёт отовсюду и из бота, в архив «Снят с публикации». Вернуть — «Опубликовать снова».')
+          : chosen[0] === 'site' ? t('Объект пропадёт с сайта, пост в канале и статус останутся.') : t('Пост удалится из канала, на сайте и в статусе всё останется.')}</div>}
+        {!off && chosen.includes('tg') && <div className="alert alert-info" style={{ fontSize: 13 }}>{t('В канал выйдет новый пост из параметров объекта.')}</div>}
+        <div className="modal-actions"><Button block disabled={!chosen.length} loading={m.isPending} onClick={() => m.mutate()}>{t('Подтвердить')}</Button></div>
+      </div>
+    </Modal>
+  );
 }
 
 /** «Снять с паузы» / «Опубликовать снова» (unpublished): published again with a new post; «Снова в работу» for
@@ -1587,7 +1589,7 @@ function PostFieldsForm({ value: f, onChange, price }: { value: PostFields; onCh
   );
 }
 
-function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
+function EditModal({ p, open, onClose, repost }: { p: Property; open: boolean; onClose: () => void; repost?: boolean }) {
   const { toast, set } = useProp(p.id);
   type Form = Partial<Property> & { owner_name?: string; owner_phone?: string; owner_id?: number | null };
   const [f, setF] = useState<Form>({});
@@ -1599,6 +1601,15 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
     onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : t('Сохранено')); onClose(); setF({}); setReason(''); },
     onError: (e) => toast(errText(e), true),
   });
+  // «Обновить пост» (Stanislav 11-24): the changes (if any) and a fresh post; the manual publish drops the queued auto-repost
+  const again = useMutation({
+    mutationFn: async () => {
+      if (Object.keys(f).length) await api.properties.update(p.id, { ...f, reason: reason || undefined });
+      return api.properties.publish(p.id, { channel: 'tg', tg: true, site: !p.site_hidden });
+    },
+    onSuccess: (r) => { set(r); toast(Object.keys(f).length ? t('Сохранено · пост перевыложен, старый удалён') : t('Пост перевыложен, старый удалён')); onClose(); setF({}); setReason(''); },
+    onError: (e) => toast(errText(e), true),
+  });
   // after the operator's verification these fields go to «Запросы» (backend properties.LOCKED_AFTER_VERIFY)
   const locked = new Set(p.locked_fields || []);
   const lockHint = (k: string) => (locked.has(k) ? t('Изменение уйдёт оператору на проверку') : undefined);
@@ -1606,7 +1617,8 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
   const where = useQuery({ queryKey: ['property-elsewhere', p.id], queryFn: () => api.properties.elsewhere(p.id), enabled: open && !!v.is_exclusive });
   const found = where.data?.items || [];
   return (
-    <Modal open={open} onClose={onClose} title={t('Поля объекта')}>
+    <Modal open={open} onClose={onClose} title={repost ? t('Редактировать пост') : t('Поля объекта')}>
+      {repost && <div className="alert alert-info" style={{ fontSize: 13, marginBottom: 12 }}>{t('Пост собирается из этих полей. «Обновить пост» внизу сохранит изменения и перевыложит пост (старый удалится, сайт обновится). Ничего не меняли — пост просто поднимется.')}</div>}
       <div className="form-grid">
         {(p.missing || []).length > 0 && <div className="alert alert-warn span2" style={{ fontSize: 13, display: 'block' }}>{t('Для отправки оператору не хватает:')} <b>{(p.missing || []).join(', ')}</b></div>}
         <Field label={t('Район')}><DistrictSelect value={v.district} onChange={(x) => upd('district', x)} /></Field>
@@ -1649,7 +1661,12 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
           <Field label={t('Причина изменения')} hint={t('Оператор увидит её в запросе')}><Input value={reason} placeholder={t('Например: собственник сменил номер')} onChange={(e) => setReason(e.target.value)} /></Field>
         </div>
       )}
-      <div className="row mt-lg"><Button loading={save.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => save.mutate()}>{t('Сохранить')}</Button><Button variant="ghost" onClick={onClose}>{t('Отмена')}</Button></div>
+      <div className="modal-actions mt-lg">
+        {repost
+          ? <><Button block loading={again.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => again.mutate()}><RotateCcw size={16} />{t('Обновить пост')}</Button>
+            <Button block variant="ghost" onClick={onClose}>{t('Отмена')}</Button></>
+          : <div className="row"><Button loading={save.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => save.mutate()}>{t('Сохранить')}</Button><Button variant="ghost" onClick={onClose}>{t('Отмена')}</Button></div>}
+      </div>
     </Modal>
   );
 }
@@ -1762,7 +1779,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id),
     refetchInterval: (q) => (q.state.data?.duplicate_scan?.pending ? 10_000 : false) });
   const hist = useQuery({ queryKey: ['property-history', id], queryFn: () => api.properties.history(id) });
-  const [edit, setEdit] = useState(false);
+  const [edit, setEdit] = useState<boolean | 'repost'>(false);
   const [ownerEdit, setOwnerEdit] = useState(false);
   const [archiving, setArchiving] = useState<string | false>(false);
   const step = useMemo(() => (p ? stepOf(p) : 0), [p]);
@@ -1798,7 +1815,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
         {canWork && p.status === 'published' && <SiteButton p={p} />}
       </div>
       {canWork && p.status === 'published' && <PublishedActions p={p} onArchive={setArchiving} />}
-      {canWork && p.status === 'published' && <Republish p={p} onEdit={() => setEdit(true)} />}
+      {canWork && p.status === 'published' && <Republish p={p} onEdit={() => setEdit('repost')} />}
       {/* David 11-23: a rented flat is free again — back on the market from the card, not through the archive */}
       {p.status === 'rented' && canWork && <div className="row row-wrap gap-sm">
         {!!p.published_at && <Resume p={p} republish />}
@@ -1931,7 +1948,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {compact && <Card label={t('История')} title={t('События')}><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>
       </div>
-      <EditModal p={p} open={edit} onClose={() => setEdit(false)} />
+      <EditModal p={p} open={!!edit} repost={edit === 'repost'} onClose={() => setEdit(false)} />
       {ownerEdit && <OwnerEditModal p={p} open onClose={() => setOwnerEdit(false)} />}
       {archiving !== false && <ArchiveModal key={archiving} p={p} preset={archiving} open onClose={() => setArchiving(false)} />}
     </div>
