@@ -5,7 +5,7 @@ to the market from the card."""
 from app import worker
 from app.models import Job, Property, PropertyPublication
 from app.services import properties
-from tests.conftest import auth
+from tests.conftest import auth, make_user
 from tests.test_tg_unpost import _actions, _posts
 from tests.test_publish_card import _submitted
 
@@ -83,9 +83,10 @@ def test_rented_posts_flat_rented_once_and_goes_back_from_the_card(db, client, m
     assert _live(db, pid) == [] and "tg_rented_posted" in _actions(db, pid)
     properties.rented_post(db, db.get(Property, pid))  # the same rent: not again
     assert len([c for c in calls if c[0] == "rented"]) == 1
-    # «Опубликовать снова» (staff) right from the rented card
-    assert client.post(f"/api/properties/{pid}/resume", json={"republish": True}, headers=auth(georgiy)).status_code == 403
-    assert client.post(f"/api/properties/{pid}/resume", json={"republish": True}, headers=auth(nino)).json()["status"] == "published"
+    # «Опубликовать снова» right from the rented card: someone else's agent can't, the object's own agent can (11-23)
+    other = make_user(db, "agent", "Леван")
+    assert client.post(f"/api/properties/{pid}/resume", json={"republish": True}, headers=auth(other)).status_code == 403
+    assert client.post(f"/api/properties/{pid}/resume", json={"republish": True}, headers=auth(georgiy)).json()["status"] == "published"
     worker.tick()
     assert _live(db, pid) == ["120"]
 

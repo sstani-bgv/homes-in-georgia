@@ -104,19 +104,14 @@ def test_matching_by_the_second_number(db, client, sent):
     assert matching.same_as(db, "Палиашвили 10", None, "+995 555 00 00 00") == []
 
 
-def test_after_verification_a_new_number_is_an_operator_request(db, client, sent):
+def test_after_verification_the_own_agent_adds_a_number_at_once(db, client, sent):
     from tests.test_change_requests import _verified
     georgiy, nino, pid = _verified(db, client, sent, "ss506")
     client.post(f"/api/properties/{pid}/publish", headers=auth(nino))
     body = {"owner_name": "Нана", "owner_phone": AD, "owner_phones": [{"phone": AD}, {"phone": SISTER, "note": "сестра"}]}
     r = client.patch(f"/api/properties/{pid}", json=body, headers=auth(georgiy)).json()
-    assert len(r["owner"]["phones"]) == 1  # not applied yet
-    ch = {c["field"]: (c["old"], c["new"]) for c in r["change_request"]["changes"]}
-    assert ch == {"owner_phones": ([{"phone": "+995599112233", "note": None}],
-                                   [{"phone": "+995599112233", "note": None}, {"phone": "+995577445566", "note": "сестра"}])}
-    client.post(f"/api/change-requests/{r['change_request']['id']}/decide", json={"approve": True}, headers=auth(nino))
-    r = client.get(f"/api/properties/{pid}", headers=auth(georgiy)).json()
-    assert [x["phone"] for x in r["owner"]["phones"]] == ["+995599112233", "+995577445566"]
+    assert r["change_request"] is None and [x["phone"] for x in r["owner"]["phones"]] == ["+995599112233", "+995577445566"]
+    assert any("Агент изменил" in a[1] and "owner_phones" in a[5] for a in sent.of("prop_event"))
 
 
 def test_ad_window_and_dedup_check_show_every_number_to_who_may_see_them(db, client, sent):

@@ -660,8 +660,8 @@ class PublishIn(BaseModel):
 
 @router.post("/properties/{pid}/publish")
 def properties_publish(pid: int, body: PublishIn | None = None, db: Session = Depends(get_db, scope="function"),
-                       user: User = Depends(require_level("operator"))):
-    b = body or PublishIn()
+                       user: User = Depends(current_user)):
+    b = body or PublishIn()  # an agent (his own published object, P.publish checks) reposts from the fields: no own text
     try:
         return P.out(db, P.publish(db, pid, user, b.text, b.media_ids, b.channel, b.comment, b.tg, b.site), user, full=True)
     finally:
@@ -669,7 +669,7 @@ def properties_publish(pid: int, body: PublishIn | None = None, db: Session = De
 
 
 @router.get("/properties/{pid}/publish/progress")
-def properties_publish_progress(pid: int, user: User = Depends(require_level("operator"))):
+def properties_publish_progress(pid: int, user: User = Depends(current_user)):
     """What the publish of this object is doing now ({step, n, of, chat}; {} when none runs): the card polls it."""
     return progress.get(f"publish:{pid}")
 
@@ -680,7 +680,7 @@ class SiteIn(BaseModel):
 
 @router.post("/properties/{pid}/site")
 def properties_site(pid: int, body: SiteIn, db: Session = Depends(get_db, scope="function"),
-                    user: User = Depends(require_level("operator"))):
+                    user: User = Depends(current_user)):
     return P.out(db, P.set_site(db, pid, user, body.on), user, full=True)
 
 

@@ -691,22 +691,20 @@ def step2():
     post = one_post("2 правка поля не из поста", pid)
     eq("2 правка поля не из поста: пост не трогается", old, post and post["message_id"])
 
-    # «Редактировать пост» = the «Править» form by the agent: a verified object → locked fields go to the operator
+    # Stanislav 11-23: the object's own agent has the operator's buttons — «% Скидка» on a verified object applies at once
     mark = FAKE.mark()
-    r = A["agent"].patch(f"/properties/{pid}", json={"price": 750, "post_fields": {**prop(pid)["post_fields"], "discount": True},
-                                                   "reason": "собственник снизил"})
-    cr = r.get("change_request")
-    check("2 скидка агентом на проверенном объекте → запрос оператору", "change_request pending", cr and cr.get("status"),
-          cr and cr.get("status") == "pending")
-    audience("2 запрос оператору пришёл оператору", mark, "", {"op"}, {"agent"})
+    r = A["agent"].patch(f"/properties/{pid}", json={"price": 750, "post_fields": {**prop(pid)["post_fields"], "discount": True}})
+    check("2 скидка агентом на своём проверенном объекте → сразу, без запроса", "750, no change_request",
+          (r.get("price"), r.get("change_request")), not r.get("change_request") and float(r.get("price") or 0) == 750)
+    audience("2 скидка агентом → оператору", mark, "Агент изменил", {"op"}, {"agent"})
     work()
-    eq("2 до решения оператора пост не меняется", old, (posts_of(CH["rent"], pid) or [{}])[0].get("message_id"))
-    A["op"].post(f"/change-requests/{cr['id']}/decide", json={"approve": True})
-    work()
-    post = one_post("2 запрос одобрен → перевыкладка", pid)
+    post = one_post("2 скидка агентом → перевыкладка", pid)
     t = text_of(post or {})
-    check("2 запрос одобрен: пост с ценой 750", "750", t[:120], "750" in t)
-    eq("2 цена в CRM после одобрения", 750, float(prop(pid)["price"]))
+    check("2 пост с ценой 750", "750", t[:120], "750" in t)
+    mark = FAKE.mark()
+    A["agent"].post(f"/properties/{pid}/publish", json={"channel": "tg", "tg": True, "site": True})  # «Обновить пост» агентом
+    post = one_post("2 «Обновить пост» агентом: один пост", pid)
+    audience("2 «Обновить пост» агентом → оператору", mark, "Агент перевыложил", {"op"}, {"agent"})
     STATE["post_mid"] = post and post["message_id"]
 
 
@@ -714,7 +712,7 @@ def step2():
 def step3():
     """3) «Снять только из канала/с сайта» и обратно; «Снять с публикации» / «Опубликовать снова»; «Приостановить» / «Снять с паузы»"""
     pid = STATE["pid"]
-    p = A["op"].post(f"/properties/{pid}/unpost")
+    p = A["agent"].post(f"/properties/{pid}/unpost")  # the object's own agent (11-23)
     no_post("3 «Снять только из канала»: поста нет", pid)
     check("3 «Снять только из канала»: статус и сайт остались", "published, на сайте", (p["status"], p["site_hidden"], p.get("post_url")),
           p["status"] == "published" and not p["site_hidden"] and site(pid) is not None and not p.get("post_url"))
@@ -722,7 +720,7 @@ def step3():
     no_post("3 после воркера пост не вернулся", pid)
     p = A["op"].post(f"/properties/{pid}/publish", json={"channel": "tg", "tg": True, "site": True})
     one_post("3 «Выложить в канал» обратно", pid)
-    p = A["op"].post(f"/properties/{pid}/site", json={"on": False})
+    p = A["agent"].post(f"/properties/{pid}/site", json={"on": False})
     check("3 «Снять только с сайта»: сайт 404, пост остался", "site None, 1 пост", (site(pid) is None, p["status"]),
           site(pid) is None and p["status"] == "published")
     one_post("3 «Снять только с сайта»: пост на месте", pid)
@@ -748,19 +746,12 @@ def step3():
 
     mark = FAKE.mark()
     p = A["agent"].post(f"/properties/{pid}/archive", json={"reason": "paused", "comment": "собственник уехал на неделю"})
-    cr = p.get("change_request")
-    check("3 «Приостановить» агентом (объект проверен) → запрос оператору", "change_request pending", (p["status"], cr and cr["status"]),
-          p["status"] == "published" and cr and cr["status"] == "pending")
-    audience("3 запрос на паузу → оператору", mark, "", {"op"}, {"agent"})
-    one_post("3 до решения пост на месте", pid)
-    mark = FAKE.mark()
-    A["op"].post(f"/change-requests/{cr['id']}/decide", json={"approve": True})
-    p = prop(pid)
-    eq("3 «Приостановить» (одобрено)", ("archived", "paused"), (p["status"], p["archive_reason"]))
+    eq("3 «Приостановить» агентом (свой проверенный объект) → сразу", ("archived", "paused", None),
+       (p["status"], p["archive_reason"], p.get("change_request")))
     work()
     no_post("3 «Приостановить»: пост удалён", pid)
     check("3 «Приостановить»: сайт", "404", site(pid), site(pid) is None)
-    audience("3 запрос одобрен → агенту", mark, "", {"agent"}, {"op"})
+    audience("3 «Приостановить» агентом → оператору", mark, f"#{pid}", {"op"}, {"agent"})
     p = A["agent"].post(f"/properties/{pid}/resume", json={})
     eq("3 «Снять с паузы»", "published", p["status"])
     work()

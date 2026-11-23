@@ -597,8 +597,16 @@ def schedule_lease_reminders(db: Session, p: Property) -> None:
 
 
 def is_locked_for(p: Property, user: User) -> bool:
-    """The agent's key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY)."""
-    return not at_least(user, "operator") and p.verified_at is not None
+    """Someone else's verified object: key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY).
+    Stanislav 11-23: the object's own agent has every button the operator has on it — applied at once, logged, and the
+    operator is told (agent_did)."""
+    return not at_least(user, "operator") and p.verified_at is not None and p.agent_id != user.id
+
+
+def agent_did(p: Property, actor: User | None, head: str, note: str | None = None) -> None:
+    """The agent changed his verified object himself (no «Запрос оператору» any more): the operators hear of it."""
+    if actor is not None and not at_least(actor, "operator") and p.verified_at is not None:
+        _notify("prop_event", p, head, actor.id, [], True, note)
 
 
 def _current(db: Session, p: Property, k: str):
@@ -657,14 +665,18 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
     locked = {}
     if is_locked_for(p, actor):
         data, locked = split_locked(db, p, data)
+    was = {k: _norm(k, _current(db, p, k)) for k in LOCKED_AFTER_VERIFY}
     apply_update(db, p, data, actor)
     p.change_request = None  # transient, read by the API
+    key = [k for k in LOCKED_AFTER_VERIFY if _norm(k, _current(db, p, k)) != was[k]]
     if locked:
         from app.services import change_requests  # local: change_requests imports this module
         p.change_request = change_requests.create(db, "property", p.id, "edit", locked, actor, reason)
     db.commit()
     if p.change_request is not None:
         _notify("change_request_new", p.change_request)
+    if key:
+        agent_did(p, actor, "✏️ <b>Агент изменил проверенные поля</b>", ", ".join(key))
     return p
 
 
@@ -2347,7 +2359,10 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
     leaves it unpublished."""
     p = _prop(db, pid, lock=True)
     if actor is not None and not at_least(actor, "operator"):  # None: the worker's repost (job tg_repost)
-        raise forbidden("only operators publish")
+        _require_owner(p, actor)  # Stanislav 11-23: the agent reposts his own object once the operator has published it
+        if p.status != "published":
+            raise forbidden("only operators publish")
+        text = None  # the post is built from the fields
     if not (tg or site):
         raise DomainError("no_target", "Отметьте, куда публиковать: сайт или Telegram")
     if channel not in PUBLICATION_CHANNELS:
@@ -2409,6 +2424,8 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         db.commit()
     if tg:
         _notify("property_published", p)
+        if not first:
+            agent_did(p, actor, "🔄 <b>Агент перевыложил пост</b>")
     if first and actor is not None:  # David 11-23: одобрено / опубликовано → и оператору (the agent: property_published)
         head = ("✅ <b>Одобрен и опубликован</b>" if approved else "📢 <b>Опубликован</b>") + \
             (" (канал + сайт)" if tg and site else " (канал)" if tg else " (сайт)")
@@ -2418,15 +2435,17 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
 
 def set_site(db: Session, pid: int, actor: User, on: bool) -> Property:
     """«Опубликовать на сайте» / «Снять с сайта»: a published object is on hge.ge unless hidden (site_feed.public_filter);
-    the Telegram post (publish) is the other button. Operators only."""
+    the Telegram post (publish) is the other button. Staff and the object's own agent (a published one)."""
     p = _prop(db, pid, lock=True)
-    if not at_least(actor, "operator"):
+    _require_owner(p, actor)
+    if not at_least(actor, "operator") and p.status != "published":
         raise forbidden("only operators publish")
     if on and p.status != "published":
         raise DomainError("bad_status", "На сайт попадает опубликованный объект — сначала опубликуйте его в Telegram")
     p.site_hidden = not on
     log_event(db, "property", p.id, "site_on" if on else "site_off", actor)
     db.commit()
+    agent_did(p, actor, "🌐 <b>Агент вернул объект на сайт</b>" if on else "🌐 <b>Агент снял объект с сайта</b>")
     from app.services import site_feed
     site_feed.clear_cache()
     return p
@@ -2434,16 +2453,16 @@ def set_site(db: Session, pid: int, actor: User, on: bool) -> Property:
 
 def unpost_channel(db: Session, pid: int, actor: User) -> Property:
     """«Снять только из канала» (Stanislav 11-23): deletes the object's Telegram posts now; the status, the site and the
-    bot stay. «Выложить в канал» is publish(tg=True). Operators only."""
+    bot stay. «Выложить в канал» is publish(tg=True). Staff and the object's own agent."""
     p = _prop(db, pid, lock=True)
-    if not at_least(actor, "operator"):
-        raise forbidden("only operators publish")
+    _require_owner(p, actor)
     jobs.cancel(db, "tg_repost", p.id)
     res = unpost(db, p, actor, action="tg_removed")
     if res["failed"]:
         db.commit()
         raise DomainError("unpost_failed", "Telegram не удалил пост — попробуйте ещё раз", 502)
     db.commit()
+    agent_did(p, actor, "📤 <b>Агент удалил пост из канала</b>")
     return p
 
 
@@ -2487,8 +2506,7 @@ def resume(db: Session, pid: int, actor: User, republish: bool = False) -> Prope
         _require_owner(p, actor)
     rented = p.status == "rented" or (p.status == "archived" and p.archive_reason in RENTED_REASONS)
     if republish and rented:
-        if not at_least(actor, "operator"):
-            raise forbidden("only operators publish")
+        _require_owner(p, actor)  # Stanislav 11-23: his own object, the agent too (it was published by the operator)
         if not p.published_at:
             raise DomainError("bad_status", "Объект ещё не публиковался — сначала верните его в работу")
         _republish(db, p, actor, "republished")

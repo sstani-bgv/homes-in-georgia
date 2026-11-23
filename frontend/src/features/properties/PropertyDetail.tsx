@@ -1438,7 +1438,7 @@ function PublishedActions({ p, onArchive }: { p: Property; onArchive: (reason: s
 
 /** «Опубликовать на сайте» (staff, a Telegram-only object) and «Снять с публикации» (David 11-23, staff and the
  * object's agent): off the site and the channel at once (backend properties.unpublish), back by «Опубликовать снова». */
-function SiteButton({ p, isStaff }: { p: Property; isStaff: boolean }) {
+function SiteButton({ p }: { p: Property }) {
   const confirm = useConfirm();
   const { toast, set } = useProp(p.id);
   const m = useMutation({
@@ -1464,10 +1464,10 @@ function SiteButton({ p, isStaff }: { p: Property; isStaff: boolean }) {
   });
   return <>
     {p.site_hidden
-      ? isStaff && <Button variant="ok" loading={m.isPending} onClick={() => m.mutate()}><Globe size={16} />{t('Вернуть на сайт')}</Button>
+      ? <Button variant="ok" loading={m.isPending} onClick={() => m.mutate()}><Globe size={16} />{t('Вернуть на сайт')}</Button>
       : <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>}
     <Button variant="ghost" loading={off.isPending} onClick={async () => { if (await confirm(t('Снять объект с публикации? Он уйдёт с сайта hge.ge и из канала, вернуть — «Опубликовать снова».'))) off.mutate(); }}>{t('Снять с публикации')}</Button>
-    {isStaff && (p.post_url || !p.site_hidden) && <Button variant="ghost" size="sm" onClick={() => setPart(!part)}>{t('Частично')}<ChevronDown size={14} /></Button>}
+    {(p.post_url || !p.site_hidden) && <Button variant="ghost" size="sm" onClick={() => setPart(!part)}>{t('Частично')}<ChevronDown size={14} /></Button>}
     {part && !p.site_hidden && <Button variant="secondary" size="sm" loading={siteOff.isPending} onClick={() => siteOff.mutate()}>{t('Снять только с сайта')}</Button>}
     {part && p.post_url && <Button variant="secondary" size="sm" loading={tgOff.isPending} onClick={async () => { if (await confirm(t('Удалить пост из канала? Объект останется опубликованным на сайте, выложить снова — «Выложить в канал».'))) tgOff.mutate(); }}>{t('Снять только из канала')}</Button>}
   </>;
@@ -1795,13 +1795,13 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
       )}
       <div className="row row-wrap">
         {p.post_url && <a className="btn" href={p.post_url} target="_blank" rel="noreferrer"><ExternalLink size={16} />{t('Пост в канале')}</a>}
-        {canWork && p.status === 'published' && <SiteButton p={p} isStaff={isStaff} />}
+        {canWork && p.status === 'published' && <SiteButton p={p} />}
       </div>
       {canWork && p.status === 'published' && <PublishedActions p={p} onArchive={setArchiving} />}
-      {isStaff && p.status === 'published' && <Republish p={p} onEdit={() => setEdit(true)} />}
+      {canWork && p.status === 'published' && <Republish p={p} onEdit={() => setEdit(true)} />}
       {/* David 11-23: a rented flat is free again — back on the market from the card, not through the archive */}
       {p.status === 'rented' && canWork && <div className="row row-wrap gap-sm">
-        {isStaff && <Resume p={p} republish />}
+        {!!p.published_at && <Resume p={p} republish />}
         <Resume p={p} />
       </div>}
     </div>
@@ -1866,7 +1866,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               </span>
               {(canWork && ['paused', 'unpublished', 'rented_by_owner', 'not_actual', 'idle_return'].includes(p.archive_reason || '')
                 || (p.owner?.agent?.id === user?.id && ['rented_by_owner', 'not_actual', 'idle_return'].includes(p.archive_reason || ''))) && <Resume p={p} />}
-              {isStaff && ['rented_by_owner', 'rented_by_us'].includes(p.archive_reason || '') && !!p.published_at && <Resume p={p} republish />}
+              {canWork && ['rented_by_owner', 'rented_by_us'].includes(p.archive_reason || '') && !!p.published_at && <Resume p={p} republish />}
             </div>
           )}
           {p.status === 'archived' && p.archive_reason === 'rented_by_owner' && <OwnerLeaseNote p={p} canWork={canWork} />}
