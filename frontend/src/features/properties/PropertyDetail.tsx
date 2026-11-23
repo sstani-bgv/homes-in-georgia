@@ -1373,7 +1373,7 @@ function Republish({ p, onEdit }: { p: Property; onEdit: () => void }) {
       <Button variant="secondary" loading={again.isPending} onClick={() => again.mutate()}><RotateCcw size={16} />{t('Обновить пост')}</Button>
       <Button variant="secondary" disabled={again.isPending} onClick={onEdit}><Pencil size={16} />{t('Редактировать пост')}</Button>
     </div>
-    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />{t('Опубликовать в Telegram')}</Button>;
+    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />{t('Выложить в канал')}</Button>;
 }
 
 /** «Скидка»: the new price and ❗️#Discount in the post; the post is reposted by itself (backend apply_update → tg_repost). */
@@ -1430,6 +1430,17 @@ function SiteButton({ p, isStaff }: { p: Property; isStaff: boolean }) {
     onSuccess: (r) => { set(r); toast(t('Опубликовано на сайте')); },
     onError: (e) => toast(errText(e), true),
   });
+  const [part, setPart] = useState(false);
+  const siteOff = useMutation({
+    mutationFn: () => api.properties.site(p.id, false),
+    onSuccess: (r) => { set(r); setPart(false); toast(t('Снято с сайта · канал и статус без изменений')); },
+    onError: (e) => toast(errText(e), true),
+  });
+  const tgOff = useMutation({
+    mutationFn: () => api.properties.unpost(p.id),
+    onSuccess: (r) => { set(r); setPart(false); toast(t('Пост удалён из канала · сайт и статус без изменений')); },
+    onError: (e) => toast(errText(e), true),
+  });
   const off = useMutation({
     mutationFn: () => api.properties.unpublish(p.id),
     onSuccess: (r) => { set(r); toast(t('Снято с публикации: сайт и канал')); },
@@ -1437,9 +1448,12 @@ function SiteButton({ p, isStaff }: { p: Property; isStaff: boolean }) {
   });
   return <>
     {p.site_hidden
-      ? isStaff && <Button variant="ok" loading={m.isPending} onClick={() => m.mutate()}><Globe size={16} />{t('Опубликовать на сайте')}</Button>
+      ? isStaff && <Button variant="ok" loading={m.isPending} onClick={() => m.mutate()}><Globe size={16} />{t('Вернуть на сайт')}</Button>
       : <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>}
     <Button variant="ghost" loading={off.isPending} onClick={async () => { if (await confirm(t('Снять объект с публикации? Он уйдёт с сайта hge.ge и из канала, вернуть — «Опубликовать снова».'))) off.mutate(); }}>{t('Снять с публикации')}</Button>
+    {isStaff && (p.post_url || !p.site_hidden) && <Button variant="ghost" size="sm" onClick={() => setPart(!part)}>{t('Частично')}<ChevronDown size={14} /></Button>}
+    {part && !p.site_hidden && <Button variant="secondary" size="sm" loading={siteOff.isPending} onClick={() => siteOff.mutate()}>{t('Снять только с сайта')}</Button>}
+    {part && p.post_url && <Button variant="secondary" size="sm" loading={tgOff.isPending} onClick={async () => { if (await confirm(t('Удалить пост из канала? Объект останется опубликованным на сайте, выложить снова — «Выложить в канал».'))) tgOff.mutate(); }}>{t('Снять только из канала')}</Button>}
   </>;
 }
 

@@ -2398,6 +2398,21 @@ def set_site(db: Session, pid: int, actor: User, on: bool) -> Property:
     return p
 
 
+def unpost_channel(db: Session, pid: int, actor: User) -> Property:
+    """«Снять только из канала» (Stanislav 11-23): deletes the object's Telegram posts now; the status, the site and the
+    bot stay. «Выложить в канал» is publish(tg=True). Operators only."""
+    p = _prop(db, pid, lock=True)
+    if not at_least(actor, "operator"):
+        raise forbidden("only operators publish")
+    jobs.cancel(db, "tg_repost", p.id)
+    res = unpost(db, p, actor, action="tg_removed")
+    if res["failed"]:
+        db.commit()
+        raise DomainError("unpost_failed", "Telegram не удалил пост — попробуйте ещё раз", 502)
+    db.commit()
+    return p
+
+
 def unpublish(db: Session, pid: int, actor: User) -> Property:
     """«Снять с публикации» (David 11-23, instead of «Снять с сайта»): off everywhere — the site, the bot's catalog and
     the channel (job tg_unpost) — the object waits in the archive (reason «unpublished») for «Опубликовать снова»

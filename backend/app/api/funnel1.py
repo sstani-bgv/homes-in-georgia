@@ -365,6 +365,12 @@ def properties_resume(pid: int, body: ResumeIn | None = None, db: Session = Depe
     return P.out(db, P.resume(db, pid, user, (body or ResumeIn()).republish), user, full=True)
 
 
+@router.post("/properties/{pid}/unpost")
+def properties_unpost(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Снять только из канала»: the posts leave the channel, the site and the status stay (properties.unpost_channel)."""
+    return P.out(db, P.unpost_channel(db, pid, user), user, full=True)
+
+
 @router.post("/properties/{pid}/unpublish")
 def properties_unpublish(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """«Снять с публикации»: off the site and the channel (properties.unpublish)."""
