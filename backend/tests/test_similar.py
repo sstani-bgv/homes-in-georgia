@@ -45,8 +45,11 @@ def test_dubl_links_the_ad_to_the_object(db, client):
     r = client.post("/api/similar/decide", json={"a": "l:mh7002", "b": f"p:{pid}", "same": True}, headers=auth(ana))
     assert r.json() == {"ok": True, "verdict": "same", "linked_to": pid, "revived": None, "owner_taken": None}
     assert db.query(PropertyListing).filter_by(listing_id="mh7002").one().property_id == pid
-    # the object's card lists it no more as a stray ad: it is the object's own now
-    assert all(x.get("listing_id") != "mh7002" for x in client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"])
+    # the object's card lists it no more as a stray ad: it is the object's own now, first, «привязано» (Stanislav 11-24)
+    items = client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"]
+    head = [x["listing_id"] for x in items if x.get("linked")]
+    assert "mh7002" in head and [x["listing_id"] for x in items[:len(head)]] == head
+    assert sum(x.get("listing_id") == "mh7002" for x in items) == 1
 
 
 def test_object_card_shows_ads_of_every_site_and_competitors_by_phone_and_house(db, client):

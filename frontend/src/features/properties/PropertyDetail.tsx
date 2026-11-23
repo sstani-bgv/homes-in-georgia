@@ -925,52 +925,12 @@ function Ads({ p }: { p: Property }) {
 
 const srcName = (s?: string | null) => SOURCE_LABEL[s || ''] || s || t('другой сайт');
 
-/** «Где ещё выложен» (David 11-23, any object): its outside ads and the copies the duplicate search found, with the site,
- * the match and who posted it. «Попросить снять» is the agent's task (contact whoever posted it / the owner); the operator
- * checks and presses «Проверено: снято» (manual on purpose: ss.ge / myhome block server checks); «Не дубль» drops it.
- * An exclusive's linked ads block its publication until checked; nothing else blocks anything. */
-function WhereElse({ p }: { p: Property }) {
-  const confirm = useConfirm();
-  const { isStaff } = useAuth();
-  const { toast, set, qc } = useProp(p.id);
-  const done = (msg: string) => (r: Property) => { set(r); toast(msg); };
-  const removed = useMutation({ mutationFn: (lid: string) => api.properties.adRemoved(p.id, lid), onSuccess: done(t('Отмечено: объявление снято')), onError: (e) => toast(errText(e), true) });
-  const ask = useMutation({ mutationFn: (lid: string) => api.properties.adTakedown(p.id, lid), onSuccess: done(t('Задача агенту: попросить снять')), onError: (e) => toast(errText(e), true) });
-  const notDup = useMutation({
-    mutationFn: (lid: string) => api.similar.decide(`p:${p.id}`, `l:${lid}`, 'different'),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['property', p.id] }); qc.invalidateQueries({ queryKey: ['similar'] }); toast(t('Отмечено: не дубль')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const ads = p.copies || [];
-  if (!ads.length) return null;
-  const blocking = ads.filter((a) => a.blocking);
-  const title = blocking.length ? t('Эксклюзив висит на {s}', { s: [...new Set(blocking.map((a) => a.where))].join(', ') }) : t('Где ещё выложен: {n}', { n: ads.length });
-  return (
-    <Card label={t('Дубли')} title={title}>
-      {blocking.length > 0 && <div className="alert alert-warn">{t('Задача агенту: попросить собственника снять объявление. Публикация как эксклюзив закрыта, пока оператор не проверит, что объявление снято.')}</div>}
-      {ads.map((a) => (
-        <div className="list-row" key={a.listing_id} style={{ flexWrap: 'wrap' }}>
-          <div className="grow" style={{ flex: '1 1 100%' }}>
-            <div className="row gap-sm" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
-              {a.where}
-              {a.level === 'linked' ? <Badge tone="grey">{t('привязано')}</Badge> : <Badge tone={a.level === 'confirmed' ? 'red' : 'warn'}>{a.pct != null ? `${Math.round(a.pct)}%` : a.level === 'confirmed' ? t('дубль') : t('возможно')}</Badge>}
-              {a.who && <Badge tone="grey">{t(a.who)}</Badge>}
-            </div>
-            {a.asked && <div className="muted" style={{ fontSize: 12 }}>{t('Попросили снять {d}', { d: fmtDateTime(a.asked.at) })}{a.asked.by ? ` · ${a.asked.by}` : ''}</div>}
-          </div>
-          {a.url && <a className="btn btn-secondary btn-sm" href={a.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t('Открыть')}</a>}
-          {!a.asked && <Button size="sm" variant="secondary" loading={ask.isPending && ask.variables === a.listing_id} onClick={() => ask.mutate(a.listing_id)}>{t('Попросить снять')}</Button>}
-          {a.level !== 'linked' && <Button size="sm" variant="secondary" loading={notDup.isPending && notDup.variables === a.listing_id} onClick={() => notDup.mutate(a.listing_id)}>{t('Не дубль')}</Button>}
-          {isStaff && (
-            <Button size="sm" loading={removed.isPending && removed.variables === a.listing_id}
-              onClick={async () => { if (await confirm(t('Вы открыли ссылку и убедились, что объявление снято с сайта?'))) removed.mutate(a.listing_id); }}>
-              {t('Проверено: снято')}
-            </Button>
-          )}
-        </div>
-      ))}
-    </Card>
-  );
+/** An exclusive still advertised on its linked site ads (Stanislav 11-24: above «Похожие объекты», where the ads are listed
+ * with «Попросить снять» / «Проверено: снято»): its publication stays closed until the operator checks them. */
+function ExclusiveHangs({ p }: { p: Property }) {
+  const sites = [...new Set((p.copies || []).filter((a) => a.blocking).map((a) => a.where))];
+  if (!sites.length) return null;
+  return <div className="alert alert-warn" style={{ fontSize: 13 }}>{t('Эксклюзив висит на {s} — публикация закрыта до «Проверено: снято». Задача агенту: попросить собственника снять объявление.', { s: sites.join(', ') })}</div>;
 }
 
 /** Stage 7: an object typed in a deal form; its deal is confirmed only after the operator checks it here. */
@@ -1863,6 +1823,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {p.status === 'review' && isStaff && (
             <Card label={t('Проверка на дубль')} title={t('Похожие объекты')}>
               <DupScan p={p} />
+              <ExclusiveHangs p={p} />
               <SimilarList subject={`p:${p.id}`} intro={t('Перед публикацией проверьте похожие: это может быть дубль объекта из базы или уже выложенного.')}
                 emptyText={t('Похожих объектов не найдено: ни в базе, ни на сайтах, ни у конкурентов.')} />
             </Card>
@@ -1892,10 +1853,10 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {p.change_requests.map((r) => <RequestRow key={r.id} r={r} showObject={false} />)}
             </Card>
           )}
-          <WhereElse p={p} />
           {!(p.status === 'review' && isStaff) && (
             <Card label={t('Дубли')} title={t('Похожие объекты')} actions={<MyhomeCopies p={p} />}>
               <DupScan p={p} />
+              <ExclusiveHangs p={p} />
               <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{t('Те же фото, адрес, собственник или параметры — в нашей базе, на ss.ge / myhome.ge и у конкурентов. Отметьте: дубль или нет.')}</div>
               <SimilarList subject={`p:${p.id}`} emptyText={t('Похожих объектов не найдено: ни в базе, ни на сайтах, ни у конкурентов.')} />
               <CompareLink p={p} />

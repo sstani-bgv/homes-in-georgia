@@ -2596,8 +2596,8 @@ def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
     p = _prop(db, pid, lock=True)
     link = db.scalar(select(PropertyListing).where(PropertyListing.property_id == p.id,
                                                    PropertyListing.listing_id == listing_id))
-    copy = None if link else next((c for c in copies(db, p) if c["listing_id"] == listing_id), None)
-    if link is None and copy is None:  # a copy found by the duplicate search (David 11-23): not linked, its event says so
+    copy = None if link else _site_ad(db, listing_id)
+    if link is None and copy is None:  # a site ad «Похожие» lists (David 11-23): not linked
         raise DomainError("not_found", "the ad is not linked to this object")
     if link:
         link.removed_checked_at, link.removed_checked_by = now(), actor.id
@@ -2638,15 +2638,7 @@ def copies(db: Session, p: Property) -> list[dict]:
     found = [c for c in ((ev.data or {}).get("copies") or [] if ev else []) if c["listing_id"] not in {a["listing_id"] for a in linked}]
     if not linked and not found:
         return []
-    asked, removed = {}, set()
-    for e_ in db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
-                                             Event.action.in_(("ad_takedown_asked", "ad_removed_checked"))).order_by(Event.id)):
-        lid = (e_.data or {}).get("listing_id")
-        if e_.action == "ad_removed_checked":
-            removed.add(lid)
-        else:
-            asked[lid] = {"at": e_.at.isoformat(), "by": e_.actor_id}
-    names = dict(db.execute(select(User.id, User.name).where(User.id.in_({a["by"] for a in asked.values() if a["by"]}))).all()) if asked else {}
+    asked, removed = _ad_marks(db, p)
     different = {k for k, d in similar._decisions(db, similar.key("p", p.id)).items() if d["verdict"] == "different"}
     ls = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([a["listing_id"] for a in linked + found])))}
     competitors = set(db.scalars(competitor_sources()))
@@ -2659,7 +2651,52 @@ def copies(db: Session, p: Property) -> list[dict]:
         a = asked.get(l.id)
         out.append({"listing_id": l.id, "where": similar._ad_source(l, competitors), "url": c.get("url") or (jload(l.urls, []) or [None])[0],
                     "pct": c.get("pct"), "level": level, "who": _who(l, competitors), "blocking": level == "linked" and p.is_exclusive,
-                    "asked": {"at": a["at"], "by": names.get(a["by"])} if a else None})
+                    "asked": a})
+    return out
+
+
+def _ad_marks(db: Session, p: Property) -> tuple[dict, set]:
+    """The object's «Попросить снять» ({listing id: {at, by name}}) and «Проверено: снято» (listing ids) so far."""
+    asked, removed = {}, set()
+    for e_ in db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                             Event.action.in_(("ad_takedown_asked", "ad_removed_checked"))).order_by(Event.id)):
+        lid = (e_.data or {}).get("listing_id")
+        if e_.action == "ad_removed_checked":
+            removed.add(lid)
+        else:
+            asked[lid] = {"at": e_.at.isoformat(), "by": e_.actor_id}
+    names = dict(db.execute(select(User.id, User.name).where(User.id.in_({a["by"] for a in asked.values() if a["by"]}))).all()) if asked else {}
+    return {k: {"at": a["at"], "by": names.get(a["by"])} for k, a in asked.items()}, removed
+
+
+def _site_ad(db: Session, listing_id: str) -> dict | None:
+    """A MyHome / SS / Livo / Korter ad (linked or listed in «Похожие»): {where, url, who}; None for another one."""
+    l = db.get(Listing, listing_id)
+    if l is None or source_type_of(l) not in COPY_SITES:
+        return None
+    from app.services import similar
+    competitors = set(db.scalars(competitor_sources()))
+    return {"where": similar._ad_source(l, competitors), "url": (jload(l.urls, []) or [None])[0], "who": _who(l, competitors)}
+
+
+def similar_with_sites(db: Session, p: Property, items: list[dict]) -> list[dict]:
+    """«Похожие объекты» of an object is also where else it is advertised (Stanislav 11-24: one list, not a «Где ещё
+    выложен» block beside it): its linked MyHome / SS / Livo / Korter ads lead with «привязано» (an exclusive's block
+    its publication), every site ad carries who posted it, «Попросили снять» and «Проверено: снято»."""
+    from app.services import similar
+    competitors = set(db.scalars(competitor_sources()))
+    ids = [a["listing_id"] for a in external_ads(db, [p.id]).get(p.id, [])]
+    ls = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_(ids)))}
+    head = [{**similar._listing_profile(l, competitors)["out"], "key": similar.key("l", l.id), "level": "same",
+             "level_text": "привязано", "reasons": ["привязано к объекту"], "decided": None, "linked": True,
+             "blocking": bool(p.is_exclusive)} for lid in ids if (l := ls.get(lid)) is not None and source_type_of(l) in COPY_SITES]
+    asked, removed = _ad_marks(db, p)
+    out = head + [x for x in items if x.get("listing_id") not in ls]
+    site = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([x["listing_id"] for x in out if x["kind"] == "ad"])))}
+    for x in out:
+        l = site.get(x.get("listing_id"))
+        if l is not None and source_type_of(l) in COPY_SITES:
+            x.update(site=True, who=_who(l, competitors), asked=asked.get(l.id), removed=l.id in removed)
     return out
 
 
@@ -2668,9 +2705,9 @@ def ad_takedown(db: Session, pid: int, listing_id: str, actor: User) -> Property
     the operator checks it later («Проверено: снято»). A history event + a message to the agent."""
     p = _prop(db, pid)
     _require_owner(p, actor)
-    c = next((x for x in copies(db, p) if x["listing_id"] == listing_id), None)
+    c = _site_ad(db, listing_id)
     if c is None:
-        raise DomainError("not_found", "no such ad among the object's copies")
+        raise DomainError("not_found", "not a MyHome / SS / Livo / Korter ad")
     log_event(db, "property", p.id, "ad_takedown_asked", actor, listing_id=listing_id, source=c["where"], url=c["url"])
     db.commit()
     who = "собственником" if c["who"] == "собственник" else "тем, кто выложил, или с собственником"

@@ -233,7 +233,21 @@ on('GET', '/listings/:id', (m) => {
   return l && p?.owner && (isStaff(u) || p.agent_id === u.id) ? { ...l, contacts_visible: true, owner: { name: p.owner.name, phone: p.owner.phone, phones: p.owner.phones, is_agent: p.owner.is_agent } } : l;
 });
 on('GET', '/listings/:id/similar', () => ({ items: [] }));
-on('GET', '/properties/:id/similar', (m) => ({ items: getProp(Number(m[1])).duplicate_scan?.n ? DUPS : [] }));
+// backend properties.similar_with_sites: the object's site ads lead («привязано» first), with the takedown marks
+on('GET', '/properties/:id/similar', (m) => {
+  const p = getProp(Number(m[1]));
+  propOut(p, currentUser());
+  const sites: SimilarItem[] = (p.copies || []).map((c, i) => ({
+    key: `l:${c.listing_id}`, kind: 'ad', property_id: null, listing_id: c.listing_id, where: c.where, url: c.url,
+    level: c.level === 'probable' ? 'maybe' : 'same', pct: c.pct ?? undefined,
+    reasons: c.level === 'linked' ? ['привязано к объекту'] : [`общих фото: ${5 - Math.min(i, 3)}`, 'спальни совпадают', 'этаж совпадает'],
+    address: 'რამიშვილი ნ. ქ. 3', district: 'Ваке', bedrooms: 1, area: 56 + i, floor: 8, price_usd: 800, photos: [],
+    linked: c.level === 'linked', blocking: c.blocking, site: true, who: c.who, asked: c.asked, removed: REMOVED.has(c.listing_id),
+  }));
+  return { items: [...sites, ...(p.duplicate_scan?.n ? DUPS.filter((x) => !x.key.startsWith('l:mh')) : [])] };
+});
+const REMOVED = new Set<string>();
+on('POST', '/properties/:id/myhome-copies', (m) => { dupScan(getProp(Number(m[1])), 'manual'); return { ok: true }; });
 on('POST', '/properties/:id/listings/:lid/takedown', (m) => {
   const p = getProp(Number(m[1]));
   p.copies = (p.copies || []).map((c) => c.listing_id === m[2] ? { ...c, asked: { at: new Date().toISOString(), by: currentUser().name } } : c);
@@ -241,7 +255,7 @@ on('POST', '/properties/:id/listings/:lid/takedown', (m) => {
 });
 on('POST', '/properties/:id/listings/:lid/removed', (m) => {
   const p = getProp(Number(m[1]));
-  p.copies = (p.copies || []).filter((c) => c.listing_id !== m[2]);
+  REMOVED.add(m[2]);
   return propOut(p, currentUser());
 });
 on('POST', '/similar/decide', (_m, b) => ({ ok: true, verdict: (b as { verdict?: string }).verdict || 'different', linked_to: null }));

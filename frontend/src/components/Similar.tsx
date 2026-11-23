@@ -13,7 +13,7 @@ import { CompareSide, ListingSide, PhotoStrip, PropertyStatusBadge } from './dom
 import { useAuth } from '../auth/AuthContext';
 import { errText, useToast } from './toast';
 import { t } from '../lib/i18n';
-import { PROPERTY_STATUS, bedroomsLabel, districtLabel, money } from '../lib/format';
+import { PROPERTY_STATUS, bedroomsLabel, districtLabel, fmtDateTime, money } from '../lib/format';
 
 /** subject: «l:<ad id>» / «p:<object id>». intro: the warning line above the list (the review step, the take check). */
 export function SimilarList({ subject, intro, emptyText, onLinked }: { subject: string; intro?: string; emptyText?: string; onLinked?: (pid: number) => void }) {
@@ -64,18 +64,37 @@ function SimilarRow({ subject, x, qk, onLinked }: { subject: string; x: SimilarI
   const loc = useLocation();
   const [cmp, setCmp] = useState(false);
   const decide = useDecide(subject, x, qk, onLinked);
+  const confirm = useConfirm();
+  const { isStaff } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const pid = subject.startsWith('p:') ? Number(subject.slice(2)) : null;
+  // «Попросить снять» (the agent's task) / «Проверено: снято» (the operator opened it and saw it gone) of a site ad
+  const ad = useMutation({
+    mutationFn: (what: 'ask' | 'removed') => (what === 'ask' ? api.properties.adTakedown : api.properties.adRemoved)(pid!, x.listing_id!),
+    onSuccess: (r, what) => {
+      qc.setQueryData(['property', pid], r);
+      qc.invalidateQueries({ queryKey: qk });
+      toast(what === 'ask' ? t('Задача агенту: попросить снять') : t('Отмечено: объявление снято'));
+    },
+    onError: (e) => toast(errText(e), true),
+  });
+  const site = !!pid && !!x.site && !!x.listing_id;
   const obj = x.kind === 'object';
   const title = obj ? t('Объект #{id}', { id: x.property_id ?? '' }) : x.where;
   const params = paramLine(x);
   const objLink = obj && x.can_open ? `${loc.pathname.startsWith('/m/') ? '/m/properties' : '/objects'}/${x.property_id}` : null;
   return (
-    <div className="card" style={{ padding: 12, borderColor: x.level === 'same' ? 'var(--red, #d33)' : undefined }}>
+    <div className="card" style={{ padding: 12, borderColor: x.level === 'same' && !x.linked ? 'var(--red, #d33)' : undefined }}>
       <div className="col gap-sm">
         <div className="row row-wrap gap-sm" style={{ alignItems: 'center' }}>
-          <Badge tone={x.level === 'same' ? 'red' : 'warn'}>{x.pct != null ? `${x.pct}% · ` : ''}{x.level === 'same' ? t('дубль / почти точно') : t('вероятный, нужна проверка')}</Badge>
+          {x.linked ? <Badge tone="grey">{t('привязано')}</Badge>
+            : <Badge tone={x.level === 'same' ? 'red' : 'warn'}>{x.pct != null ? `${x.pct}% · ` : ''}{x.level === 'same' ? t('дубль / почти точно') : t('вероятный, нужна проверка')}</Badge>}
           <strong>{title}</strong>
+          {x.who && <Badge tone="grey">{t(x.who)}</Badge>}
           {obj && x.status && <PropertyStatusBadge status={x.status as PropertyStatus} />}
-          {!obj && <Badge tone={x.competitor ? 'redsoft' : 'grey'}>{x.competitor ? t('конкурент') : t('объявление')}</Badge>}
+          {!obj && !x.linked && <Badge tone={x.competitor ? 'redsoft' : 'grey'}>{x.competitor ? t('конкурент') : t('объявление')}</Badge>}
+          {x.removed && <Badge tone="ok">{t('проверено: снято')}</Badge>}
           {obj && x.is_exclusive && <Badge tone="solid">{t('эксклюзив')}</Badge>}
           {x.decided === 'same' && <Badge tone="red">{t('отмечен дублем')}</Badge>}
           {x.decided === 'review' && <Badge tone="warn">{t('нужна проверка')}</Badge>}
@@ -84,6 +103,7 @@ function SimilarRow({ subject, x, qk, onLinked }: { subject: string; x: SimilarI
         {params && <div className="muted" style={{ fontSize: 13 }}>{params}</div>}
         {obj && <div className="faint" style={{ fontSize: 12 }}>{x.agent ? t('Ведёт: {name}', { name: x.agent }) : t('Без агента')}</div>}
         <div style={{ fontSize: 13 }}><span className="label">{t('Почему: ')}</span>{x.reasons.join(' · ')}</div>
+        {x.asked && <div className="muted" style={{ fontSize: 12 }}>{t('Попросили снять {d}', { d: fmtDateTime(x.asked.at) })}{x.asked.by ? ` · ${x.asked.by}` : ''}</div>}
         {!!x.differs?.length && <div style={{ fontSize: 13 }}><span className="label">{t('Отличается: ')}</span>{x.differs.join(' · ')}</div>}
         {!!x.matched_photos?.length && <div className="faint" style={{ fontSize: 12 }}>{t('Совпавшие фото: {n} — первыми в ленте', { n: x.matched_photos.length })}</div>}
         <PhotoStrip photos={x.photos} />
@@ -92,14 +112,23 @@ function SimilarRow({ subject, x, qk, onLinked }: { subject: string; x: SimilarI
           <Button size="sm" variant="secondary" onClick={() => setCmp(true)}>{t('Сравнить')}</Button>
           {objLink && <Link className="btn btn-secondary btn-sm" to={objLink}><ExternalLink size={14} />{t('Открыть объект')}</Link>}
           {x.url && <a className="btn btn-secondary btn-sm" href={x.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />{obj ? t('Пост в канале') : t('Открыть источник')}</a>}
-          {x.decided !== 'same' && (
+          {!x.linked && x.decided !== 'same' && (
             <Button size="sm" loading={decide.isPending && decide.variables === 'same'} onClick={() => decide.mutate('same')}>
               {subject.startsWith('l:') && obj ? t('Дубль: это он') : t('Дубль')}
             </Button>
           )}
-          <Button size="sm" variant="secondary" loading={decide.isPending && decide.variables === 'different'} onClick={() => decide.mutate('different')}>{t('Не дубль')}</Button>
-          {x.decided !== 'review' && x.decided !== 'same' && (
+          {!x.linked && <Button size="sm" variant="secondary" loading={decide.isPending && decide.variables === 'different'} onClick={() => decide.mutate('different')}>{t('Не дубль')}</Button>}
+          {!x.linked && x.decided !== 'review' && x.decided !== 'same' && (
             <Button size="sm" variant="secondary" loading={decide.isPending && decide.variables === 'review'} onClick={() => decide.mutate('review')}>{t('Нужна проверка')}</Button>
+          )}
+          {site && !x.removed && !x.asked && (
+            <Button size="sm" variant="secondary" loading={ad.isPending && ad.variables === 'ask'} onClick={() => ad.mutate('ask')}>{t('Попросить снять')}</Button>
+          )}
+          {site && !x.removed && isStaff && (
+            <Button size="sm" loading={ad.isPending && ad.variables === 'removed'}
+              onClick={async () => { if (await confirm(t('Вы открыли ссылку и убедились, что объявление снято с сайта?'))) ad.mutate('removed'); }}>
+              {t('Проверено: снято')}
+            </Button>
           )}
         </div>
       </div>

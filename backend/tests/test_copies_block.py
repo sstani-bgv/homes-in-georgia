@@ -1,4 +1,4 @@
-"""David 11-23: «Где ещё выложен» for any object — the ads its duplicate search finds, «Попросить снять» (the agent's
+"""David 11-23: «Где ещё выложен» (since 11-24 inside «Похожие объекты») for any object — the ads its duplicate search finds, «Попросить снять» (the agent's
 task), «Проверено: снято» (operator), «Не дубль»; the agent hears of new copies once."""
 import json
 
@@ -40,10 +40,20 @@ def test_copies_of_any_object_ask_check_and_not_a_dup(db, client, sent):
     c = next(c for c in r.json()["copies"] if c["listing_id"] == "mh7001")
     assert c["asked"]["by"] == "Вика"
     assert client.post(f"/api/properties/{pid}/listings/mh7001/takedown", headers=auth(make_user(db, "agent"))).status_code == 403
+    assert client.post(f"/api/properties/{pid}/listings/tg7003/takedown", headers=auth(vika)).status_code == 404  # not a site
+    # Stanislav 11-24: «Похожие объекты» is the one list — the linked site ad first («привязано»), the site ads with the marks
+    items = client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"]
+    assert items[0]["listing_id"] == "ss5001" and items[0]["linked"] and not items[0]["blocking"]
+    by = {x["listing_id"]: x for x in items if x["kind"] == "ad"}
+    assert by["mh7001"]["site"] and by["mh7001"]["asked"]["by"] == "Вика" and not by["mh7001"]["removed"]
+    assert by["ss7002"]["who"] == "собственник" and by["ss7002"]["asked"] is None
+    assert "site" not in by.get("tg7003", {})  # a TG post is listed, without the site marks
     assert client.post(f"/api/properties/{pid}/listings/mh7001/removed", headers=auth(vika)).status_code == 403
     r = client.post(f"/api/properties/{pid}/listings/mh7001/removed", headers=auth(op))
     assert r.status_code == 200, r.text
     assert [c["listing_id"] for c in r.json()["copies"]] == ["ss5001", "ss7002"]
+    items = client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"]
+    assert next(x for x in items if x["listing_id"] == "mh7001")["removed"]
 
     client.post("/api/similar/decide", json={"a": f"p:{pid}", "b": "l:ss7002", "same": False}, headers=auth(op))
     assert [c["listing_id"] for c in client.get(f"/api/properties/{pid}", headers=auth(vika)).json()["copies"]] == ["ss5001"]

@@ -99,8 +99,8 @@ def listing_similar(listing_id: str, db: Session = Depends(get_db, scope="functi
 
 @router.get("/properties/{pid}/similar")
 def property_similar(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    P.get_visible(db, pid, user)
-    return {"items": similar.find(db, similar.key("p", pid), user)}
+    p = P.get_visible(db, pid, user)
+    return {"items": P.similar_with_sites(db, p, similar.find(db, similar.key("p", pid), user))}
 
 
 @router.post("/similar/decide")

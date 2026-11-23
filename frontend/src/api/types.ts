@@ -134,6 +134,11 @@ export interface SimilarItem {
   price_usd?: number | null; photos: string[]; url?: string | null; agent?: string | null; is_exclusive?: boolean;
   /** the object's card opens for this user (others' objects: closed, the reasons and the ad photos still show) */
   can_open?: boolean;
+  /** «Похожие» of an object (Stanislav 11-24, «Где ещё выложен» merged in): linked — the object's own ad (first, «привязано»),
+   * blocking — an exclusive's, publication closed until «Проверено: снято»; site — a MyHome / SS / Livo / Korter ad with
+   * who posted it, «Попросили снять» and «Проверено: снято» */
+  linked?: boolean; blocking?: boolean; site?: boolean; who?: string | null;
+  asked?: { at: string; by?: string | null } | null; removed?: boolean;
 }
 
 export interface SimilarFlat {

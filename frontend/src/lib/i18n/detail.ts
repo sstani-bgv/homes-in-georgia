@@ -1,7 +1,8 @@
 // detail: Russian (the key, shown as is for ru) → [Georgian, English]
 // PropertyDetail.tsx: the property card
 export const D: Record<string, [ka: string, en: string]> = {
-  "Где ещё выложен: {n}": ["სხვაგან განთავსებულია: {n}", "Also listed elsewhere: {n}"],
+  "Эксклюзив висит на {s} — публикация закрыта до «Проверено: снято». Задача агенту: попросить собственника снять объявление.": ["ექსკლუზივი ჯერ კიდევ არის: {s} — გამოქვეყნება დახურულია «შემოწმდა: წაშლილია»-მდე. აგენტის დავალება: სთხოვეთ მესაკუთრეს განცხადების წაშლა.", "Exclusive still listed on {s} — publishing is closed until «Checked: removed». Agent's task: ask the owner to take the ad down."],
+  "проверено: снято": ["შემოწმდა: წაშლილია", "checked: removed"],
   "Попросить снять": ["მოთხოვნა: წაშლა", "Ask to take down"],
   "Попросили снять {d}": ["წაშლა მოითხოვეს {d}", "Takedown asked {d}"],
   "Задача агенту: попросить снять": ["აგენტის დავალება: წაშლის მოთხოვნა", "Agent's task: ask to take it down"],
