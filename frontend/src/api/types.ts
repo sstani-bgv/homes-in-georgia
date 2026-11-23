@@ -9,15 +9,14 @@ export const atLeast = (u: { role: Role } | null | undefined, role: Role) => !!u
 export type PermSection = 'contracts' | 'originals';
 export type PermAction = 'r' | 'c' | 'u' | 'd';
 export const can = (u: { perms?: Partial<Record<PermSection, string>> } | null | undefined, s: PermSection, a: PermAction = 'r') => !!u?.perms?.[s]?.includes(a);
-export interface PermMatrix {
+/** GET /admin/permissions: the sections and every standard role's rights (the card's checkboxes) */
+export interface PermInfo {
   sections: { key: PermSection; label: string; actions: string }[];
   roles: Role[];
-  /** the superadmin's roles made on the basis of a ladder one; key «c<id>»; users: someone has it */
-  custom: { key: string; id: number; label: string; base: Role; users: boolean }[];
-  matrix: Record<string, Record<string, string>>;
   defaults: Record<string, Record<string, string>>;
 }
-export interface PermChange { at: string; by: string | null; role: string; action: 'updated' | 'role_created' | 'role_deleted'; changes: Record<string, { from: string; to: string }>; label?: string | null; base?: Role | null }
+/** GET /users/{id}/perms-history: role = his role then */
+export interface PermChange { at: string; by: string | null; role: string | null; changes: Record<string, { from: string; to: string }> }
 export const SUPER_ROLES: Role[] = ['superadmin'];
 export const ADMIN_ROLES: Role[] = [...SUPER_ROLES, 'admin'];
 export const STAFF_ROLES: Role[] = [...ADMIN_ROLES, 'operator'];
@@ -70,10 +69,10 @@ export interface User {
   works_as_agent?: boolean;
   /** works as an agent: agent / recruit, or staff with works_as_agent */
   field?: boolean;
-  /** /auth/me: «Права» per section (can()) */
+  /** «Права» per section (can()): his role's, with his own changes */
   perms?: Partial<Record<PermSection, string>>;
-  /** «Права»: a custom role of this role (superadmin-made), null = the role's own flags */
-  custom_role_id?: number | null;
+  /** «Права» changed for this person (not his role's standard ones) */
+  perms_own?: boolean;
   next_level_at?: number | null;
   created_at?: string;
   last_login_at?: string | null;

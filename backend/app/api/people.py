@@ -39,6 +39,7 @@ class UserIn(BaseModel):
     agent_tag: str | None = None
     works_as_agent: bool = False
     ie_number: str | None = None
+    perms: dict[str, str] | None = None  # «Права» of this person (superadmin only)
 
 
 class UserPatch(BaseModel):
@@ -63,7 +64,7 @@ class UserPatch(BaseModel):
     agent_tag: str | None = None
     works_as_agent: bool | None = None
     ie_number: str | None = None
-    custom_role_id: int | None = None  # «Права»: superadmin only (services/perms.check_assign); null = as the role
+    perms: dict[str, str] | None = None  # «Права» of this person: superadmin only (services/perms.clean); null = as the role
 
 
 class PromoteIn(BaseModel):
@@ -104,6 +105,15 @@ def create_user(body: UserIn, db: Session = Depends(get_db, scope="function"), u
 @router.patch("/users/{uid}")
 def patch_user(uid: int, body: UserPatch, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
     return user_out(users.update(db, uid, body.model_dump(exclude_unset=True), user), user)
+
+
+@router.get("/users/{uid}/perms-history")
+def perms_history(uid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("superadmin"))):
+    """A person's «Права» changes (services/users.update «perms» events): who, when, section from → to."""
+    from app.models import Event
+    return [{"at": e.at.isoformat(), "by": e.actor_label, "role": e.data.get("role"), "changes": e.data.get("changes", {})}
+            for e in db.scalars(select(Event).where(Event.entity == "user", Event.entity_id == str(uid), Event.action == "perms")
+                                .order_by(Event.at.desc(), Event.id.desc()).limit(100))]
 
 
 @router.post("/users/{uid}/photo")

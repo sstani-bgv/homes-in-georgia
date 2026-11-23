@@ -13,7 +13,7 @@ from app.services.errors import DomainError
 
 EDITABLE = ("name", "first_name", "last_name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
             "birth_date", "email", "plans", "tg_id", "exclusive_deals", "agent_tag", "works_as_agent", "ie_number",
-            "custom_role_id")
+            "perms")
 # the employee profile Irakli asked for (11-12): «чтобы дни рождения не пропускали»
 PROFILE = ("first_name", "last_name", "birth_date", "phone", "email")
 IE_RE = re.compile(r"\d{9}|\d{11}")  # ი/მ: the personal number (11 digits) or an older 9-digit identification code
@@ -222,6 +222,9 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
         raise DomainError("conflict", "login already taken")
     if "agent_tag" in data:
         data["agent_tag"] = clean_agent_tag(db, data["agent_tag"])
+    if data.get("perms") is not None:
+        from app.services import perms
+        data["perms"] = perms.clean(actor, data.get("role") or "agent", data["perms"])
     u = User(**{k: v for k, v in data.items() if k in EDITABLE})
     if u.role is None:
         u.role = "agent"
@@ -230,6 +233,10 @@ def create(db: Session, data: dict, actor: User | None = None) -> User:
     db.add(u)
     db.flush()
     log_event(db, "user", u.id, "created", actor, role=u.role)
+    if u.perms:
+        from app.services import perms
+        std, own = perms.defaults(u.role), perms.for_user(u)
+        log_event(db, "user", u.id, "perms", actor, role=u.role, changes={s: {"from": std[s], "to": a} for s, a in own.items() if a != std[s]})
     db.commit()
     return u
 
@@ -256,9 +263,12 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None, full_pr
             raise DomainError("conflict", "login already taken")
     if "agent_tag" in data:
         data["agent_tag"] = clean_agent_tag(db, data["agent_tag"], u.id)
-    if "custom_role_id" in data and data["custom_role_id"] != u.custom_role_id:
-        from app.services import perms
-        perms.check_assign(db, actor, data["custom_role_id"], data.get("role") or u.role)
+    from app.services import perms
+    if "perms" in data:
+        data["perms"] = perms.clean(actor, data.get("role") or u.role, data["perms"])
+    elif data.get("role", u.role) != u.role:
+        data["perms"] = None  # another role: its own rights (the form sends them anew)
+    was = perms.for_user(u)
     changed = {}
     for k, v in data.items():
         if k in EDITABLE and getattr(u, k) != v:
@@ -268,6 +278,8 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None, full_pr
         u.password_hash = hash_password(pw)
         changed["password"] = "***"
     log_event(db, "user", u.id, "updated", actor, **changed)
+    if diff := {s: {"from": was[s], "to": a} for s, a in perms.for_user(u).items() if a != was[s]}:
+        log_event(db, "user", u.id, "perms", actor, role=u.role, changes=diff)  # GET /users/{id}/perms-history
     db.commit()
     if changed.get("ie_number"):
         from app.services import nda

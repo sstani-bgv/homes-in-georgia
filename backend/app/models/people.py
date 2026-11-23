@@ -37,7 +37,7 @@ class User(Base):
     last_name = Column(Text)
     phone = Column(Text)
     role = Column(Text, nullable=False)
-    custom_role_id = Column(Integer, ForeignKey("custom_roles.id", ondelete="SET NULL"))  # «Права»: a CustomRole of this role
+    perms = Column(JSONB)  # «Права» changed for this person only: section → actions; none = his role's (services/perms.py)
     level = Column(Integer)
     mentor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     districts = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
@@ -130,23 +130,3 @@ class Invite(Base):
     creator = relationship("User", foreign_keys=[created_by])
     user = relationship("User", foreign_keys=[used_by])
 
-
-class CustomRole(Base):
-    """A role the superadmin made in «Права» on the basis of a ladder role (Stanislav 11-23: «оператор, который только
-    выкладывает фото»). The user keeps users.role = base for everything not yet in the matrix; the matrix reads the
-    custom role's row («c<id>») while users.custom_role_id points here and the base still matches users.role."""
-    __tablename__ = "custom_roles"
-    __table_args__ = (CheckConstraint("base IN ('recruit', 'agent', 'operator', 'admin')", name="custom_roles_base_check"),)
-    id = Column(Integer, primary_key=True)
-    label = Column(Text, nullable=False)
-    base = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-
-class RolePermission(Base):
-    """The superadmin's «Права» matrix (Управление): what a role may do in a section, «r»/«c»/«u»/«d» letters. Only the
-    cells changed from the defaults are stored; no row = services/perms.py SECTIONS default (today's behaviour)."""
-    __tablename__ = "role_permissions"
-    role = Column(Text, primary_key=True)
-    section = Column(Text, primary_key=True)
-    actions = Column(Text, nullable=False, server_default="")

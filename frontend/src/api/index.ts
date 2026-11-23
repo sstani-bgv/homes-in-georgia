@@ -4,7 +4,7 @@ import {
   normAgentStat, normAuth, normBoard, normCabinet, normClient, normCounter, normDashboard, normEvent, normLead, normListing, normPage,
   normProperty, normRecommend, normReport,
 } from './normalize';
-import type { IntegrationKey, KeyCheck, PermChange, PermMatrix, Role, Spend,
+import type { IntegrationKey, KeyCheck, PermChange, PermInfo, Spend,
   Birthday, Invite, InviteInfo,
   AgentStat, AppConfig, AuthOut, Cabinet, Client, Contract, ContractCloseReason, ContractDraftIn, ContractIn, CounterRow, Dashboard, Deal, DealCalcIn, DealCalcOut,
   EventItem, Evaluation, Lead, LeadContract, LeadStatus, DealPrefill, Listing, NewsItem, Owner, Page, Property, RecommendedAgent, Report, ReportKind,
@@ -298,12 +298,9 @@ export const api = {
     reveal: (name: string) => http.get<{ name: string; value: string }>(`/keys/${encodeURIComponent(name)}/value`),
     check: (name: string) => http.post<{ results: KeyCheck[] }>(`/keys/${encodeURIComponent(name)}/check`),
   },
-  perms: {  // Управление → Права (superadmin): role × section Ч/С/И/У, backend services/perms.py
-    get: () => http.get<PermMatrix>('/admin/permissions'),
-    put: (m: Record<string, Record<string, string>>) => http.put<PermMatrix>('/admin/permissions', m),
-    history: () => http.get<PermChange[]>('/admin/permissions/history'),
-    createRole: (label: string, base: Role) => http.post<PermMatrix>('/admin/permissions/roles', { label, base }),
-    deleteRole: (id: number) => http.del<PermMatrix>(`/admin/permissions/roles/${id}`),
+  perms: {  // «Права» in a person's card (superadmin), backend services/perms.py; a person's own: users.update «perms»
+    get: () => http.get<PermInfo>('/admin/permissions'),
+    history: (uid: number) => http.get<PermChange[]>(`/users/${uid}/perms-history`),
   },
   spend: () => http.get<Spend>('/spend'),  // Управление → Ключи → Расходы: Apify + AI
   settings: {

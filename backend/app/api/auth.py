@@ -14,7 +14,7 @@ from app.db import get_db
 from datetime import date
 
 from app.models import User, at_least, is_field
-from app.services import invites, users
+from app.services import invites, perms, users
 from app.services.common import log_event, now
 from app.services.errors import DomainError
 from app.telegram import avatars
@@ -66,16 +66,16 @@ def user_out(u: User, viewer: User | None = None) -> dict:
             "level": users.effective_level(u) if is_field(u) else u.level, "mentor_id": u.mentor_id,
             "districts": u.districts, "is_active": u.is_active, "login": u.login, "photo_url": u.photo_url,
             "birth_date": bd.isoformat() if bd and own else None, "exclusive_deals": u.exclusive_deals,
-            "plans": u.plans, "custom_role_id": u.custom_role_id, "agent_tag": u.agent_tag, "works_as_agent": u.works_as_agent,
+            "plans": u.plans, "agent_tag": u.agent_tag, "works_as_agent": u.works_as_agent,
             "ie_number": u.ie_number if own else None, "field": is_field(u), "created_at": u.created_at.isoformat() if u.created_at else None,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None}
+            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "perms": perms.for_user(u), "perms_own": bool(u.perms)}  # «Права»: the frontend's can(); own = changed for him
 
 
 def _session(db: Session, u: User) -> dict:
     u.last_login_at = now()
     db.commit()
-    from app.services import perms
-    return {"token": create_token(u), "user": {**user_out(u), "perms": perms.for_user(db, u)}}
+    return {"token": create_token(u), "user": user_out(u)}
 
 
 def _tg_user(db: Session, tg: dict) -> User:
@@ -177,9 +177,8 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db, scope="
 
 
 @router.get("/me")
-def me(db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    from app.services import perms
-    return {**user_out(user), "perms": perms.for_user(db, user)}  # the frontend's can() (api/types.ts)
+def me(user: User = Depends(current_user)):
+    return user_out(user)
 
 
 @router.get("/media-token")
