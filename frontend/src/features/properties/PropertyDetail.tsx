@@ -118,12 +118,29 @@ function IdleTimer({ at }: { at: string }) {
   return <div className="alert alert-warn">⏳ {t('вернётся в «Новые объявления» через {left}, если собственник не подтвердит', { left })}</div>;
 }
 
+/** David 11-24: «Собственник закреплён за #Tag» — offer the agent a request to the operator to move that owner to him
+ * (backend change_requests.request_owner); any other error: the toast as before. */
+function useOwnerTaken(p: Property) {
+  const { toast } = useProp(p.id);
+  const confirm = useConfirm();
+  return async (e: unknown, phone?: string) => {
+    if (e instanceof ApiError && e.code === 'owner_taken' && phone) {
+      if (await confirm(`${e.message}. ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`)) {
+        try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
+      }
+      return;
+    }
+    toast(errText(e), true);
+  };
+}
+
 function CallStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [reached, setReached] = useState(false);
   const [isOwner, setIsOwner] = useState<'owner' | 'agent'>('owner');
   const [name, setName] = useState(p.owner?.name || '');
   const [phones, setPhones] = useState(() => phoneRows(p.owner));  // David 11-18: the ad's number + the one given on the call
+  const onTaken = useOwnerTaken(p);
   const fail = useMutation({ mutationFn: () => api.properties.call(p.id, false), onSuccess: (r) => { set(r); toast(t('Бот напомнит позвонить через 2 часа')); }, onError: (e) => toast(errText(e), true) });
   const save = useMutation({
     mutationFn: async () => {
@@ -132,7 +149,7 @@ function CallStep({ p }: { p: Property }) {
       return api.properties.owner(p.id, { is_owner: isOwner === 'owner', owner_name: name, owner_phone: list[0]?.phone, owner_phones: list });
     },
     onSuccess: (r) => { set(r); toast(isOwner === 'owner' ? t('Собственник подтверждён') : t('Объект в базе с пометкой «агент»')); },
-    onError: (e) => toast(errText(e), true),
+    onError: (e) => onTaken(e, cleanPhones(phones)[0]?.phone),
   });
   return (
     <div className="col">
@@ -876,7 +893,13 @@ function Gallery({ p }: { p: Property }) {
   };
   return (
     <Card label={t('Фото и видео')} title={own.length ? `${t('Файлы объекта')} · ${own.length}` : fromAd.length ? t('Фото из объявления') : t('Галерея')}
-      actions={staffOnly && own.some((x) => x.kind === 'photo') ? <Button variant="secondary" size="sm" loading={busy} onClick={originals}>{t('Скачать оригиналы')}</Button> : undefined}>
+      actions={staffOnly && own.length ? <div className="row row-wrap gap-sm">
+        {own.some((x) => x.kind === 'photo') && <Button variant="secondary" size="sm" loading={busy} onClick={originals}>{t('Скачать оригиналы')}</Button>}
+        {/* David 11-24: a video over 50 MB can't go to the originals chat (bot limit) — the operators take it here */}
+        {own.filter((x) => x.kind === 'video').map((v, i, vs) => (
+          <a key={v.id} className="btn btn-secondary btn-sm" href={mediaUrl(v.src)} download={`object_${p.id}_video${vs.length > 1 ? `_${i + 1}` : ''}.mp4`}>
+            {t('Скачать видео')}{vs.length > 1 ? ` ${i + 1}` : ''}</a>))}
+      </div> : undefined}>
       <MediaGrid items={own.length ? own : fromAd} />
     </Card>
   );
@@ -1520,7 +1543,7 @@ const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label
 export const metroLabel = (tag?: string | null) => (tag ? POST_ONE.metro[1][tag] || tag : '');
 export const POST_ONE: Record<string, [string, Record<string, string>]> = {
   prop_type: [t('Тип'), { Apartment: t('Квартира'), House: t('Дом'), Commercial: t('Коммерция'), Duplex: t('Дуплекс'), Townhouse: t('Таунхаус'), Land: t('Земля'), Retail: t('Ритейл'), Business: t('Бизнес'), Cafe: t('Кафе'), Restaurant: t('Ресторан'), BeautySalon: t('Салон красоты'), Warehouses: t('Склад'), Manufacture: t('Производство') }],
-  metro: [t('Метро'), { LibertySquare: t('Площадь Свободы'), Rustaveli: t('Руставели'), Marjanishvili: t('Марджанишвили'), StationSquare: t('Вокзальная площадь'), Tsereteli: t('Церетели'), Gotsiridze: t('Гоциридзе'), Nadzaladevi: t('Надзаладеви'), Didube: t('Дидубе'), Grmagele: t('Грмагеле'), Guramishvili: t('Гурамишвили'), Sarajishvili: t('Сараджишвили'), AhmeteliTheatre: t('Театр Ахметели'), STUniversity: t('Техуниверситет'), VazhaPshavela: t('Важа-Пшавела'), Delisi: t('Делиси'), TCUniversity: t('Госуниверситет'), MCUniversity: t('Медуниверситет'), AvlabariMetro: t('Авлабари'), IsaniMetro: t('Исани'), '300Aragveli': t('300 Арагвели'), SamgoriMetro: t('Самгори'), Varketili: t('Варкетили') }],
+  metro: [t('Метро'), { LibertySquare: t('Площадь Свободы'), Rustaveli: t('Руставели'), Marjanishvili: t('Марджанишвили'), StationSquare: t('Вокзальная площадь'), Tsereteli: t('Церетели'), Gotsiridze: t('Гоциридзе'), Nadzaladevi: t('Надзаладеви'), Didube: t('Дидубе'), Grmagele: t('Грмагеле'), Guramishvili: t('Гурамишвили'), Sarajishvili: t('Сараджишвили'), AhmeteliTheatre: t('Театр Ахметели'), STUniversity: t('Госуниверситет'), VazhaPshavela: t('Важа-Пшавела'), Delisi: t('Делиси'), TCUniversity: t('Техуниверситет'), MCUniversity: t('Медуниверситет'), AvlabariMetro: t('Авлабари'), IsaniMetro: t('Исани'), '300Aragveli': t('300 Арагвели'), SamgoriMetro: t('Самгори'), Varketili: t('Варкетили') }],
   building: [t('Дом'), { NewBuilding: t('Новостройка'), OldBuilding: t('Старый фонд'), HistoricalBuilding: t('Исторический'), Reconstruction: t('Реконструкция') }],
   design: [t('Дизайн'), { New: t('Новый'), White: t('Белый'), Grey: t('Серый'), Yellow: t('Жёлтый'), Mixed: t('Смешанный'), Old: t('Старый'), Retro: t('Ретро'), UnderRepair: t('В ремонте') }],
   condition: [t('Состояние (продажа)'), { BlackFrame: t('Чёрный каркас'), WhiteFrame: t('Белый каркас'), GreenFrame: t('Зелёный каркас'), FullyRenovated: t('С ремонтом') }],
@@ -1683,6 +1706,7 @@ function OwnerEditModal({ p, open, onClose }: { p: Property; open: boolean; onCl
   const phone = phones[0]?.phone || '';
   const [link, setLink] = useState<'link' | 'separate'>('link');
   const [reason, setReason] = useState('');
+  const onTaken = useOwnerTaken(p);
   const digits = (s?: string | null) => (s || '').replace(/\D/g, '').replace(/^995/, '').replace(/^0/, '');
   const changed = digits(phone) !== digits(p.owner?.phone);
   const [q, setQ] = useState('');
@@ -1696,7 +1720,7 @@ function OwnerEditModal({ p, open, onClose }: { p: Property; open: boolean; onCl
       : { owner_name: name, owner_phone: cleanPhones(phones)[0]?.phone, owner_phones: samePhones(phones, phoneRows(p.owner)) ? undefined : cleanPhones(phones),
           owner_separate: !!other || undefined, reason: reason || undefined }),
     onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : t('Сохранено')); onClose(); },
-    onError: (e) => toast(errText(e), true),
+    onError: (e) => onTaken(e, cleanPhones(phones)[0]?.phone),
   });
   return (
     <Modal open={open} onClose={onClose} title={t('Контакт собственника')}>

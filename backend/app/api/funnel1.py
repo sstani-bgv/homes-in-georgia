@@ -842,6 +842,18 @@ def properties_transfer_request(pid: int, body: TransferIn, db: Session = Depend
     return {"change_request": CR.outs(db, [cr])[0] if cr else None}
 
 
+class OwnerRequestIn(BaseModel):
+    phone: str
+    reason: str | None = None
+
+
+@router.post("/properties/{pid}/owner-request")
+def properties_owner_request(pid: int, body: OwnerRequestIn, db: Session = Depends(get_db, scope="function"),
+                             user: User = Depends(current_user)):
+    """«Запросить собственника» (David 11-24): the typed owner is another agent's — the operator moves him over."""
+    return {"change_request": CR.outs(db, [CR.request_owner(db, pid, body.phone, user, body.reason)])[0]}
+
+
 @router.post("/properties/{pid}/listings/{listing_id}/takedown")
 def properties_ad_takedown(pid: int, listing_id: str, db: Session = Depends(get_db, scope="function"),
                            user: User = Depends(current_user)):

@@ -20,7 +20,7 @@ const CHECKABLE = new Set(['OPENAI_API_KEY', ...APIFY_KEYS]);
 const usd = (v: number | null | undefined, d = 2) => (v == null ? '—' : `$${v.toFixed(v > 0 && v < 0.01 ? 4 : d)}`);
 const PURPOSE: Record<string, string> = {
   search_query: 'Подбор: разбор запроса клиента', search_near: 'Подбор: место рядом с которым искать',
-  search_pick: 'Подбор: выбор вариантов', search_translate: 'Подбор: перевод карточек на английский', contract_translate: 'Договоры: автоперевод пунктов',
+  search_pick: 'Подбор: выбор вариантов', search_translate: 'Подбор: перевод карточек на английский', contract_translate: 'Договоры: автоперевод пунктов', post_translate: 'Посты: перевод описания на английский',
   index: 'Парсер: разбор новых объявлений (текст + фото)', index_competitor: 'Парсер: разбор постов конкурентов (текст + фото)',
   index_facts: 'Парсер: факты для старых объявлений (текст)', other: 'Прочее (проверка ключа, ручные запуски)',
 };

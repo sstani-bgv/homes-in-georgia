@@ -1479,7 +1479,7 @@ def originals_post(pid, chat, text):
                 n += len(photos[i:i + 10])
         for p in big:
             log.warning("originals of %s: video %s is %d MB, over the Bot API limit — not sent", pid, p, os.path.getsize(p) >> 20)
-        note = "".join(f"\n\n🎥 Видео {os.path.getsize(p) >> 20} МБ больше 50 МБ — не отправлено, оригинал в CRM" for p in big)
+        note = "".join(f"\n\n🎥 Видео {os.path.getsize(p) >> 20} МБ: бот не может отправить больше 50 МБ — скачайте в карточке CRM (кнопка «Скачать видео»)" for p in big)
         tg.send(chat, text + note)
         for p in videos:
             if tg.call("sendDocument", files={"document": p}, chat_id=chat):

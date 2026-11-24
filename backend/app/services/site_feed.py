@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Car, Property, PropertyMedia, User
+from app.models import Car, Listing, Property, PropertyMedia, User
 from app.services import properties as P
 
 NBG_URL = "https://nbg.gov.ge/gw/api/ct/monetarypolicy/currencies/en/json/?currencies=USD&currencies=EUR"
@@ -39,8 +39,8 @@ AMENITY = {"smart_tv": "SmartTV", "balcony": "Balcony", "terrace": "Terrace", "c
 METRO = {"Liberty Square": "LibertySquare", "Rustaveli": "Rustaveli", "Marjanishvili": "Marjanishvili",
          "Station Square": "StationSquare", "Tsereteli": "Tsereteli", "Gotsiridze": "Gotsiridze",
          "Nadzaladevi": "Nadzaladevi", "Didube": "Didube", "Grmagele": "Grmagele", "Guramishvili": "Guramishvili",
-         "Sarajishvili": "Sarajishvili", "Akhmeteli Theatre": "AhmeteliTheatre", "Technical University": "STUniversity",
-         "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi", "State University": "TCUniversity",
+         "Sarajishvili": "Sarajishvili", "Akhmeteli Theatre": "AhmeteliTheatre", "Technical University": "TCUniversity",
+         "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi", "State University": "STUniversity",
          "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro", "Isani": "IsaniMetro",
          "300 Aragveli": "300Aragveli", "Samgori": "SamgoriMetro", "Varketili": "Varketili"}
 
@@ -119,7 +119,18 @@ def tag_words(f: dict) -> dict:
     }
 
 
-def item(p: Property, n_photos: int, agent: User | None, fx: dict) -> dict:
+def pins(db: Session, props: list) -> dict:
+    """{object id: (lat, lng)} of the origin ad for objects without their own point (David 11-24: «On the map» showed an
+    empty map for #15512 — the post's Google link had the ad's pin, the site had none)."""
+    want = {p.listing_id: p.id for p in props if p.lat is None and p.listing_id}
+    if not want:
+        return {}
+    rows = db.execute(select(Listing.id, Listing.lat, Listing.lng).where(Listing.id.in_(want), Listing.lat.is_not(None),
+                                                                       Listing.lng.is_not(None)))
+    return {want[lid]: (float(lat), float(lng)) for lid, lat, lng in rows}
+
+
+def item(p: Property, n_photos: int, agent: User | None, fx: dict, pin: tuple | None = None) -> dict:
     """A property: rent (rent, daily, commercial for rent) or sale (post_fields.deal = Sale: resale, new, commercial)."""
     f = p.post_fields or {}
     sale = f.get("deal") == "Sale"
@@ -131,7 +142,8 @@ def item(p: Property, n_photos: int, agent: User | None, fx: dict) -> dict:
     return _final({
         "id": iid, "legacy_id": f.get("site_id"), "service": service, "source": service, "deal": "sale" if sale else "rent",
         "period": f.get("period"), **tag_words(f),
-        "title": p.address, "district": p.district, "lat": p.lat, "lon": p.lng,
+        "title": p.address, "district": p.district, "lat": p.lat if p.lat is not None else pin and pin[0],
+        "lon": p.lng if p.lng is not None else pin and pin[1],
         "price": price, "currency": p.currency, "price_usd": usd, "deposit": None if sale else f.get("deposit"),
         "ppsqm_usd": round(usd / area) if sale and usd and area else None, "completion": f.get("completion"),
         "rooms": p.bedrooms, "area": area, "floor": p.floor, "floors": p.total_floors,
@@ -223,8 +235,8 @@ def feed(db: Session) -> dict:
         counts[pid] = counts.get(pid, 0) + 1
     aids = {o.agent_id for o in (*props, *cars) if o.agent_id}
     agents = {u.id: u for u in db.scalars(select(User).where(User.id.in_(aids)))}
-    fx = rates()
-    rows = ([(p.published_at, p.id, item(p, counts.get(p.id, 0), agents.get(p.agent_id), fx)) for p in props]
+    fx, at = rates(), pins(db, props)
+    rows = ([(p.published_at, p.id, item(p, counts.get(p.id, 0), agents.get(p.agent_id), fx, at.get(p.id))) for p in props]
             + [(c.published_at, c.id, car_item(c, agents.get(c.agent_id), fx)) for c in cars])
     rows.sort(key=lambda r: (r[0] or EPOCH, r[1]), reverse=True)  # newest first, undated last
     items = [r[2] for r in rows]
@@ -254,6 +266,6 @@ def detail(db: Session, ident: str) -> dict | None:
     if o is None:
         return None
     agent, fx = db.get(User, o.agent_id) if o.agent_id else None, rates()
-    d = item(o, len(photo_keys(db, o.id)), agent, fx) if isinstance(o, Property) else car_item(o, agent, fx)
+    d = item(o, len(photo_keys(db, o.id)), agent, fx, pins(db, [o]).get(o.id)) if isinstance(o, Property) else car_item(o, agent, fx)
     d["video"] = VIDEO_URL.format(id=ident_of(o)) if video_key(db, o) else None
     return d

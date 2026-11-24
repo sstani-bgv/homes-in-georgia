@@ -66,6 +66,39 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     return cr
 
 
+def request_owner(db: Session, pid: int, phone: str, actor: User, reason: str | None = None) -> ChangeRequest:
+    """David 11-24 (voices 287409 / 287423, Luka and Zaza): the number the agent typed is an owner bound to another agent
+    («Собственник закреплён за #Tag») — the agent asks the operator to move the owner to him and link him to this
+    object; the owner's agent hears of it (he may say he is against it). Not when that agent has an exclusive with him."""
+    p = get_or_404(db, Property, int(pid), "property")
+    if p.agent_id != actor.id:
+        raise forbidden("only the object's agent")
+    o = P.find_owner(db, phone)
+    if o is None or o.is_agent or o.agent_id in (None, actor.id):
+        raise DomainError("bad_status", "Этот собственник ни за кем не закреплён — просто сохраните номер")
+    if db.scalar(select(Property.id).where(Property.owner_id == o.id, Property.agent_id == o.agent_id,
+                                           Property.is_exclusive.is_(True), Property.status.not_in(("archived", "rented"))).limit(1)):
+        raise DomainError("exclusive", f"У {users_svc_tag(db, o.agent_id)} эксклюзив с этим собственником — передать нельзя")
+    if db.scalar(select(ChangeRequest.id).where(ChangeRequest.kind == "transfer_owner", ChangeRequest.status == "pending",
+                                                ChangeRequest.entity_id == p.id).limit(1)):
+        raise DomainError("bad_status", "Запрос уже отправлен, ждёт оператора")
+    old = db.get(User, o.agent_id)
+    cr = create(db, "property", p.id, "transfer_owner", {
+        "owner_id": o.id, "agent_id": actor.id, "link": True,
+        "owner_agent": {"old": old.name if old else P.PLATFORM, "new": actor.name}}, actor, reason)
+    db.commit()
+    P._notify("change_request_new", cr)
+    P._notify("prop_event", p, f"✋ <b>{escape(actor.name or '')} просит передать ему вашего собственника "
+              f"{escape(o.name or '—')}</b>", actor.id, [o.agent_id], False,
+              "Если вы против — напишите оператору. Решает оператор в «Запросах».")
+    return cr
+
+
+def users_svc_tag(db: Session, uid: int | None) -> str:
+    from app.services import users as users_svc
+    return users_svc.tag_of(db.get(User, uid)) if uid else "—"
+
+
 def request_no_esign(db: Session, pid: int, reason: str | None, actor: User,
                      scan: tuple[str, bytes] | None = None) -> ChangeRequest:
     """«Без электронной подписи»: the owner can't sign by the link (abroad, no smartphone, signed on paper) → a request
@@ -139,6 +172,9 @@ def _apply(db: Session, cr: ChangeRequest, p: Property, operator: User) -> None:
             P.set_owner_lease(db, p, new("rent_from"), new("rent_to"), operator)
     elif cr.kind == "transfer_owner":
         P.transfer_owner(db, pl["owner_id"], pl["agent_id"], operator, cr.reason, commit=False)
+        if pl.get("link") and p.owner_id != pl["owner_id"]:  # request_owner: the owner goes onto the asking agent's object
+            p.owner_id, p.updated_at = pl["owner_id"], now()
+            log_event(db, "property", p.id, "owner_linked", operator, owner_id=pl["owner_id"], request_id=cr.id)
     elif cr.kind == "no_esign":  # the step counts as done from now (properties.contract_done reads the request)
         log_event(db, "property", p.id, "exclusive_contract_waived", operator, request_id=cr.id, reason=cr.reason,
                   requested_by=cr.requested_by, media_id=pl.get("media_id"))

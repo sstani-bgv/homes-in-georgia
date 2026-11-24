@@ -149,6 +149,7 @@ export const api = {
     /** reason: ARCHIVE_REASON key; a verified object's agent gets change_request back instead */
     archive: (id: number, b: { reason: string; comment?: string; duplicate_of?: number | null } & Partial<OwnerLease>) => http.post<Property>(`/properties/${id}/archive`, b),
     /** agent's «Запрос оператору»: move the owner to another agent (staff: moved right away, change_request null) */
+    ownerRequest: (id: number, phone: string, reason?: string) => http.post<{ change_request: ChangeRequest }>(`/properties/${id}/owner-request`, { phone, reason }),
     transferRequest: (id: number, agent_id: number, reason?: string) => http.post<{ change_request: ChangeRequest | null }>(`/properties/${id}/transfer-request`, { agent_id, reason }),
     elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
     similar: (id: number) => http.get<{ items: SimilarItem[] }>(`/properties/${id}/similar`),

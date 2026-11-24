@@ -1959,21 +1959,22 @@ def clean_post_fields(v) -> dict:
 
 # ---------------------------------------------------------------- generator prefill from the parsed ad (David 2026-11-08)
 
-# Tbilisi metro stations (OpenStreetMap railway=station subway, 2026-11-08) -> the generator's metro tag
+# Tbilisi metro stations (OpenStreetMap railway=station subway, 2026-11-08) -> the generator's metro tag. The channel's own
+# tags (Irakli 11-24, as the old sheet): #STUniversity = State University (Universiteti), #TCUniversity = Technical
 METRO = {"LibertySquare": (41.69452, 44.80056), "Rustaveli": (41.7035, 44.78965), "Marjanishvili": (41.70959, 44.79687),
          "StationSquare": (41.72256, 44.7971), "Tsereteli": (41.72641, 44.78766), "Gotsiridze": (41.74294, 44.78405),
          "Nadzaladevi": (41.7334, 44.79643), "Didube": (41.74945, 44.77999), "Grmagele": (41.76497, 44.78996),
          "Guramishvili": (41.77576, 44.79558), "Sarajishvili": (41.78406, 44.79992), "AhmeteliTheatre": (41.79106, 44.815),
-         "STUniversity": (41.72035, 44.77664), "VazhaPshavela": (41.72403, 44.73085), "Delisi": (41.72549, 44.74534),
-         "TCUniversity": (41.72283, 44.71851), "MCUniversity": (41.72728, 44.76384), "AvlabariMetro": (41.69226, 44.81584),
+         "TCUniversity": (41.72035, 44.77664), "VazhaPshavela": (41.72403, 44.73085), "Delisi": (41.72549, 44.74534),
+         "STUniversity": (41.72283, 44.71851), "MCUniversity": (41.72728, 44.76384), "AvlabariMetro": (41.69226, 44.81584),
          "IsaniMetro": (41.68663, 44.83996), "300Aragveli": (41.68799, 44.82623), "SamgoriMetro": (41.68552, 44.85448),
          "Varketili": (41.6919, 44.87088)}
 METRO_NAME = {"Liberty Square": "LibertySquare", "Rustaveli": "Rustaveli", "Marjanishvili": "Marjanishvili",
               "Station Square": "StationSquare", "Tsereteli": "Tsereteli", "Gotsiridze": "Gotsiridze",
               "Nadzaladevi": "Nadzaladevi", "Didube": "Didube", "Grmagele": "Grmagele", "Ghrmaghele": "Grmagele",
               "Guramishvili": "Guramishvili", "Sarajishvili": "Sarajishvili", "Akhmeteli Theatre": "AhmeteliTheatre",
-              "Technical University": "STUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
-              "State University": "TCUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
+              "Technical University": "TCUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
+              "State University": "STUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
               "Isani": "IsaniMetro", "300 Aragveli": "300Aragveli", "Samgori": "SamgoriMetro", "Varketili": "Varketili"}
 METRO_RADIUS_M = 8000  # the nearest station always fills (Stanislav 11-11); only points clearly outside Tbilisi get none
 _P_TYPE = {"apartment": "Apartment", "house": "House", "commercial": "Commercial"}
@@ -2170,6 +2171,70 @@ def prose(text: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
 
 
+METRO_EN = {"STUniversity": "University", "TCUniversity": "Technical University", "MCUniversity": "Medical University",
+            "AvlabariMetro": "Avlabari", "IsaniMetro": "Isani", "SamgoriMetro": "Samgori", "AhmeteliTheatre": "Akhmeteli Theatre",
+            "300Aragveli": "300 Aragveli", "VazhaPshavela": "Vazha-Pshavela"}  # the rest: the tag split (Liberty Square)
+_ADDR_DROP = re.compile(r"^(\d{4}|tbilisi|georgia|тбилиси|грузия|თბილისი|საქართველო)$|district|raion|район|რაიონი|\bblocks?\b", re.I)
+_ADDR_ABBR = ((r"\bStreet\b", "St"), (r"\bAvenue\b", "Ave"), (r"\bLane\b", "Ln"), (r"\bHighway\b", "Hwy"))
+
+
+def short_address(address: str | None, district: str | None = None) -> str | None:
+    """The post's address without the geocoder's tail (Irakli 11-24 «адрес короче, без индекса»): «Biota Park, 20, Anna
+    Politkovskaya Street, Saburtalo, Vazha-Pshavela Blocks, Vake District, Tbilisi, 0168» → «Biota Park · Anna
+    Politkovskaya St 20». A short address stays as it is."""
+    if not address:
+        return None
+    parts = [x.strip() for x in address.split(",") if x.strip()]
+    if len(parts) <= 2:
+        return address.strip()
+    names = {d[i].lower() for d in districts.DISTRICTS for i in (1, 2, 3)} | {(district or "").lower()}
+    out, num = [], None
+    for x in parts:
+        if _ADDR_DROP.search(x) or x.lower() in names:
+            continue
+        if re.fullmatch(r"\d+[a-zA-Zა-ჰ]?", x):
+            num = x
+            continue
+        for a, b in _ADDR_ABBR:
+            x = re.sub(a, b, x)
+        out.append(f"{x} {num}" if num else x)
+        num = None
+    return " · ".join(out[:2]) or address.strip()
+
+
+_FOREIGN = re.compile(r"[а-яА-ЯёЁა-ჰ]")
+
+
+def post_description(db: Session, p: Property) -> str:
+    """The description for the post, in English (David 11-24: «почему по-русски опять»): Russian / Georgian prose is
+    translated once and kept in post_fields.description_en (with the source's hash, so an edit translates again).
+    No model or a failure: the description as it is."""
+    text = prose(p.description)
+    if not text or not _FOREIGN.search(text):
+        return text
+    f = p.post_fields or {}
+    key = hashlib.sha1(text.encode()).hexdigest()[:12]
+    if f.get("description_en") and f.get("description_en_of") == key:
+        return f["description_en"]
+    if not os.environ.get("OPENAI_API_KEY"):
+        return text
+    try:
+        from app.services.contracts import _llm
+        out = _llm().ask("Translate this apartment listing description into natural English for a Telegram rental channel. "
+                         "Keep facts, numbers, street and place names (transliterated); no additions, no emojis, no hashtags."
+                         "\n\n" + text, {"type": "object", "additionalProperties": False, "required": ["en"],
+                                         "properties": {"en": {"type": "string"}}}, retries=1, timeout=60,
+                         purpose="post_translate")
+        en = str(out.get("en") or "").strip()
+    except Exception as e:  # noqa: BLE001
+        log.warning("post description translate failed for %s: %s", p.id, e)
+        return text
+    if not en:
+        return text
+    p.post_fields = {**f, "description_en": en, "description_en_of": key}
+    return en
+
+
 def post_rich(db: Session, p: Property, media: list[str]) -> str:
     """The post as a Telegram rich message (Bot API sendRichMessage) in the @tbilisi_rent style (Irakli's video
     2026-11-09): photo slideshow, «$price · beds · district» title, «building · m² · floor · ID» line, 📍 address (the
@@ -2184,44 +2249,56 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
     head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
                                   _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district))) if x)
-    marks = [x for x, on in (("Exclusive", p.is_exclusive), ("Discount", f.get("discount"))) if on]
-    sub = " · ".join(x for x in (*marks, f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
-                                 p.floor and (f"{p.floor}/{p.total_floors} floor" if p.total_floors else f"{p.floor} floor"),
-                                 f"ID: {p.id}") if x)
+    # Irakli 11-24 (his sample post): «🏢 building · m² · floor», the headline and the description, 📍 a short address ·
+    # Ⓜ️ Metro <station>, ✅ the amenities and 💰 deposit · lease open, one collapsed «Parameters, amenities and tags»,
+    # «ID …» at the bottom; «Exclusive» stands out when it is one
+    marks = [x for x, on in (("💎 Exclusive", p.is_exclusive), ("❗️ Discount", f.get("discount"))) if on]
+    sub = " · ".join(x for x in (f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
+                                 p.floor and (f"floor {p.floor}/{p.total_floors}" if p.total_floors else f"floor {p.floor}")) if x)
     out = []
     if media:
         out.append("<tg-slideshow>" + "".join(f'<video src="{m}"/>' if "video" in m else f'<img src="{m}"/>' for m in media)
                    + "</tg-slideshow>")
-    out.append(f"<h2>{h(head)}</h2><p>{h(sub)}</p>")
-    url = maps_url(db, p) if p.address else None
-    where = [f'📍 <a href="{h(url)}">{h(p.address)}</a>' if url else (p.address and f"📍 {h(p.address)}"),
-             f.get("metro") and f"Ⓜ️ {h(_split(f['metro']))}"]
-    if any(where):
-        out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
-    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", prose(p.description)) if x)
+    out.append(f"<h2>{h(head)}</h2>" + (f"<p><b>{h(' · '.join(marks))}</b></p>" if marks else "")
+               + (f"<p>🏢 {h(sub)}</p>" if sub else ""))
+    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", post_description(db, p)) if x)
     if text:
         out.append("<p>" + h(text).replace("\n", "<br>") + "</p>")
+    url = maps_url(db, p) if p.address else None
+    short = short_address(p.address, p.district)
+    where = [f'📍 <a href="{h(url)}">{h(short)}</a>' if url and short else (short and f"📍 {h(short)}"),
+             f.get("metro") and f"Ⓜ️ Metro {h(METRO_EN.get(f['metro']) or _split(f['metro']))}"]
+    if any(where):
+        out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
     am = f.get("amenities") or []
+    feats = [_human(a) for a in am if a in ("Conditioner", "Balcony")] + ([_human(f["heating"])] if f.get("heating") else []) \
+        + [_human(a) for a in am if a not in ("Conditioner", "Balcony")]
+    months = sorted(int(x[:-5]) for x in f.get("periods") or [] if x.endswith("Month") and x[:-5].isdigit())
+    dep = f.get("deposit", price)
+    money_line = " · ".join(x for x in ((not sale and price and (f"Deposit ${dep}" if dep else "No deposit")),
+                                        months and f"from {months[0]} month{'s' if months[0] != 1 else ''}") if x)
+    lines = [feats and f"✅ {' · '.join(feats)}", money_line and f"💰 {money_line}"]
+    if any(lines):
+        out.append("<p>" + "<br>".join(h(x) for x in lines if x) + "</p>")
     rows = [("Rooms", p.rooms), ("Bathrooms", (f.get("bathrooms") or "")[:1] or (1 if p.bedrooms is not None else None)),
             ("Air conditioners", "yes" if "Conditioner" in am else None), ("Balconies", "yes" if "Balcony" in am else None),
             ("Heating", f.get("heating") and _human(f["heating"])), ("Design", f.get("design") and _human(f["design"])),
             ("Condition", sale and f.get("condition") and _human(f["condition"])),
             ("Pets", f.get("pets") and _human(f["pets"])), ("Tenants", f.get("tenants") and f"up to {f['tenants']}"),
             ("Lease term", f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
-            ("Deposit", not sale and price and (f"${f.get('deposit', price)}" if f.get("deposit", price) else "none")),
+            ("Deposit", not sale and price and (f"${dep}" if dep else "none")),
             ("Commission", "0%")]
     table = "".join(f"<tr><td>{h(k)}</td><td>{h(v)}</td></tr>" for k, v in rows if v)
-    rest = [_human(a) for a in am if a not in ("Conditioner", "Balcony")]
-    params = f"<table striped compact>{table}</table>" + (f"<p>✅ {h(' · '.join(rest))}</p>" if rest else "")
-    out.append(f"<details><summary>Parameters and amenities</summary>{params}</details>")
     agent = db.get(User, p.agent_id) if p.agent_id else None
     tags = " ".join(hashtags(post_text(db, p)))
-    out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p>"
+    out.append(f"<details><summary>Parameters, amenities and tags</summary><table striped compact>{table}</table>"
+               f"<p>{h(tags)}</p>"
                f"<p>📲 {h(phone_line(agent))}<br>"
                '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 All listings</a> · <a href="https://t.me/reviews_rent_tbilisi">Reviews</a> · '
                '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">Instagram</a> · '
                '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">FB</a> · '
                '<a href="https://youtube.com/@rentintbilisi">YouTube</a></p></details>')
+    out.append(f"<p>ID {p.id}</p>")
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
     # «On the map»: our map Mini App page with the object's pin (as «📍 На карте» on the bot's cards; a channel can't
     # open a web_app button, so it's a link), Google Maps without a point
@@ -2237,7 +2314,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
         pin = f"{env.PUBLIC_URL.rstrip('/')}/map?" + urlencode({"pin": f"{at[0]:.6f},{at[1]:.6f}", "prec": prec,
                                                                 "title": head, "lang": "en"})
     # David 11-23: only «On the map» and «Contact» (no «I like it»; the bot keeps answering plike: of the old posts)
-    where = hge_map_url(p.id) if not p.site_hidden else pin or url  # the site's map on this object, else our pin map
+    # the site's map on this object (its point, or the ad's: site_feed.pins), else our pin map; no point at all: Google
+    where = (hge_map_url(p.id) if not p.site_hidden else pin) if at else url
     if where:
         out.append("<tg-button-row>" + btn("📍 On the map", where) + "</tg-button-row>")
     # «Contact» (back by Stanislav 11-11, own full-width row): /start p<id> -> journey.on_post_start, a lead as before
