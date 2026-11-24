@@ -180,6 +180,18 @@ def contract_drive(db: Session, job: Job):
     return contracts.drive_upload(db, _ref_id(job))
 
 
+@handler("deal_due")
+def deal_due(db: Session, job: Job):
+    """24 h after both parties signed (services/contracts.start_deal_due): no deal yet → ⛔ to the agent and the operator."""
+    from app.models import Contract
+    from app.services import contracts as C
+    c = db.get(Contract, _ref_id(job))
+    if not c or not c.deal_due_at or not C.owes_deal(db, c):
+        return "stale"
+    notify.deal_overdue(c, C.deal_owers(db, c))
+    log_event(db, "contract", c.id, C.DEAL_OVERDUE, None, "bot")
+
+
 @handler("birthdays")
 def birthdays_job(db: Session, job: Job):
     """09:00 Tbilisi: today's birthdays → the team, tomorrow's → a reminder to admins (services/birthdays.py)."""
@@ -229,13 +241,45 @@ def sign_doc_drive(db: Session, job: Job):
 
 @handler("tg_unpost")
 def tg_unpost(db: Session, job: Job):
-    """Rented («Сдано» / «Сдал сам»): our Telegram posts of the object are deleted (properties.unpost)."""
+    """Rented («Сдано» / «Сдал сам») or archived for any reason (pause, «Снять с публикации», …): our Telegram posts are deleted
+    (properties.unpost); a rented one then gets the channel's «#FlatRented» announcement (properties.rented_post)."""
     from app.services import properties
     p = db.get(Property, _ref_id(job))
-    if p is None or not (p.status == "rented" or p.archive_reason in properties.RENTED_REASONS):
+    rented = p is not None and (p.status == "rented" or (p.status == "archived" and p.archive_reason in properties.RENTED_REASONS))
+    if p is None or not (rented or p.status == "archived"):
         return "noop"  # back on the market before the worker came to it
     r = properties.unpost(db, p, None)
-    return "ok" if not r["failed"] else f"not deleted: {', '.join(r['failed'])}"[:500]
+    res = "ok" if not r["failed"] else f"not deleted: {', '.join(r['failed'])}"[:500]
+    if rented and (sent := properties.rented_post(db, p)) not in ("ok", "never posted"):
+        res = f"{res}; rented post: {sent}"
+    return res
+
+
+@handler("tg_originals")
+def tg_originals(db: Session, job: Job):
+    """After a publication: the photos without the watermark into the originals chat (properties.send_originals)."""
+    from app.services import properties
+    p = db.get(Property, _ref_id(job))
+    return properties.send_originals(db, p, (job.payload or {}).get("text")) if p is not None else "noop"
+
+
+@handler("tg_repost")
+def tg_repost(db: Session, job: Job):
+    """A published object's post shows changed fields («Правка», «% Скидка») or it is back from a pause: posted again
+    (properties.publish: the new post first, then the old ones deleted)."""
+    from app.services import properties
+    from app.services.errors import DomainError
+    p = db.get(Property, _ref_id(job))
+    if p is None or p.status != "published":
+        return "noop"
+    try:
+        properties.publish(db, p.id, None, tg=True, site=not p.site_hidden)
+    except DomainError as e:  # too few photos, an exclusive still advertised elsewhere: the same next time
+        if e.code == "publish_failed":
+            raise  # Telegram refused: try again later
+        db.rollback()
+        return f"not reposted: {e}"[:500]
+    return "ok"
 
 
 @handler("dup_purge")
@@ -250,13 +294,14 @@ def dup_purge(db: Session, job: Job):
 
 @handler("dup_scan")
 def dup_scan(db: Session, job: Job):
-    """An object became exclusive / got its contract / took a «Дубль» in, or new ads look like it: search its duplicates
-    everywhere (similar.scan_exclusive)."""
-    from app.services import myhome_copies, similar
+    """An object was published, got a link («Сравнить по ссылке»), «Найти копии» was pressed (the sites are searched
+    then), became exclusive / got its contract / took a «Дубль» in, new ads look like it: search its duplicates
+    (similar.scan_exclusive)."""
+    from app.services import myhome_copies, properties, similar
     trigger = (job.payload or {}).get("trigger") or "exclusive"
-    # agents' copies on myhome first (David 11-22), once a day; not on the mass re-scans (new photo vectors, new ads:
-    # 613 queued 11-22 would have been 613 myhome searches in a row)
-    if trigger not in ("photo_vectors", "new_ads") and not myhome_copies.recent(db, _ref_id(job)):
+    # the sites (myhome, ss.ge, korter) only on publishing, a pasted link and «Найти копии» (Stanislav 11-23: no daily
+    # pass); the other triggers search what the base has
+    if trigger in properties.SITE_TRIGGERS:
         try:
             myhome_copies.run(db, _ref_id(job))
         except Exception:  # noqa: BLE001 — myhome down / changed: the scan of what we have still runs
@@ -268,9 +313,9 @@ def dup_scan(db: Session, job: Job):
 
 @handler("myhome_copies")
 def myhome_copies_job(db: Session, job: Job):
-    """The card's «Найти копии на myhome»: agents' copies of the object (services/myhome_copies.py)."""
-    from app.services import myhome_copies
-    return f"saved {myhome_copies.run(db, _ref_id(job))}"
+    """Old queued «Найти копии» jobs: the same as a dup_scan «manual» now."""
+    job.payload = {"trigger": "manual"}
+    return dup_scan(db, job)
 
 
 @handler("dup_recheck")
@@ -361,10 +406,32 @@ def daily_rent_ical_tick():
         with SessionLocal() as db:
             if r := daily_rent_ical.sync_all(db):
                 log.info("daily rent ical: %s", r)
+            from app.services import daily_rent_auto
+            if (st := daily_rent_auto.auto_stays(db)) and any(st.values()):
+                log.info("daily rent auto stays: %s", st)
             if fresh := daily_rent_ical.new_conflicts(db):
                 notify.daily_rent_conflicts(fresh, {a.id: a.name for a in db.query(DrApartment)})
     except Exception:  # noqa: BLE001
         log.exception("daily rent ical sync failed")
+
+
+def daily_rent_morning_tick():
+    """«Посуточная аренда», once a day from 09:00 Tbilisi: cleanings for today's check-outs, then the «Сегодня» digest to the
+    managers; on the 1st (or the first day after) the past month's owner reports (services/daily_rent_auto.py)."""
+    from app.services import daily_rent_auto as A
+    try:
+        with SessionLocal() as db:
+            if A.digest_due(db):
+                if n := A.auto_cleanings(db):
+                    log.info("daily rent: %s cleanings for today's check-outs", n)
+                notify.daily_rent_digest(A.digest_text(A.today(db)))
+                A.mark_digest(db)
+            if month := A.reports_due(db):
+                if reps := A.owner_reports(db, month):
+                    notify.daily_rent_owner_reports(reps, month)
+                A.mark_reports(db, month)
+    except Exception:  # noqa: BLE001
+        log.exception("daily rent morning failed")
 
 
 _child = {"proc": None, "after": 0.0, "npz": None}
@@ -402,19 +469,36 @@ def photo_vectors_tick() -> None:
                                           cwd=str(REPO_ROOT / "backend"))
 
 
-def tick(limit: int = 50) -> dict:
+# The sites' copies search (myhome / ss.ge / korter pages and photos) runs minutes: in its own thread, so a post's
+# repost, a takedown or a notification never waits behind it (David 11-24: a price change sat 10 min in the queue)
+SLOW = ("dup_scan", "myhome_copies", "dup_recheck", "channel_dups")  # all of them: similar.find over the whole base, one thread
+
+
+def tick(limit: int = 50, kinds: tuple = (), skip: tuple = ()) -> dict:
     """One pass: claim due jobs one at a time (each in its own transaction, row-locked, SKIP LOCKED)."""
     stats: dict[str, int] = {}
-    with SessionLocal() as db:
-        birthdays.ensure_job(db)
+    if not kinds:
+        with SessionLocal() as db:
+            birthdays.ensure_job(db)
     for _ in range(limit):
         with SessionLocal() as db:
-            due = jobs.due(db, limit=1)
+            due = jobs.due(db, limit=1, kinds=kinds, skip=() if kinds else skip)
             if not due:
                 break
             res = run_job(db, due[0])
             stats[res] = stats.get(res, 0) + 1
     return stats
+
+
+def slow_lane(interval: int = 10):
+    """worker.SLOW jobs, one at a time, beside the main loop."""
+    while True:
+        try:
+            if st := tick(limit=20, kinds=SLOW):
+                log.info("slow jobs: %s", st)
+        except Exception:  # noqa: BLE001
+            log.exception("slow tick failed")
+        time.sleep(interval)
 
 
 def channel_import_pass():
@@ -439,16 +523,18 @@ def main():
     log.info("worker started, interval %ss, tz %s", args.interval, env.TZ)
     from app.telegram import login_bot
     login_bot.start_thread()  # staff invites: /start inv_<token> in the CRM sign-in bot
+    threading.Thread(target=slow_lane, daemon=True).start()
     last_ical = time.time() - env.DAILY_RENT_ICAL_MINUTES * 60 + 20  # first fetch 20 s after the start, as ApartFlow
     last_avatars = time.time() - 23 * 3600  # first pass an hour after the start, then daily
-    last_posts = time.time() - 3000  # «сверка с каналом» (services/post_sync.py): 10 min after the start, then hourly
+    last_posts = time.time() - 480  # «сверка с каналом» (services/post_sync.py): 2 min after the start, then every 10 min
+    # (David 11-24: a post deleted by hand in the channel → the CRM and the bot know within minutes, not an hour)
     importer = None
     last_import = time.time() - 25 * 60  # channel posts → objects (services/channel_import.py): 5 min after the start, every 30 min
     while True:
         from app import keys
         keys.refresh()  # Управление → Ключи
         try:
-            st = tick()
+            st = tick(skip=SLOW)  # the slow ones: slow_lane
             if st:
                 log.info("jobs: %s", st)
         except Exception:  # noqa: BLE001
@@ -456,6 +542,7 @@ def main():
         if env.DAILY_RENT_ICAL_MINUTES > 0 and time.time() - last_ical >= env.DAILY_RENT_ICAL_MINUTES * 60:
             last_ical = time.time()
             daily_rent_ical_tick()
+        daily_rent_morning_tick()
         if time.time() - last_avatars >= 24 * 3600:  # team members still without a stored photo (telegram/avatars.py)
             last_avatars = time.time()
             try:
@@ -463,7 +550,7 @@ def main():
                 avatars.run(out=log.info)
             except Exception:  # noqa: BLE001
                 log.exception("avatar sync failed")
-        if time.time() - last_posts >= 3600:
+        if time.time() - last_posts >= 600:
             last_posts = time.time()
             try:
                 from app.services import post_sync

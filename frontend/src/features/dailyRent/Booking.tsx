@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { Badge, Button, Field, Input, Loading, Modal, Seg, Select, Textarea } from '../../components/ui';
 import { errText, useToast } from '../../components/toast';
-import { cm, dr, EXP_LABEL, nightsLabel, PAY_LABEL, type Calc, type DrApartment, type DrBooking, type DrExpense, type Platform } from './api';
+import { cm, dr, EXP_LABEL, LANGS, nightsLabel, PAY_LABEL, type Calc, type DrApartment, type DrBooking, type DrExpense, type Lang, type Platform, type Reports } from './api';
 
 type Draft = Partial<DrBooking>;
 const PLATFORMS: Platform[] = ['Airbnb', 'Booking', 'Другое'];
@@ -18,6 +18,21 @@ export function useDrInvalidate() {
 
 export function copy(text: string, toast: (t: string, err?: boolean) => void) {
   navigator.clipboard.writeText(text).then(() => toast('Скопировано'), () => toast('Не удалось скопировать', true));
+}
+
+/** the owner's report in Russian / English / Georgian: opens in the owner's language (the apartment card → «Язык отчётов»),
+ * the manager switches and copies the one she needs */
+export function ReportView({ reports, lang, toast }: { reports: Reports; lang?: Lang; toast: (t: string, err?: boolean) => void }) {
+  const [l, setL] = useState<Lang>(lang || 'ru');
+  return (
+    <div className="col gap">
+      <div className="row gap-sm row-wrap row-between">
+        <Seg value={l} onChange={setL} options={LANGS} />
+        <Button size="sm" variant="secondary" onClick={() => copy(reports[l], toast)}><Copy size={14} />Копировать</Button>
+      </div>
+      <pre className="dr-report" lang={l}>{reports[l]}</pre>
+    </div>
+  );
 }
 
 /** open: a stay id, or 'new' with the apartment (and optional dates from the calendar) */
@@ -97,12 +112,8 @@ function BookingBody({ b, start, onClose }: { b?: DrBooking; start: Draft; onClo
         </>
       )}
       {tab === 'exp' && (cur ? <Expenses b={cur} run={run} /> : <p className="muted">Сначала сохраните проживание.</p>)}
-      {tab === 'rpt' && (cur?.report ? (
-        <div className="col gap">
-          <pre className="dr-report">{cur.report}</pre>
-          <Button variant="secondary" onClick={() => copy(cur.report!, toast)} style={{ alignSelf: 'start' }}><Copy size={15} />Копировать</Button>
-        </div>
-      ) : <p className="muted">Сначала сохраните проживание.</p>)}
+      {tab === 'rpt' && (cur?.reports ? <ReportView reports={cur.reports} lang={cur.report_lang} toast={toast} />
+        : <p className="muted">Сначала сохраните проживание.</p>)}
     </div>
   );
 }

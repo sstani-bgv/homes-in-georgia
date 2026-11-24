@@ -77,4 +77,5 @@ def test_prefill_takes_empty_fields_from_older_posts(db):
 def test_channel_announcements_are_not_objects():
     assert not L.is_object_text("❗️#Rented Commercial space in 📍Vera has found a business 🤝💰🎉")
     assert not L.is_object_text("❗️#FlatRented Nice House in 📍Saburtalo found a tenant 🤝👏🎉")
+    assert not L.is_object_text("❗️#Sold\nCommercial space in 📍Vake found a new owner 🤝👏🎉\n#Vake")  # rented_text of a sale
     assert L.is_object_text("#Vake 📍 5 Abashidze St\n🏢 #2Bed #Apartment for #Rent | 80 Sq.m")

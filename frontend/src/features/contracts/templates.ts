@@ -215,6 +215,44 @@ export function editClause(e: CxEdits, key: DraftKey, k: string, op: ClauseOp): 
   return n;
 }
 
+// The bilingual columns don't share paragraph indices (rent_RU: 94 Georgian, 102 Russian paragraphs), so the pair of a
+// paragraph is found by its clause number: the nearest numbered paragraph above it («1.4.», «2.1»), then the same count
+// of non-empty paragraphs down in the other column. No match (an unnumbered preamble that doesn't line up) = null.
+const CLAUSE_NO = /^[\s*„"«(]*(\d+(?:\.\d+)+|\d+(?=\.))/;
+type Para = { p: string; k: string };
+
+/** The other column's paragraph of k (with k's «+n» of an added one), or null: not in the bilingual table / no pair. */
+export function pairClause(doc: ContractDoc, k: string): string | null {
+  const m = /^(\d+)\.([01])\.(\d+)(\+\d+)?$/.exec(k);
+  const tbl = m && doc.body[Number(m[1])];
+  if (!m || !tbl || !isCols(tbl)) return null;
+  const col = (ci: number) => ((tbl.t[0][ci] as DraftBlock[]).filter((b) => typeof b === 'object' && 'p' in b && b.k && !b.k.includes('+')) as Para[]);
+  const own = col(Number(m[2])), other = col(1 - Number(m[2]));
+  const at = own.findIndex((b) => b.k === `${m[1]}.${m[2]}.${m[3]}`);
+  if (at < 0 || !own[at].p.trim()) return null;
+  let a = at;
+  while (a >= 0 && !CLAUSE_NO.test(own[a].p)) a--;
+  let steps = own.slice(a + 1, at + 1).filter((b) => b.p.trim()).length;
+  let j = a < 0 ? -1 : other.findIndex((b) => CLAUSE_NO.exec(b.p)?.[1] === CLAUSE_NO.exec(own[a].p)![1]);
+  if (a >= 0 && j < 0) return null;
+  while (steps > 0) {
+    j++;
+    if (j >= other.length || CLAUSE_NO.test(other[j].p)) return null;  // ran into the next clause: the columns differ here
+    if (other[j].p.trim()) steps--;
+  }
+  return other[j].k + (m[4] ?? '');
+}
+
+/** The autotranslated paths (`${draftKey}:auto`, shown «автоперевод» in the clause editor). */
+export const autoPaths = (e: CxEdits, key: DraftKey): string[] => (Array.isArray(e[`${key}:auto`]) ? e[`${key}:auto`] as string[] : []);
+export function markAuto(e: CxEdits, key: DraftKey, paths: string[], on: boolean): CxEdits {
+  const s = new Set(autoPaths(e, key));
+  paths.forEach((p) => (on ? s.add(p) : s.delete(p)));
+  const n = { ...e };
+  if (s.size) n[`${key}:auto`] = [...s]; else delete n[`${key}:auto`];
+  return n;
+}
+
 /** The paragraph's language in the document: the bilingual table's columns are Georgian | Russian / English. */
 export function clauseLang(doc: ContractDoc, k: string): CxLang {
   const col = /^\d+\.(\d)\./.exec(k)?.[1];

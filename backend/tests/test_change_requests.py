@@ -31,54 +31,56 @@ def test_agent_edits_freely_before_verification(db, client, sent):
     assert r["address"] == "Ваке, 5" and r["verified_at"] is None
 
 
-def test_after_verification_locked_fields_become_a_request_others_apply(db, client, sent):
+def test_after_verification_the_own_agent_edits_at_once_and_the_operator_hears(db, client, sent):
+    """Stanislav 11-23: the object's own agent has the operator's buttons on it — no «Запрос оператору»."""
     georgiy, nino, pid = _verified(db, client, sent)
     pub = client.post(f"/api/properties/{pid}/publish", headers=auth(nino)).json()
-    assert pub["verified_at"] and "owner_phone" in client.get(f"/api/properties/{pid}", headers=auth(georgiy)).json()["locked_fields"]
-    assert client.get(f"/api/properties/{pid}", headers=auth(nino)).json()["locked_fields"] == []  # staff edit directly
-
-    body = {"owner_phone": "+995 577 00 00 00", "price": 850, "description": "Свежий ремонт",
-            "post_fields": {"amenities": ["WiFi"], "deposit": 500}, "reason": "собственник сменил номер"}
+    assert pub["verified_at"] and client.get(f"/api/properties/{pid}", headers=auth(georgiy)).json()["locked_fields"] == []
+    body = {"owner_phone": "+995 577 00 00 00", "price": 900, "description": "Свежий ремонт",
+            "post_fields": {"amenities": ["WiFi"], "deposit": 500}}
     r = client.patch(f"/api/properties/{pid}", json=body, headers=auth(georgiy)).json()
-    # price unchanged (850) → not in the request; description / amenities applied; phone and deposit wait for the operator
-    assert r["description"] == "Свежий ремонт" and r["post_fields"] == {"amenities": ["WiFi"]}
-    assert r["owner"]["phone"] == "+995599112233"
-    cr = r["change_request"]
-    assert cr["kind"] == "edit" and cr["status"] == "pending" and cr["reason"] == "собственник сменил номер"
-    assert {c["field"]: (c["old"], c["new"]) for c in cr["changes"]} == {
-        "owner_phone": ("+995599112233", "+995577000000"), "deposit": (None, 500)}
-    assert [x["id"] for x in client.get(f"/api/properties/{pid}", headers=auth(georgiy)).json()["change_requests"]] == [cr["id"]]
-    assert sent.of("change_request_new")
+    assert r["owner"]["phone"] == "+995577000000"  # not in the post: at once
+    heads = [a for a in sent.of("prop_event") if "Агент изменил" in a[1]]
+    assert len(heads) == 1 and "owner_phone" in heads[0][5]
+    # David 11-24: what the live post shows goes to the operator («Редактирование = новый пост»)
+    assert r["change_request"] and {c["field"] for c in r["change_request"]["changes"]} >= {"price", "description", "deposit", "pf:amenities"}
 
-    # the queue «Запросы» is staff only: agents can't load it (their own requests are on the object card) nor decide
-    assert [x["id"] for x in client.get("/api/change-requests", headers=auth(nino)).json()["items"]] == [cr["id"]]
+
+def _request(db, georgiy, pid, changes, reason=None):
+    """A pending «Запрос оператору» as made before 11-23 (the queue still decides old ones and transfer requests)."""
+    from app.services import change_requests
+    cr = change_requests.create(db, "property", pid, "edit", changes, georgiy, reason)
+    db.commit()
+    return cr.id
+
+
+def test_an_old_request_is_approved_by_the_operator(db, client, sent):
+    georgiy, nino, pid = _verified(db, client, sent)
+    client.post(f"/api/properties/{pid}/publish", headers=auth(nino))
+    cid = _request(db, georgiy, pid, {"owner_phone": {"old": "+995599112233", "new": "+995577000000"}})
+    assert [x["id"] for x in client.get("/api/change-requests", headers=auth(nino)).json()["items"]] == [cid]
     assert client.get("/api/change-requests", headers=auth(georgiy)).status_code == 403
-    assert client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": True}, headers=auth(georgiy)).status_code == 403
-
-    d = client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": True}, headers=auth(nino)).json()
+    assert client.post(f"/api/change-requests/{cid}/decide", json={"approve": True}, headers=auth(georgiy)).status_code == 403
+    d = client.post(f"/api/change-requests/{cid}/decide", json={"approve": True}, headers=auth(nino)).json()
     assert d["status"] == "approved" and d["decided_by"]["id"] == nino.id
     db.expire_all()
-    p = db.get(Property, pid)
-    assert db.get(Owner, p.owner_id).phone == "+995577000000" and p.post_fields == {"amenities": ["WiFi"], "deposit": 500}
-    acts = [e.action for e in db.query(Event).filter_by(entity="property", entity_id=str(pid)).order_by(Event.id)]
-    assert acts[-4:] == ["change_requested", "owner_contact", "updated", "change_request_approved"]
-    assert sent.of("change_request_decided")
-    assert client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": True}, headers=auth(nino)).json()["code"] == "bad_status"
+    assert db.get(Owner, db.get(Property, pid).owner_id).phone == "+995577000000"
+    assert client.post(f"/api/change-requests/{cid}/decide", json={"approve": True}, headers=auth(nino)).json()["code"] == "bad_status"
 
 
 def test_reject_needs_comment_and_changes_nothing(db, client, sent):
     georgiy, nino, pid = _verified(db, client, sent)
     client.post(f"/api/properties/{pid}/publish", headers=auth(nino))
-    cr = client.patch(f"/api/properties/{pid}", json={"address": "Другой адрес"}, headers=auth(georgiy)).json()["change_request"]
-    assert client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": False}, headers=auth(nino)).json()["code"] == "comment_required"
-    d = client.post(f"/api/change-requests/{cr['id']}/decide", json={"approve": False, "comment": "адрес верный"}, headers=auth(nino)).json()
+    cid = _request(db, georgiy, pid, {"address": {"old": "ул. Палиашвили 10", "new": "Другой адрес"}})
+    assert client.post(f"/api/change-requests/{cid}/decide", json={"approve": False}, headers=auth(nino)).json()["code"] == "comment_required"
+    d = client.post(f"/api/change-requests/{cid}/decide", json={"approve": False, "comment": "адрес верный"}, headers=auth(nino)).json()
     assert d["status"] == "rejected" and d["decision_comment"] == "адрес верный"
     db.expire_all()
     assert db.get(Property, pid).address == "ул. Палиашвили 10"
     assert db.query(Event).filter_by(entity_id=str(pid), action="change_request_rejected").count() == 1
 
 
-def test_archive_reason_validation_and_agent_request_after_verification(db, client, sent):
+def test_archive_reason_validation_and_the_own_agent_archives_at_once(db, client, sent):
     georgiy, nino, pid = _verified(db, client, sent)
     other_pid = client.post("/api/properties", json={"listing_id": make_listing(db, "ss6002").id, "force": True}, headers=auth(georgiy)).json()["id"]
     arch = lambda uid, b: client.post(f"/api/properties/{uid}/archive", json=b, headers=auth(nino)).json()  # noqa: E731
@@ -91,11 +93,9 @@ def test_archive_reason_validation_and_agent_request_after_verification(db, clie
 
     client.post(f"/api/properties/{pid}/publish", headers=auth(nino))
     r = client.post(f"/api/properties/{pid}/archive", json={"reason": "not_actual"}, headers=auth(georgiy)).json()
-    assert r["status"] == "published" and r["change_request"]["kind"] == "archive"
-    client.post(f"/api/change-requests/{r['change_request']['id']}/decide", json={"approve": True}, headers=auth(nino))
-    db.expire_all()
-    p = db.get(Property, pid)
-    assert (p.status, p.archive_reason) == ("archived", "not_actual")
+    assert (r["status"], r["archive_reason"], r["change_request"]) == ("archived", "not_actual", None)
+    levan = make_user(db, "agent", "Леван")  # someone else's object: as before
+    assert client.post(f"/api/properties/{pid}/resume", headers=auth(levan)).status_code == 403
 
 
 def test_existing_flows_set_reasons_and_transfer_request(db, client, sent):

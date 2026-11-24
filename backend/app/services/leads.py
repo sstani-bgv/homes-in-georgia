@@ -1,6 +1,7 @@
 """Funnel 2: client like → operator → agent → slots → viewing → outcome → deal (docs/ARCHITECTURE.md §4.3, §5)."""
 import logging
 from datetime import datetime, timedelta
+from html import escape
 
 from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -10,7 +11,7 @@ from app.config import settings as env
 from app.models import (FIELD_SQL, ChannelPost, Client, Event, Lead, LeadEvent, LeadSlot, Listing, Owner, Property,
                         Reaction, User, at_least, is_field)
 from app.services import catalog, jobs, settings
-from app.services.common import aware, get_or_404, jload, log_event, now, now_text
+from app.services.common import aware, get_or_404, jload, log_event, notify_later, now, now_text
 from app.services.dedup import extract_phones, owner_phones
 from app.services.errors import DomainError, forbidden
 from app.telegram import notify, texts
@@ -25,6 +26,10 @@ DEAL_STAGES = CONTRACT_FROM + ("contract", "deal_pending")  # attach_deal moves 
 BOARD_COLUMNS = ACTIVE + ("rented", "refused")
 OUTCOMES = {"client": ("rented", "refused", "thinking"), "agent": ("rented", "refused", "thinking", "reschedule", "gone")}
 REFUSAL_REASONS = ("price", "location", "condition", "other")
+
+
+OUTCOME_HEAD = {"rented": "✅ <b>Сдаём</b>", "refused": "❌ <b>Не подошло</b>", "thinking": "🤔 <b>Думает</b>"}
+REASON_RU = {"price": "Причина: цена", "location": "Причина: район", "condition": "Причина: состояние", "other": "Причина: другое"}
 
 
 def _notify(name: str, *args):
@@ -368,6 +373,9 @@ def assign_agent(db: Session, lead_id: int, agent_id: int, actor: User | None) -
     if took:
         _notify("lead_taken_group", lead, actor)
     _notify("lead_assigned_agent", lead)
+    if prev and prev != agent.id:
+        _notify("lead_event", lead, f"🔀 <b>Заявку передали агенту {escape(agent.name or '')}</b>",
+                actor.id if actor else None, [prev], False)
     return lead
 
 
@@ -450,6 +458,7 @@ def cancel(db: Session, lead_id: int, actor: User, reason: str | None = None) ->
         jobs.cancel(db, k, lead.id)
     _event(db, lead, "cancelled", actor, note=reason)
     db.commit()
+    _notify("lead_event", lead, "🚫 <b>Заявка отменена</b>", actor.id, None, False, reason)
     return lead
 
 
@@ -575,6 +584,9 @@ def set_outcome(db: Session, lead_id: int, by: str, outcome: str, reason: str | 
     db.commit()
     if ask_reason:
         _notify("refusal_reason_ask", lead)
+    # 11-23 inventory G: the client's answer → the agent and the operator; the agent's → the operator
+    _notify("lead_event", lead, f"{OUTCOME_HEAD[outcome]} ({'клиент' if by == 'client' else 'агент'})",
+            actor.id if actor else None, None, True, REASON_RU.get(reason, reason))
     return lead
 
 

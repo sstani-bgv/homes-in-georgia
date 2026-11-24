@@ -356,8 +356,8 @@ const ACTION_TEXT: Record<string, string> = tmap({
   media_added: 'Добавлены фото / видео', media_deleted: 'Файл удалён', media_reordered: 'Изменён порядок файлов', checklist: 'Чек-лист комнат', verified: 'Объект проверен оператором',
   from_deal: 'Создан из сделки', fast_track: 'Собственник согласен · объект показан клиентам',
   agent_bound: 'Собственник закреплён за агентом', agent_released: 'Собственник освобождён',
-  listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято',
-  duplicate_scan: 'Поиск дублей эксклюзива', exclusive_contract_waived: 'Договор без электронной подписи: подтвердил оператор',
+  listing_linked: 'Найдено объявление этого объекта', exclusive_conflict: 'Эксклюзив висит на другом сайте', ad_removed_checked: 'Проверено: объявление снято', ad_takedown_asked: 'Попросили снять объявление',
+  duplicate_scan: 'Поиск дублей', exclusive_contract_waived: 'Договор без электронной подписи: подтвердил оператор',
   exclusive_dups_clear: 'Эксклюзив подтверждён: дублей нет', exclusive_dups_waiting: 'Ожидается устранение дублей (24 ч)',
   exclusive_dups_review: 'Сомнительные совпадения — ручная проверка', exclusive_dups_operator: 'Дубли остались — решение оператора',
   exclusive_contract_uploaded: 'Загружен эксклюзивный договор', exclusive_contract_signed: 'Собственник подписал эксклюзивный договор',
@@ -366,7 +366,7 @@ const ACTION_TEXT: Record<string, string> = tmap({
   legacy_exclusive: 'Эксклюзив (старая база)', legacy_archived: 'В архив (старая база)',
   legacy_rented_by_owner: 'Собственник сдал сам (старая база)', legacy_rented_by_us: 'Сдали мы (старая база)',
 });
-const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked'];
+const AD_EVENTS = ['listing_linked', 'exclusive_conflict', 'ad_removed_checked', 'ad_takedown_asked'];
 function eventText(e: EventItem): string {
   const base = ACTION_TEXT[e.action] || e.action;
   const d = e.data || {};

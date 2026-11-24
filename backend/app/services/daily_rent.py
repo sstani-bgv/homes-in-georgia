@@ -24,14 +24,14 @@ ENTITY = {DrApartment: "dr_apartment", DrBooking: "dr_booking", DrExpense: "dr_e
 # what a form may write (status-like fields included); ids, photos, legacy_id, deleted_at only through the calls here
 FIELDS = {
     DrApartment: ("name", "address", "owner_name", "owner_contact", "owner_account", "platform_pct", "platforms", "status",
-                  "active", "rooms", "notes", "util_rates", "price_night", "currency", "description", "district"),
+                  "active", "rooms", "notes", "util_rates", "price_night", "currency", "description", "district", "report_lang"),
     DrBooking: ("apartment_id", "platform", "guest_name", "check_in", "check_out", "gross", "currency", "tax_pct",
                 "booking_fee", "platform_pct", "payment_status", "paid_out", "paid_out_at", "assigned_staff", "comment"),
     DrExpense: ("booking_id", "apartment_id", "category", "amount", "currency", "payer", "comment", "date", "created_by"),
     DrCleaning: ("apartment_id", "cleaner", "date", "started_at", "finished_at", "hours", "hourly_rate", "amount", "notes"),
     DrStaff: ("name", "role", "contact", "active"),
 }
-EXP_LABELS = {"cleaning": "Уборка", "telmico": "💧 Telmico", "gwp": "🔥 GWP", "energy": "⚡ Tbilisi Energy",
+EXP_LABELS = {"cleaning": "Уборка", "telmico": "⚡ Telmico", "gwp": "💧 GWP", "energy": "🔥 Tbilisi Energy",
               "internet": "🌐 Internet", "tbilisi_clean": "🗑 Tbilisi Clean", "supplies": "Расходники", "repair": "Ремонт",
               "other": "Прочее"}
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
@@ -227,86 +227,152 @@ def pay(db: Session, booking_ids: list[int] | None, apartment_id: int | None, pa
 
 # ---------------------------------------------------------------- reports (texts to copy / send to the owner)
 
-def _day(d: str | None) -> str:
+REPORT_LANGS = ("ru", "en", "ka")
+# the report's words in the owner's language (owners are Russian-, English- and Georgian-speaking). What people typed —
+# guest names, the address, comments — stays as typed.
+T = {
+    "ru": {"period": "Период", "guest": "Гость", "platform": "Платформа", "in": "Пришло", "tax": "Налог", "fee": "Booking fee",
+           "exp": "Расходы", "owner_pays": "Собственник", "we_pay": "Платформа", "net": "Чистая прибыль", "comp": "компенсация расходов",
+           "owner": "Владелец", "account": "Счёт", "city": "Tbilisi", "in_l": "пришло", "net_l": "чистая", "owner_l": "владельцу",
+           "paid": "✓ выплачено", "stays": "Проживаний", "nights_l": "ночей", "comps": "компенсации", "to_pay": "Ещё не выплачено",
+           "all": "За всё время",
+           "months": ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+           "months1": ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+           "exp_l": {"cleaning": "Уборка", "supplies": "Расходники", "repair": "Ремонт", "other": "Прочее"}},
+    "en": {"period": "Period", "guest": "Guest", "platform": "Platform", "in": "Received", "tax": "Tax", "fee": "Booking fee",
+           "exp": "Expenses", "owner_pays": "Owner", "we_pay": "Platform", "net": "Net profit", "comp": "expense compensation",
+           "owner": "Owner", "account": "Account", "city": "Tbilisi", "in_l": "received", "net_l": "net", "owner_l": "to owner",
+           "paid": "✓ paid out", "stays": "Stays", "nights_l": "nights", "comps": "compensations", "to_pay": "Not paid out yet",
+           "all": "All time",
+           "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+           "months1": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+           "exp_l": {"cleaning": "Cleaning", "supplies": "Supplies", "repair": "Repair", "other": "Other"}},
+    "ka": {"period": "პერიოდი", "guest": "სტუმარი", "platform": "პლატფორმა", "in": "შემოსავალი", "tax": "გადასახადი", "fee": "Booking fee",
+           "exp": "ხარჯები", "owner_pays": "მესაკუთრე", "we_pay": "პლატფორმა", "net": "წმინდა მოგება", "comp": "ხარჯების კომპენსაცია",
+           "owner": "მესაკუთრე", "account": "ანგარიში", "city": "თბილისი", "in_l": "შემოსავალი", "net_l": "წმინდა", "owner_l": "მესაკუთრეს",
+           "paid": "✓ გადახდილია", "stays": "ჯავშნები", "nights_l": "ღამე", "comps": "კომპენსაციები", "to_pay": "ჯერ არ არის გადახდილი",
+           "all": "მთელი პერიოდი",
+           "months": ["იანვარი", "თებერვალი", "მარტი", "აპრილი", "მაისი", "ივნისი", "ივლისი", "აგვისტო", "სექტემბერი", "ოქტომბერი", "ნოემბერი", "დეკემბერი"],
+           "months1": ["იანვარი", "თებერვალი", "მარტი", "აპრილი", "მაისი", "ივნისი", "ივლისი", "აგვისტო", "სექტემბერი", "ოქტომბერი", "ნოემბერი", "დეკემბერი"],
+           "exp_l": {"cleaning": "დასუფთავება", "supplies": "სახარჯი მასალები", "repair": "რემონტი", "other": "სხვა"}},
+}
+
+
+def _lang(lang: str | None) -> str:
+    return lang if lang in REPORT_LANGS else "ru"
+
+
+def _day(d: str | None, lang: str = "ru") -> str:
     if not d:
         return "—"
     x = date.fromisoformat(d[:10])
-    return f"{x.day:02d} {MONTHS[x.month - 1]}"
+    return f"{x.day:02d} {T[_lang(lang)]['months'][x.month - 1]}"
 
 
 def _short(d: str | None) -> str:
     return date.fromisoformat(d[:10]).strftime("%d.%m.%y") if d else "—"
 
 
-def nights_label(n: int) -> str:
+def nights_label(n: int, lang: str = "ru") -> str:
+    if lang == "en":
+        return "1 night" if n == 1 else f"{n} nights"
+    if lang == "ka":
+        return f"{n} ღამე"  # a Georgian noun after a number stays singular
     return "1 ночь" if n == 1 else f"{n} ночи" if 2 <= n <= 4 else f"{n} ночей"
 
 
-def money_str(cur: str, v: float) -> str:
-    s = f"{v:,.2f}".replace(",", " ").replace(".00", "").replace(".", ",")
+def money_str(cur: str, v: float, lang: str = "ru") -> str:
+    if lang == "en":
+        s = f"{v:,.2f}".replace(".00", "")
+    else:
+        s = f"{v:,.2f}".replace(",", " ").replace(".00", "").replace(".", ",")
     return ("₾" if cur == "GEL" else "$") + s
 
 
-def mix_str(m: dict) -> str:
-    return " + ".join(money_str(c, m[c]) for c in ("USD", "GEL") if m.get(c)) or "—"
+def mix_str(m: dict, lang: str = "ru") -> str:
+    return " + ".join(money_str(c, m[c], lang) for c in ("USD", "GEL") if m.get(c)) or "—"
 
 
-def booking_report(a: DrApartment | None, b: dict) -> str:
-    """ApartFlow's makeReport (ru): the stay's money for the owner."""
+def period_label(month_from: str | None, month_to: str | None, lang: str = "ru") -> str:
+    """«Октябрь 2026» / «October 2026» / «ოქტომბერი 2026», a range «… — …», or all time."""
+    t = T[_lang(lang)]
+    if not month_from and not month_to:
+        return t["all"]
+    one = lambda ym: f"{t['months1'][int(ym[5:7]) - 1]} {ym[:4]}"  # noqa: E731
+    a, b = month_from or month_to, month_to or month_from
+    return one(a) if a == b else f"{one(a)} — {one(b)}"
+
+
+def _exp_label(cat: str, lang: str) -> str:
+    return T[lang]["exp_l"].get(cat) or EXP_LABELS.get(cat, cat)  # the bills keep their company names
+
+
+def booking_report(a: DrApartment | None, b: dict, lang: str = "ru") -> str:
+    """ApartFlow's makeReport: the stay's money for the owner, in ru / en / ka."""
+    lang = _lang(lang)
+    t = T[lang]
     c = b["calc"]
-    S = lambda v: money_str(c["currency"], v)  # noqa: E731
+    S = lambda v: money_str(c["currency"], v, lang)  # noqa: E731
     lines = ["🏠 " + (a.name if a else "—")]
     if a and a.address:
-        lines.append("📍 " + a.address + ", Tbilisi")
-    lines += ["", f"📅 Период: {_day(b['check_in'])} — {_day(b['check_out'])} ({nights_label(b['nights'])})"]
+        lines.append(f"📍 {a.address}, {t['city']}")
+    lines += ["", f"📅 {t['period']}: {_day(b['check_in'], lang)} — {_day(b['check_out'], lang)} ({nights_label(b['nights'], lang)})"]
     if b["guest_name"]:
-        lines.append("👤 Гость: " + b["guest_name"])
-    lines += ["📱 Платформа: " + b["platform"], "", "💰 Пришло: " + S(c["gross"])]
+        lines.append(f"👤 {t['guest']}: " + b["guest_name"])
+    lines += [f"📱 {t['platform']}: " + b["platform"], "", f"💰 {t['in']}: " + S(c["gross"])]
     if c["tax"] > 0:
-        lines.append(f"📉 Налог ({c['tax_pct']:g}%): -" + S(c["tax"]))
+        lines.append(f"📉 {t['tax']} ({c['tax_pct']:g}%): -" + S(c["tax"]))
     if c["booking_fee"] > 0:
-        lines.append("📉 Booking fee: -" + S(c["booking_fee"]))
+        lines.append(f"📉 {t['fee']}: -" + S(c["booking_fee"]))
     if c["total_expenses"] > 0:
-        lines.append("🔧 Расходы: -" + S(c["total_expenses"]))
+        lines.append(f"🔧 {t['exp']}: -" + S(c["total_expenses"]))
     for e in c["expenses"]:
-        who = " [Собственник]" if e["payer"] == "owner" else " [Платформа]"
-        lines.append(f"   • {EXP_LABELS.get(e['category'], e['category'])}: {money_str(e['currency'], e['amount'])}{who}"
+        who = f" [{t['owner_pays']}]" if e["payer"] == "owner" else f" [{t['we_pay']}]"
+        lines.append(f"   • {_exp_label(e['category'], lang)}: {money_str(e['currency'], e['amount'], lang)}{who}"
                      + (f" ({e['comment']})" if e["comment"] else ""))
-    lines += ["", "✅ Чистая прибыль: " + S(c["net"]), "",
-              f"👤 Платформа ({c['platform_pct']:g}%):", f"   {S(c['net'])} × {c['platform_pct']:g}% = {S(c['platform_base'])}"]
+    lines += ["", f"✅ {t['net']}: " + S(c["net"]), "",
+              f"👤 {t['we_pay']} ({c['platform_pct']:g}%):", f"   {S(c['net'])} × {c['platform_pct']:g}% = {S(c['platform_base'])}"]
     if c["exp_platform"] > 0:
-        lines.append("   + компенсация расходов (Платформа): " + S(c["exp_platform"]))
+        lines.append(f"   + {t['comp']} ({t['we_pay']}): " + S(c["exp_platform"]))
     if c["booking_fee"] > 0:
-        lines.append("   + Booking fee: " + S(c["booking_fee"]))
-    lines += ["   = " + S(c["platform"]), "", f"🏦 {(a and a.owner_name) or 'Владелец'} ({c['owner_pct']:g}%):",
+        lines.append(f"   + {t['fee']}: " + S(c["booking_fee"]))
+    lines += ["   = " + S(c["platform"]), "", f"🏦 {(a and a.owner_name) or t['owner']} ({c['owner_pct']:g}%):",
               f"   {S(c['net'])} × {c['owner_pct']:g}% = {S(c['owner_base'])}"]
     if c["exp_owner"] > 0:
-        lines.append("   + компенсация расходов (Собственник): " + S(c["exp_owner"]))
+        lines.append(f"   + {t['comp']} ({t['owner_pays']}): " + S(c["exp_owner"]))
     lines.append("   = " + S(c["owner"]))
     if a and a.owner_account:
-        lines.append("\n🏦 Счёт: " + a.owner_account)
+        lines.append(f"\n🏦 {t['account']}: " + a.owner_account)
     if b["comment"]:
         lines.append("\n💬 " + b["comment"])
     return "\n".join(lines)
 
 
-def period_report(a: DrApartment, rows: list[dict], label: str) -> str:
-    """ApartFlow's periodReport: every stay of the period and the owner's total."""
-    lines = ["🏠 " + a.name, "📅 Период: " + label, ""]
+def period_report(a: DrApartment, rows: list[dict], label: str, lang: str = "ru") -> str:
+    """ApartFlow's periodReport: every stay of the period and the owner's total, in ru / en / ka."""
+    lang = _lang(lang)
+    t = T[lang]
+    M = lambda cur, v: money_str(cur, v, lang)  # noqa: E731
+    lines = ["🏠 " + a.name, f"📅 {t['period']}: " + label, ""]
     for b in sorted(rows, key=lambda x: x["check_in"] or ""):
         c = b["calc"]
-        lines.append(f"• {_short(b['check_in'])} — {_short(b['check_out'])} ({nights_label(b['nights'])})"
+        lines.append(f"• {_short(b['check_in'])} — {_short(b['check_out'])} ({nights_label(b['nights'], lang)})"
                      + (", " + b["guest_name"] if b["guest_name"] else "") + ", " + b["platform"])
-        lines.append(f"   пришло {money_str(c['currency'], c['gross'])} · чистая {money_str(c['currency'], c['net'])} · "
-                     f"владельцу {money_str(c['currency'], c['owner'])}" + (" ✓ выплачено" if b["paid_out"] else ""))
+        lines.append(f"   {t['in_l']} {M(c['currency'], c['gross'])} · {t['net_l']} {M(c['currency'], c['net'])} · "
+                     f"{t['owner_l']} {M(c['currency'], c['owner'])}" + (f" {t['paid']}" if b["paid_out"] else ""))
     e = econ(rows)
-    lines += ["", f"Проживаний: {e['stays']} · ночей: {e['nights']}", "💰 Пришло: " + mix_str(e["gross"]),
-              f"🏦 {a.owner_name or 'Владелец'} ({100 - float(a.platform_pct):g}% + компенсации): " + mix_str(e["owner"])]
+    lines += ["", f"{t['stays']}: {e['stays']} · {t['nights_l']}: {e['nights']}", f"💰 {t['in']}: " + mix_str(e["gross"], lang),
+              f"🏦 {a.owner_name or t['owner']} ({100 - float(a.platform_pct):g}% + {t['comps']}): " + mix_str(e["owner"], lang)]
     if e["to_pay"]:
-        lines.append("⏳ Ещё не выплачено: " + mix_str(e["to_pay"]))
+        lines.append(f"⏳ {t['to_pay']}: " + mix_str(e["to_pay"], lang))
     if a.owner_account:
-        lines += ["", "🏦 Счёт: " + a.owner_account]
+        lines += ["", f"🏦 {t['account']}: " + a.owner_account]
     return "\n".join(lines)
+
+
+def reports_all(fn, *args) -> dict:
+    """{ru, en, ka} of one report."""
+    return {lang: fn(*args, lang) for lang in REPORT_LANGS}
 
 
 # ---------------------------------------------------------------- writes (every one audited: events dr_<table>)

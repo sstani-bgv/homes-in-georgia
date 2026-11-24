@@ -13,9 +13,11 @@ import { C as COLORS, Columns, MonthPicker, MONTHS } from '../../pages/StatsChar
 import { ApartmentPage, NewApartmentPage } from './Apartment';
 import { BookingModal, useDrInvalidate } from './Booking';
 import { ChessPage } from './Chess';
+import { TodayPage } from './Today';
 import { cm, dm, dr, HOUR_RATE, mix, periodOf, STATUS_LABEL, usd, ymNow, type DrCleaning, type PerKind, type Summary } from './api';
 
 const NAV = [
+  { to: '/daily-rent/today', label: 'Сегодня' },
   { to: '/daily-rent/summary', label: 'Сводка' }, { to: '/daily-rent/apartments', label: 'Квартиры' },
   { to: '/daily-rent/calendar', label: 'Шахматка' }, { to: '/daily-rent/cleaning', label: 'Уборки и персонал' },
   { to: '/daily-rent/journal', label: 'Журнал' },
@@ -26,7 +28,8 @@ export function DailyRentPage() {
     <div className="col gap-lg">
       <SubNav items={NAV} />
       <Routes>
-        <Route index element={<Navigate to="summary" replace />} />
+        <Route index element={<Navigate to="today" replace />} />
+        <Route path="today" element={<TodayPage />} />
         <Route path="summary" element={<SummaryPage />} />
         <Route path="apartments" element={<ApartmentsPage />} />
         <Route path="apartments/new" element={<NewApartmentPage />} />
@@ -34,7 +37,7 @@ export function DailyRentPage() {
         <Route path="calendar" element={<ChessPage />} />
         <Route path="cleaning" element={<CleaningPage />} />
         <Route path="journal" element={<JournalPage />} />
-        <Route path="*" element={<Navigate to="summary" replace />} />
+        <Route path="*" element={<Navigate to="today" replace />} />
       </Routes>
     </div>
   );

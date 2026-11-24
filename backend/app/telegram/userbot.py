@@ -234,6 +234,38 @@ def delete(chat, ids, album=False):
         return None
 
 
+def send_media(chat, key, caption=None):
+    """A stored file (media key) into a chat as a document through the operator account — for videos over the Bot API's
+    50 MB (Stanislav 11-24: «давай аккаунт отправляет»; a user account sends up to 2 GB). The account must be a member
+    of the chat. -> the message id or None."""
+    url = conf("USERBOT_URL").strip().rstrip("/")
+    if not url:
+        return None
+    try:
+        import httpx
+        r = httpx.post(f"{url}/media", json={"chat": str(chat), "key": key, "caption": caption},
+                       headers={"X-Userbot-Token": conf("SECRET_KEY")}, timeout=900)
+        body = r.json()
+        return body.get("message_id") if r.status_code == 200 and body.get("ok") else None
+    except Exception as e:  # noqa: BLE001 — the caller falls back to a note
+        log.warning("userbot media to %s failed: %r", chat, e)
+        return None
+
+
+async def send_stored(client, chat, key, caption=None):
+    """Telethon side of send_media(): fetch the key (s3 or the volume) into a temp dir and send it as a document."""
+    import tempfile
+
+    from app import storage
+    with tempfile.TemporaryDirectory() as tmp:
+        path = await asyncio.to_thread(storage.fetch, key, tmp)
+        if not path:
+            raise FileNotFoundError(key)
+        ent = await client.get_input_entity(int(chat) if chat.lstrip("-").isdigit() else chat.lstrip("@"))
+        m = await client.send_file(ent, path, caption=caption or None, force_document=True)
+        return m.id
+
+
 def send_to_client(cl, text, options=None, choice=None, inline=None):
     """Send through the userbot (USERBOT_URL) -> {"message_id": …} or None (not configured / failed). inline: the bot's
     inline query to send as the message (options are then the numbered fallback)."""
@@ -607,7 +639,7 @@ def serve_http(client, loop, port):
 
         def do_POST(self):
             reply = self.reply
-            paths = ("/login", "/phone", "/code", "/password", "/logout", "/channel", "/exists") + (() if reader() else ("/send", "/delete", "/photo"))
+            paths = ("/login", "/phone", "/code", "/password", "/logout", "/channel", "/exists") + (() if reader() else ("/send", "/delete", "/photo", "/media"))
             if self.path not in paths or not self.allowed():
                 return reply(403, {"ok": False})
             p = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
@@ -653,6 +685,13 @@ def serve_http(client, loop, port):
                     return reply(200, {"ok": True, "ids": [m.id for m in ms if m]})
                 except Exception as e:  # noqa: BLE001
                     log.warning("userbot /exists failed: %r", e)
+                    return reply(502, {"ok": False, "error": repr(e)})
+            if self.path == "/media":  # {chat, key, caption?}: a big video into the originals chat (send_media)
+                try:
+                    mid = asyncio.run_coroutine_threadsafe(send_stored(c, p["chat"], p["key"], p.get("caption")), loop).result(880)
+                    return reply(200, {"ok": True, "message_id": mid})
+                except Exception as e:  # noqa: BLE001
+                    log.warning("userbot /media failed: %r", e)
                     return reply(502, {"ok": False, "error": repr(e)})
             if self.path == "/delete":
                 try:

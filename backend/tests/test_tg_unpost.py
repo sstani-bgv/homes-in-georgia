@@ -20,6 +20,7 @@ def _posts(monkeypatch, refused=()):
         return chat not in refused
     monkeypatch.setattr(notify, "publish_post", publish_post)
     monkeypatch.setattr(notify, "delete_post", delete_post)
+    monkeypatch.setattr(notify, "rented_post", lambda pid, text, chat=None: deleted.append(("rented", pid, text)) or (900, "https://t.me/rent_tbilisi_ge/900"))
     return deleted
 
 
@@ -51,7 +52,7 @@ def test_rented_deletes_every_post_in_worker_and_failures_show(db, client, monke
     assert deleted == []  # the status change does not wait on Telegram
     assert db.query(Job).filter_by(kind="tg_unpost", ref=str(pid)).count() == 1
     worker.tick()
-    assert sorted(deleted) == [("-100777", [5], True), ("@rent_tbilisi_ge", [109, 110, 111], False)]
+    assert sorted(x for x in deleted if x[0] != "rented") == [("-100777", [5], True), ("@rent_tbilisi_ge", [109, 110, 111], False)]
     db.expire_all()
     pubs = {x.url: x for x in db.query(PropertyPublication).filter_by(property_id=pid)}
     assert pubs["https://t.me/rent_tbilisi_ge/110"].status == "removed"

@@ -86,14 +86,17 @@ def test_contract_signed_or_merged_in_schedules_the_search(db, client):
     ag = make_user(db, "agent")
     p = _ready(db, ag, "ss1", address="Пекини 1")
     p.is_exclusive = True
+    # David 11-23: the photos of an object in work queue its search (any object); cleared to see the contract's own
+    assert jobs.pending(db, "dup_scan", p.id)[0].payload == {"trigger": "media"}
+    jobs.cancel(db, "dup_scan", p.id)
     db.commit()
-    assert not jobs.pending(db, "dup_scan", p.id)
     properties.upload_contract(db, p.id, "c.pdf", PDF, ag)
     assert jobs.pending(db, "dup_scan", p.id)[0].payload == {"trigger": "contract"}
 
     q = _ready(db, ag, "ss2", address="Пекини 2")
     dup = _ready(db, ag, "ss3", address="Пекини 3")
     dup.is_exclusive = True
+    jobs.cancel(db, "dup_scan", q.id)
     db.commit()
     op = make_user(db, "operator")
     properties.archive(db, dup.id, op, "duplicate", None, q.id)

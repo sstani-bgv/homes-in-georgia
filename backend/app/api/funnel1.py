@@ -99,8 +99,8 @@ def listing_similar(listing_id: str, db: Session = Depends(get_db, scope="functi
 
 @router.get("/properties/{pid}/similar")
 def property_similar(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    P.get_visible(db, pid, user)
-    return {"items": similar.find(db, similar.key("p", pid), user)}
+    p = P.get_visible(db, pid, user)
+    return {"items": P.similar_with_sites(db, p, similar.find(db, similar.key("p", pid), user))}
 
 
 @router.post("/similar/decide")
@@ -355,9 +355,26 @@ def properties_thinking(pid: int, body: ThinkingIn, db: Session = Depends(get_db
     return P.out(db, P.owner_thinking(db, pid, user, body.until, body.comment), user, full=True)
 
 
+class ResumeIn(BaseModel):
+    republish: bool = False  # a rented object: «Опубликовать снова» (staff) instead of «Вернуть в работу»
+
+
 @router.post("/properties/{pid}/resume")
-def properties_resume(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    return P.out(db, P.resume(db, pid, user), user, full=True)
+def properties_resume(pid: int, body: ResumeIn | None = None, db: Session = Depends(get_db, scope="function"),
+                      user: User = Depends(current_user)):
+    return P.out(db, P.resume(db, pid, user, (body or ResumeIn()).republish), user, full=True)
+
+
+@router.post("/properties/{pid}/unpost")
+def properties_unpost(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Снять только из канала»: the posts leave the channel, the site and the status stay (properties.unpost_channel)."""
+    return P.out(db, P.unpost_channel(db, pid, user), user, full=True)
+
+
+@router.post("/properties/{pid}/unpublish")
+def properties_unpublish(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Снять с публикации»: off the site and the channel (properties.unpublish)."""
+    return P.out(db, P.unpublish(db, pid, user), user, full=True)
 
 
 @router.post("/properties/{pid}/rented-self")
@@ -523,13 +540,13 @@ async def public_exclusive_sign(token: str, request: Request, file: UploadFile =
 
 @router.post("/properties/{pid}/myhome-copies")
 def properties_myhome_copies(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    """«Найти копии на myhome» (David 11-22): the worker searches myhome within a minute; «Похожие» then shows them."""
+    """«Найти копии» (David 11-22): the worker searches myhome / ss.ge / korter (by the link's photos too) within a
+    minute, then the duplicates; «Где ещё выложен» shows the copies."""
     from app.services import jobs
     from app.services.common import now
     p = P.get_visible(db, pid, user)
-    if not jobs.pending(db, "myhome_copies", p.id):
-        jobs.schedule(db, "myhome_copies", p.id, now(), replace=False)
-        db.commit()
+    jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": "manual"})  # replaces a pending base-only scan
+    db.commit()
     return {"ok": True}
 
 
@@ -545,7 +562,7 @@ def properties_compare_link(pid: int, body: CompareLink, db: Session = Depends(g
     from app.services.errors import DomainError
     p = P.get_visible(db, pid, user)
     try:
-        return myhome_copies.compare_link(db, p.id, body.url)
+        return myhome_copies.compare_link(db, p.id, body.url, user)
     except ValueError as e:
         raise DomainError("bad_link", str(e)) from e
     except Exception as e:  # noqa: BLE001 — the site or Apify did not answer
@@ -643,8 +660,8 @@ class PublishIn(BaseModel):
 
 @router.post("/properties/{pid}/publish")
 def properties_publish(pid: int, body: PublishIn | None = None, db: Session = Depends(get_db, scope="function"),
-                       user: User = Depends(require_level("operator"))):
-    b = body or PublishIn()
+                       user: User = Depends(current_user)):
+    b = body or PublishIn()  # an agent (his own published object, P.publish checks) reposts from the fields: no own text
     try:
         return P.out(db, P.publish(db, pid, user, b.text, b.media_ids, b.channel, b.comment, b.tg, b.site), user, full=True)
     finally:
@@ -652,7 +669,7 @@ def properties_publish(pid: int, body: PublishIn | None = None, db: Session = De
 
 
 @router.get("/properties/{pid}/publish/progress")
-def properties_publish_progress(pid: int, user: User = Depends(require_level("operator"))):
+def properties_publish_progress(pid: int, user: User = Depends(current_user)):
     """What the publish of this object is doing now ({step, n, of, chat}; {} when none runs): the card polls it."""
     return progress.get(f"publish:{pid}")
 
@@ -663,7 +680,7 @@ class SiteIn(BaseModel):
 
 @router.post("/properties/{pid}/site")
 def properties_site(pid: int, body: SiteIn, db: Session = Depends(get_db, scope="function"),
-                    user: User = Depends(require_level("operator"))):
+                    user: User = Depends(current_user)):
     return P.out(db, P.set_site(db, pid, user, body.on), user, full=True)
 
 
@@ -823,3 +840,22 @@ def properties_transfer_request(pid: int, body: TransferIn, db: Session = Depend
     """An agent's «Запрос оператору» to move the object's owner to another agent (staff: transferred right away)."""
     cr = CR.request_transfer(db, pid, body.agent_id, user, body.reason)
     return {"change_request": CR.outs(db, [cr])[0] if cr else None}
+
+
+class OwnerRequestIn(BaseModel):
+    phone: str
+    reason: str | None = None
+
+
+@router.post("/properties/{pid}/owner-request")
+def properties_owner_request(pid: int, body: OwnerRequestIn, db: Session = Depends(get_db, scope="function"),
+                             user: User = Depends(current_user)):
+    """«Запросить собственника» (David 11-24): the typed owner is another agent's — the operator moves him over."""
+    return {"change_request": CR.outs(db, [CR.request_owner(db, pid, body.phone, user, body.reason)])[0]}
+
+
+@router.post("/properties/{pid}/listings/{listing_id}/takedown")
+def properties_ad_takedown(pid: int, listing_id: str, db: Session = Depends(get_db, scope="function"),
+                           user: User = Depends(current_user)):
+    """«Попросить снять» on a copy in «Где ещё выложен»: the agent's task to have it taken down."""
+    return P.out(db, P.ad_takedown(db, pid, listing_id, user), user, full=True)

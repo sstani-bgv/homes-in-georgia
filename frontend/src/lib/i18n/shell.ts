@@ -79,6 +79,7 @@ export const D: Record<string, [ka: string, en: string]> = {
   'Неактуально': ['არააქტუალური', 'Not relevant'],
   'Дубль': ['დუბლი', 'Duplicate'],
   'На паузе': ['პაუზაზე', 'Paused'],
+  'Снят с публикации': ['გამოქვეყნებიდან მოხსნილია', 'Unpublished'],
   // change requests
   'Изменение полей': ['ველების შეცვლა', 'Edit fields'],
   'В архив': ['არქივში', 'To archive'],

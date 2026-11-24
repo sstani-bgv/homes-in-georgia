@@ -582,7 +582,7 @@ async def on_like(update: Update, ctx, cl, lid):
 
 async def on_post_start(update: Update, ctx, cl, pid: int):
     """/start p<object id>: «❤️ I like it» / «💬 Contact» under a channel rich post (Irakli 2026-11-09) -> the same lead
-    as ❤️ on a card in the bot (B1 card for operators, the operator's intro), then «передал агенту».
+    as ❤️ on a card in the bot (B1 card for operators), «передал агенту», and the operator's prepared greeting always.
     -> False when the object is no longer available (archived / rented): the caller shows similar ones."""
     from app.services import leads
     # the same listing id as a ❤️ on the object's card in the search (its catalog row): one lead per client and flat;
@@ -590,15 +590,14 @@ async def on_post_start(update: Update, ctx, cl, pid: int):
     lid = await th(_run, leads.object_listing_id, (pid,), {})
     if not lid:
         return False
-    async with lock_for(("like", cl["id"], lid)):
-        knew = await th(notify.knows_operator, cl["id"])
+    async with lock_for(("like", cl["id"], lid)):  # a double tap: one lead, one greeting
         lead, err = await svc(leads.create_from_like, cl["id"], lid, request_of(cl))
-    if err:
-        log.warning("post start %s/%s: %s", cl["id"], lid, err)
-        return False
-    await ctx.bot.send_message(update.effective_chat.id, core.t(cl["lang"], "lead_sent"))
-    if not knew:
-        await th(notify.operator_intro, lead)
+        if err:
+            log.warning("post start %s/%s: %s", cl["id"], lid, err)
+            return False
+        await ctx.bot.send_message(update.effective_chat.id, core.t(cl["lang"], "lead_sent"))
+        # Stanislav 11-23: the operator's account answers every client at once, known or not (deduped in operator_intro)
+        await th(notify.operator_intro, lead, True)
     return True
 
 

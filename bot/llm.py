@@ -100,7 +100,7 @@ def ask_openai(prompt, schema, images=(), timeout=300, transport=None, retries=4
 
 # purpose -> who calls it. One client search = 1 search_query (cached per message set) + search_pick, maybe search_near
 # and search_translate; avg $ per search = their sum / search_query calls (Расходы)
-PURPOSES = ("search_query", "search_near", "search_pick", "search_translate", "index", "index_competitor", "index_facts", "other")
+PURPOSES = ("search_query", "search_near", "search_pick", "search_translate", "index", "index_competitor", "index_facts", "contract_translate", "post_translate", "other")
 
 
 def _add(row, prompt_tokens, completion_tokens, cost):

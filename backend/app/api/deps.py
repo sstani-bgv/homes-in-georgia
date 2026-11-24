@@ -73,7 +73,24 @@ def current_user(request: Request, db: Session = Depends(get_db, scope="function
         path = request.url.path
         if (path not in DAILY_RENT_PATHS and not path.startswith(CARS_PREFIX)) or ".." in path:
             raise DomainError("forbidden", "the car operator sees only the cars")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not at_least(user, "operator"):
+        deal_lock(db, user, request.url.path)
     return user
+
+
+# The deal is overdue (services/contracts.overdue_for, David 11-23): the agent may read, but change only what enters
+# that deal — the deal form, the contract itself, his profile / logout.
+DEAL_LOCK_FREE = ("/api/auth/", "/api/deals", "/api/evaluations")
+
+
+def deal_lock(db: Session, user: User, path: str) -> None:
+    from app.services import contracts as C
+    if path.startswith(DEAL_LOCK_FREE) or ".." in path:
+        return
+    c = C.overdue_for(db, user)
+    if c and not path.startswith(f"/api/contracts/{c.id}/"):
+        raise DomainError(C.DEAL_OVERDUE, f"Сначала оформите сделку по договору #{c.id}" + (f" ({c.address})" if c.address else ""),
+                          423, {"contract": C.overdue_out(c)})
 
 
 def require_level(role: str):

@@ -20,7 +20,7 @@ import { OwnerLookup, parseRegistryText, useKnownObjects, type ExtractFields, ty
 import { CONTRACT_STAGES, LEAD_STATUS, todayStr } from '../lib/format';
 import { t, lx, LOCALE } from '../lib/i18n';
 import {
-  CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, buildContract, clauseEdited, clauseLang, cxFmt, cxOnem, editClause, langsFor, monthsBetween, requiredFields, reviewLabels,
+  CX_LANGS, CX_TYPES, DATE_FIELDS, EMPTY, addMonthsIso, autoPaths, buildContract, clauseEdited, clauseLang, markAuto, pairClause, cxFmt, cxOnem, editClause, langsFor, monthsBetween, requiredFields, reviewLabels,
   type ClauseOp, type ContractDoc, type CxEdits, type CxData, type CxLang, type CxType, type DraftBlock, type DraftCell, type DraftDoc, type DraftKey, ENABLED_TYPES } from '../features/contracts/templates';
 
 const STEPS = [t('Тип'), t('Язык'), t('Данные'), t('Проверка'), t('Документ')];
@@ -436,8 +436,46 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
     if (!doc || !clause) return;
     if ('text' in op && op.text === clauseText(doc.body, clause.k)) { setClause(null); return; }  // unchanged: the fields stay live
     touched.current = true;
-    setEdits((e) => editClause(e, doc.key, clause.k, op));
+    const { key } = doc, k = clause.k;
+    setEdits((e) => markAuto(editClause(e, key, k, op), key, [k], false));  // a manual edit: no longer «автоперевод»
     setClause(null);
+    void mirrorClause(doc, k, op);
+  }
+  /** David 11-23: the agent writes Russian; the other column of a bilingual contract follows by autotranslation (and an
+   *  English column gets English). The edit above is already kept; a failed translation only warns. */
+  async function mirrorClause(doc: ContractDoc, k: string, op: ClauseOp) {
+    const { key } = doc, pair = pairClause(doc, k);
+    const [base, added] = k.split('+');
+    const own = 'add' in op ? `${base}+${added === undefined ? 0 : Number(added) + 1}` : k;  // where the new text sits now
+    if (!/^\d+\.[01]\./.test(k)) return;  // not the bilingual table: one language, nothing to do
+    if (!pair) {
+      if (!('del' in op || 'reset' in op)) toast(t('Второй столбец не изменён: не нашёл в нём этот пункт, поправьте его вручную'), true);
+      return;
+    }
+    if ('del' in op || 'reset' in op) { setEdits((e) => markAuto(editClause(e, key, pair, op), key, [pair], false)); return; }
+    const text = 'add' in op ? op.add : op.text;
+    if (!text.trim()) return;
+    const ownLang = clauseLang(doc, k), pairLang = clauseLang(doc, pair);
+    const to = [...new Set([pairLang, ...(ownLang === 'RU' ? [] : [ownLang])])];  // the agent may type Russian in any column
+    try {
+      const tr = await api.contracts.translate(text, to);
+      if (!tr[pairLang]) throw new Error(t('пустой ответ'));
+      setEdits((e) => {
+        let n = e;
+        const list = n[`${key}:${pair.split('+')[0]}+`];
+        const pairAdded = pair.split('+')[1];
+        if ('add' in op) n = editClause(n, key, pair, { add: tr[pairLang] });
+        else if (pairAdded !== undefined && !(Array.isArray(list) && list.length > Number(pairAdded))) n = editClause(n, key, pair.split('+')[0], { add: tr[pairLang] });
+        else n = editClause(n, key, pair, { text: tr[pairLang] });
+        const pairNow = 'add' in op ? `${pair.split('+')[0]}+${pairAdded === undefined ? 0 : Number(pairAdded) + 1}` : pair;
+        const auto = [pairNow];
+        if (tr[ownLang] && tr[ownLang] !== text) { n = editClause(n, key, own, { text: tr[ownLang] }); auto.push(own); }
+        return markAuto(n, key, auto, true);
+      });
+      toast(t('Автоперевод: второй столбец обновлён, проверьте'));
+    } catch (e) {
+      toast(t('Автоперевод не удался, второй столбец не изменён: {err}', { err: errText(e) }), true);
+    }
   }
   // David has no Commercial GEO+ENG and only a Georgian sale draft: drop a language the chosen type doesn't have
   useEffect(() => { if (type && lang && !langsFor(type).includes(lang)) setLang(''); }, [type, lang]);
@@ -570,6 +608,7 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
       <div className="no-print">
         {!compact && (
           <PageHead label={t('Генератор договоров')} title={t('Договоры')} actions={<div className="row row-wrap gap-sm">
+            {linkProp > 0 && <Link className="btn btn-secondary" to={`/objects/${linkProp}`}><Home size={16} />{t('К объекту')}</Link>}
             <SignDocsLink />
             <Button variant="secondary" onClick={reset}><RotateCcw size={16} />{t('Новый договор')}</Button></div>} />
         )}
@@ -758,7 +797,8 @@ export function ContractWizard({ compact }: { compact?: boolean }) {
           <div className="contract-paper-wrap"><ContractDocument doc={doc} onClause={(k) => setClause({ k, text: clauseText(doc.body, k) ?? '' })} /></div>
           <Modal open={!!clause} onClose={() => setClause(null)} title={clause?.add ? t('Новый пункт') : t('Пункт договора')}>
             {clause && <div className="col gap-sm no-print">
-              <span className="faint" style={{ fontSize: 12 }}>{CX_LANGS[clauseLang(doc, clause.k)].title.split(' + ').pop()} · {t('**текст** между звёздочками печатается жирным')}</span>
+              <span className="faint" style={{ fontSize: 12 }}>{CX_LANGS[clauseLang(doc, clause.k)].title.split(' + ').pop()} · {t('**текст** между звёздочками печатается жирным')}{autoPaths(edits, doc.key).includes(clause.k) && <> · <b>{t('автоперевод')}</b></>}</span>
+              {/^\d+\.[01]\./.test(clause.k) && <span className="faint" style={{ fontSize: 12 }}>{t('Можно писать по-русски: второй столбец переведётся автоматически')}</span>}
               <Textarea rows={8} value={clause.text} autoFocus onChange={(e) => setClause({ ...clause, text: e.target.value })} />
               <div className="row row-wrap gap-sm">
                 <Button onClick={() => changeClause(clause.add ? { add: clause.text } : { text: clause.text })}><Save size={16} />{t('Сохранить')}</Button>

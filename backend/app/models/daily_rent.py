@@ -29,7 +29,8 @@ class _Row:
 class DrApartment(_Row, Base):
     __tablename__ = "dr_apartments"
     __table_args__ = (CheckConstraint(f"status IN {DR_STATUS}", name="dr_apartments_status_check"),
-                      CheckConstraint("platform_pct >= 0 AND platform_pct <= 100", name="dr_apartments_pct_check"))
+                      CheckConstraint("platform_pct >= 0 AND platform_pct <= 100", name="dr_apartments_pct_check"),
+                      CheckConstraint("report_lang IN ('ru', 'en', 'ka')", name="dr_apartments_report_lang_check"))
     name = Column(Text, nullable=False)
     address = Column(Text)
     owner_name = Column(Text)
@@ -48,6 +49,7 @@ class DrApartment(_Row, Base):
     currency = Column(Text, nullable=False, server_default="USD")
     description = Column(Text)
     district = Column(Text)
+    report_lang = Column(Text, nullable=False, server_default="ru")  # the owner's reports: ru | en | ka
 
 
 class DrBooking(_Row, Base):

@@ -1,9 +1,11 @@
 """Small helpers shared by services: clocks, history events, JSON-as-TEXT columns."""
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -11,6 +13,7 @@ from app.models import Event, User
 from app.services.errors import not_found
 
 TZ = ZoneInfo(settings.TZ)
+log = logging.getLogger(__name__)
 
 
 def now() -> datetime:
@@ -49,6 +52,27 @@ def log_event(db: Session, entity: str, entity_id, action: str, actor: User | No
                actor_label=label or (actor.name if actor else "system"), data=json.loads(jdump(data)), at=now())
     db.add(ev)
     return ev
+
+
+def notify_later(db: Session, name: str, *args) -> None:
+    """notify.<name>(*args) once this transaction commits, dropped on a rollback: no message about a change that
+    didn't land (owner_transferred went out before the commit, 11-23). Never raises."""
+    db.info.setdefault("notify_later", []).append((name, args))
+
+
+@event.listens_for(Session, "after_commit")
+def _notify_now(session: Session):
+    from app.telegram import notify
+    for name, args in session.info.pop("notify_later", []):
+        try:
+            getattr(notify, name)(*args)
+        except Exception:  # noqa: BLE001
+            log.exception("notify.%s failed", name)
+
+
+@event.listens_for(Session, "after_rollback")
+def _notify_drop(session: Session):
+    session.info.pop("notify_later", None)
 
 
 def get_or_404(db: Session, model, ident, what: str | None = None, lock: bool = False):

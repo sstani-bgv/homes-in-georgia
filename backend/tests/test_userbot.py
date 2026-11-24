@@ -245,6 +245,28 @@ def test_operator_intro_names_the_liked_object_without_links(db, monkeypatch):
     assert "http" not in sent[0] and "(и ещё 1)" in sent[0]
     assert notify.headline(notify.store.listing(a.id)) in sent[0]
 
+def test_contact_greets_a_known_client_too_once_per_tap_burst(db, monkeypatch):
+    """«💬 Contact» under a post (Stanislav 11-23): the operator's prepared answer goes to every client, also one with
+    earlier leads; tapping again within INTRO_AGAIN_MIN minutes sends nothing more."""
+    from app.models import Property
+    from app.telegram import client as tg
+    monkeypatch.undo()
+    monkeypatch.setattr(tg, "_client", lambda: FakeHttp())
+    cl, a = make_client(db, external_id=5550031), make_listing(db, "tg3001", obj=False)
+    db.add(Property(listing_id=a.id, status="published", address="x", post_url="https://t.me/rent_tbilisi_ge/31", post_message_id="31"))
+    db.commit()
+    b = make_listing(db, "tg3002")
+    leads.create_from_like(db, cl.id, b.id)  # known: an earlier lead
+    lead = leads.create_from_like(db, cl.id, a.id)
+    sent = []
+    monkeypatch.setattr(userbot, "send_to_client", lambda c, text, **kw: sent.append(text) or {"ok": True, "message_id": 1})
+    assert notify.operator_intro(lead) is None  # the ❤️ path: not the first lead
+    assert notify.operator_intro(lead, True) == "userbot" and notify.headline(notify.store.listing(a.id)) in sent[0]
+    assert "https://t.me/rent_tbilisi_ge/31" in sent[0]  # Irakli 11-24: the post's link
+    assert "ещё" not in sent[0]
+    assert notify.operator_intro(lead, True) is None and len(sent) == 1
+
+
 def test_paid_dm_blocks_the_userbot_send(db):
     """A client who takes DMs only for Stars: send() refuses (the caller falls back), no message goes out."""
     from telethon.tl import types
@@ -565,6 +587,10 @@ def test_phone_login_wrong_code_then_2fa(db):
         raise AssertionError(st)
     try:
         httpx.post(f"{url}/phone", headers=hdr, json={"phone": "+995 599 12-34-56"})
+        for _ in range(250):  # set through loop.call_soon_threadsafe: a beat later than the response (CI 11-23 flake)
+            if userbot.STATE["start"].is_set():
+                break
+            time.sleep(0.02)
         assert userbot.STATE["phone"] == "+995599123456" and userbot.STATE["start"].is_set()
         done = asyncio.run_coroutine_threadsafe(userbot.login(Fake()), loop)
         wait_for("code")

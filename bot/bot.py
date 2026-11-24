@@ -640,7 +640,7 @@ async def on_agent(update: Update, ctx):
 async def on_panel(update: Update, ctx):
     """/panel: staff open the Mini App (PUBLIC_URL/, the main site)."""
     u = update.effective_user
-    if not await asyncio.to_thread(core.agent, u.id, u.full_name, u.username):
+    if not (me := await asyncio.to_thread(core.agent, u.id, u.full_name, u.username)):
         await update.message.reply_text("Панель только для сотрудников: /agent <код> или попросите администратора добавить вас в CRM.")
     elif not panel_url():
         await update.message.reply_text("Панель недоступна: не задан PUBLIC_URL (https).")
@@ -652,7 +652,7 @@ async def on_panel(update: Update, ctx):
 async def on_staff_cmd(update: Update, ctx):
     """Old chat commands, kept working for compatibility; the same settings now live in the agents' Mini App."""
     u = update.effective_user
-    if not await asyncio.to_thread(core.agent, u.id, u.full_name, u.username):
+    if not (me := await asyncio.to_thread(core.agent, u.id, u.full_name, u.username)):
         await update.message.reply_text("Только для агентов: /agent <код> в личке бота")
         return
     cmd, chat = update.message.text.split()[0][1:].split("@")[0], update.effective_chat
@@ -664,6 +664,12 @@ async def on_staff_cmd(update: Update, ctx):
         db.set_setting("group_chat_id", chat.id)
         db.set_setting("lead_target", "group")
         await update.message.reply_text("✅ Лиды и проверка объявлений теперь приходят в эту группу.")
+    elif cmd == "originals_here":  # Irakli 11-23: photos without the watermark after each publication (properties.send_originals)
+        if chat.type == "private" or me["role"] not in ("operator", "admin", "superadmin"):
+            await update.message.reply_text("Отправьте эту команду в группе для оригиналов (оператор или админ).")
+            return
+        db.set_setting("originals_chat_id", str(chat.id))
+        await update.message.reply_text(f"✅ Оригиналы фото опубликованных объектов теперь приходят сюда (chat id {chat.id}).")
     elif cmd == "leads_private":
         db.set_setting("lead_target", "agents")
         await update.message.reply_text("✅ Лиды и проверка объявлений теперь приходят агентам в личку.")
@@ -724,7 +730,7 @@ def build(token):
     app.add_handler(CommandHandler("panel", on_panel, filters=private))
     app.add_handler(CommandHandler("cancel", on_cancel, filters=private))
     app.add_handler(CommandHandler("lang", on_lang, filters=private))
-    app.add_handler(CommandHandler(["leads_here", "leads_private", "moderate_all", "review"], on_staff_cmd, filters=new))
+    app.add_handler(CommandHandler(["leads_here", "leads_private", "originals_here", "moderate_all", "review"], on_staff_cmd, filters=new))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(InlineQueryHandler(journey.on_inline_query))  # «slots:<token>» from the operator's userbot (BotFather /setinline)
     # the agency channel (the bot is its admin): videos of new posts by file_id

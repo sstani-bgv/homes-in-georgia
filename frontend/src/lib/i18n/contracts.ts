@@ -263,4 +263,10 @@ export const D: Record<string, [ka: string, en: string]> = {
   "Добавить пункт после": ["პუნქტის დამატება შემდეგ", "Add a clause after"],
   "Удалить пункт": ["პუნქტის წაშლა", "Remove clause"],
   "Вернуть текст шаблона": ["შაბლონის ტექსტის დაბრუნება", "Restore the template text"],
+  "Второй столбец не изменён: не нашёл в нём этот пункт, поправьте его вручную": ["მეორე სვეტი არ შეცვლილა: ეს პუნქტი ვერ ვიპოვე, შეასწორეთ ხელით", "The other column is unchanged: this clause wasn't found in it, edit it by hand"],
+  "пустой ответ": ["ცარიელი პასუხი", "empty answer"],
+  "Автоперевод: второй столбец обновлён, проверьте": ["ავტოთარგმანი: მეორე სვეტი განახლდა, გადაამოწმეთ", "Autotranslated: the other column is updated, please check"],
+  "Автоперевод не удался, второй столбец не изменён: {err}": ["ავტოთარგმანი ვერ მოხერხდა, მეორე სვეტი არ შეცვლილა: {err}", "Autotranslation failed, the other column is unchanged: {err}"],
+  "автоперевод": ["ავტოთარგმანი", "autotranslated"],
+  "Можно писать по-русски: второй столбец переведётся автоматически": ["შეგიძლიათ რუსულად დაწეროთ: მეორე სვეტი ავტომატურად ითარგმნება", "You can write in Russian: the other column is translated automatically"],
 };

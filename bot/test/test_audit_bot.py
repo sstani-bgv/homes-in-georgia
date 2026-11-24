@@ -44,7 +44,7 @@ class Audit(Base):
             sent.append(text)
         upd = SimpleNamespace(effective_chat=SimpleNamespace(id=42))
         ctx = SimpleNamespace(bot=SimpleNamespace(send_message=send_message))
-        with mock.patch.object(journey.notify, "knows_operator", lambda cid: True):
+        with mock.patch.object(journey.notify, "operator_intro", lambda lead, always=False: None):
             return asyncio.run(journey.on_post_start(upd, ctx, self.cl, pid)), sent
 
     def leads(self):

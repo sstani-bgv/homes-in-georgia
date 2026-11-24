@@ -377,3 +377,31 @@ def test_clause_edits_kept_with_the_draft(db, client):
     assert client.post("/api/contracts/draft", json={"id": d["id"], "kind": "rent", "lang": "RU", "data": more}, headers=h).json()["pdf_stale"]
     r = client.put(f"/api/contracts/{d['id']}", json={**body, "data": more}, headers=h).json()
     assert r["data"]["_edits"]["rent_RU:8.1.50"] == "changed" and len(r["versions"]) == 1
+
+
+def test_translate_clause_mocked_llm(db, client, monkeypatch):
+    """11-23 (David): an edited clause goes to the model for the other column; a failure is a 502, not a crash."""
+    agent = make_user(db, "agent")
+    seen = []
+
+    class FakeLLM:
+        @staticmethod
+        def ask(prompt, schema, **kw):
+            seen.append((prompt, schema, kw))
+            return {"GEO": "ქირა **500$**", "EN": "Rent **$500**"}
+
+    monkeypatch.setattr(C, "_llm", lambda: FakeLLM)
+    r = client.post("/api/contracts/translate", json={"text": "Аренда **500$**", "to": ["GEO", "EN", "xx"]}, headers=auth(agent))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"GEO": "ქირა **500$**", "EN": "Rent **$500**"}
+    assert seen[0][1]["required"] == ["GEO", "EN"] and "Аренда **500$**" in seen[0][0]
+    assert seen[0][2]["purpose"] == "contract_translate"
+    assert client.post("/api/contracts/translate", json={"text": "x", "to": []}, headers=auth(agent)).json() == {}
+
+    def boom(*a, **k):
+        raise RuntimeError("llm failed (401)")
+    FakeLLM.ask = staticmethod(boom)
+    r = client.post("/api/contracts/translate", json={"text": "Аренда", "to": ["GEO"]}, headers=auth(agent))
+    assert r.status_code == 502 and "translate_failed" in r.text
+    # the marker list of autotranslated paths survives the autosave
+    assert C._edits({"rent_RU:8.0.41": "x", "rent_RU:auto": ["8.0.41"], "bad": 1}) == {"rent_RU:8.0.41": "x", "rent_RU:auto": ["8.0.41"]}

@@ -35,8 +35,13 @@ def pending(db: Session, kind: str | None = None, ref=None) -> list[Job]:
     return list(db.scalars(q.order_by(Job.due_at)))
 
 
-def due(db: Session, limit: int = 50) -> list[Job]:
-    """Due undone jobs, row-locked (FOR UPDATE SKIP LOCKED) so several workers never run one job twice."""
-    q = (select(Job).where(Job.done_at.is_(None), Job.due_at <= now()).order_by(Job.due_at)
-         .limit(limit).with_for_update(skip_locked=True))
+def due(db: Session, limit: int = 50, kinds: tuple = (), skip: tuple = ()) -> list[Job]:
+    """Due undone jobs, row-locked (FOR UPDATE SKIP LOCKED) so several workers never run one job twice. kinds: only
+    these; skip: all but these (the worker's slow lane, worker.SLOW)."""
+    q = select(Job).where(Job.done_at.is_(None), Job.due_at <= now())
+    if kinds:
+        q = q.where(Job.kind.in_(kinds))
+    if skip:
+        q = q.where(Job.kind.not_in(skip))
+    q = q.order_by(Job.due_at).limit(limit).with_for_update(skip_locked=True)
     return list(db.scalars(q))

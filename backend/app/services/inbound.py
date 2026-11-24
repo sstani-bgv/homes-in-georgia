@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.models import ChannelPost, Deal, News, Owner, PropertyPublication, Report, User
 from app.services import settings as settings_svc
 from app.services import users as users_svc
-from app.services.common import TZ, jload, log_event, now
+from app.services.common import TZ, jload, log_event, notify_later, now
 from app import districts
 from app.services.dedup import address_match, norm_address
 from app.telegram.client import conf
@@ -508,6 +508,7 @@ def save_deal(db: Session, msg: dict, source: str, actor: User | None = None) ->
         old = db.scalar(select(Deal).where(Deal.tg_ref == ref))
         return {"deal": old.id if old else None, "duplicate": True}
     log_event(db, "deal", deal.id, "telegram_parsed", actor, label="telegram", source=source, ref=ref)
+    notify_later(db, "deal_created", deal)  # 11-23 G: a #Rented post's deal waits for the operator too
     db.commit()
     return {"deal": deal.id, "agent": agent_name, "agent_id": deal.agent_id, "price": float(deal.price or 0)}
 

@@ -83,7 +83,7 @@ export const api = {
 
   properties: {
     myhomeCopies: (id: number) => http.post<{ ok: boolean }>(`/properties/${id}/myhome-copies`, {}),
-    compareLink: (id: number, url: string) => http.post<{ listing_id: string; url: string; address: string | null; area: number | null; floor: number | null; bedrooms: number | null; price_usd: number | null; photos: string[]; pct: number | null; level: 'same' | 'maybe' | null; why: string | null }>(`/properties/${id}/compare-link`, { url }),
+    compareLink: (id: number, url: string) => http.post<{ listing_id: string; url: string; address: string | null; area: number | null; floor: number | null; bedrooms: number | null; price_usd: number | null; photos: string[]; pct: number | null; level: 'same' | 'maybe' | null; why: string | null; linked: boolean; other_object: number | null }>(`/properties/${id}/compare-link`, { url }),
     originals: (id: number) => fetchBlob(`/properties/${id}/originals`),
     list: (q?: PropertyScope & { q?: string; rented?: number; freeing?: number; limit?: number; offset?: number; source?: string[]; district?: string[]; metro?: string; bedrooms?: string; price_min?: string; price_max?: string; archive_reason?: string }) => then(http.get<L<Property>>('/properties', { limit: LIMIT, ...q }), (d) => normPage(d, normProperty)),
     /** the base tabs' filter options with counts (Stanislav 11-13) */
@@ -149,13 +149,17 @@ export const api = {
     /** reason: ARCHIVE_REASON key; a verified object's agent gets change_request back instead */
     archive: (id: number, b: { reason: string; comment?: string; duplicate_of?: number | null } & Partial<OwnerLease>) => http.post<Property>(`/properties/${id}/archive`, b),
     /** agent's «Запрос оператору»: move the owner to another agent (staff: moved right away, change_request null) */
+    ownerRequest: (id: number, phone: string, reason?: string) => http.post<{ change_request: ChangeRequest }>(`/properties/${id}/owner-request`, { phone, reason }),
     transferRequest: (id: number, agent_id: number, reason?: string) => http.post<{ change_request: ChangeRequest | null }>(`/properties/${id}/transfer-request`, { agent_id, reason }),
     elsewhere: (id: number) => http.get<{ items: Elsewhere[] }>(`/properties/${id}/elsewhere`),
     similar: (id: number) => http.get<{ items: SimilarItem[] }>(`/properties/${id}/similar`),
+    adTakedown: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/takedown`), normProperty),
     adRemoved: (id: number, listingId: string) => then(http.post<Property>(`/properties/${id}/listings/${listingId}/removed`), normProperty),
     refused: (id: number, comment?: string) => http.post<Property>(`/properties/${id}/refused`, { comment }),
     thinking: (id: number, until: string, comment?: string) => http.post<Property>(`/properties/${id}/thinking`, { until, comment }),
-    resume: (id: number) => http.post<Property>(`/properties/${id}/resume`),
+    resume: (id: number, republish?: boolean) => http.post<Property>(`/properties/${id}/resume`, republish ? { republish } : undefined),
+    unpublish: (id: number) => then(http.post<Property>(`/properties/${id}/unpublish`), normProperty),
+    unpost: (id: number) => then(http.post<Property>(`/properties/${id}/unpost`), normProperty),
     /** «Собственник сдал»: the owner's lease dates are required (Stanislav 11-16) */
     rentedSelf: (id: number, b: OwnerLease & { comment?: string }) => http.post<Property>(`/properties/${id}/rented-self`, b),
     history: (id: number) => then(http.get<L<EventItem>>(`/properties/${id}/history`), (d) => normPage(d, normEvent)),
@@ -226,6 +230,8 @@ export const api = {
   /** Mini App: the generated contract file sent to the user's Telegram chat by the bot (webviews block downloads) */
   contracts: {
     send: (filename: string, html: string) => http.post<{ ok: boolean }>('/contracts/send', { filename, html }),
+    /** an edited clause into the other column's language(s) (GEO / RU / EN): {lang: text} */
+    translate: (text: string, to: string[]) => http.post<Record<string, string>>('/contracts/translate', { text, to }),
     /** status: active (draft + signed, default) | draft | signed | deal | closed_no_deal | all */
     list: (q?: { status?: string; lead_id?: number; deal_id?: number; property_id?: number; agent_id?: number; q?: string }) => http.get<L<Contract>>('/contracts', { ...q, limit: LIMIT }),
     /** the wizard's debounced autosave: the deal's draft (no PDF), or `id`'s data */
@@ -242,6 +248,7 @@ export const api = {
     link: (id: number, b: { lead_id?: number; deal_id?: number }) => http.post<Contract>(`/contracts/${id}/link`, b),
     /** «Оформить сделку»: the contract's lead for the deal form, made from the contract when it has none (11-18) */
     dealLead: (id: number) => http.post<Contract>(`/contracts/${id}/deal-lead`, {}),
+    liftDealDue: (id: number) => http.post<Contract>(`/contracts/${id}/deal-due/lift`, {}),
     close: (id: number, reason: ContractCloseReason, comment?: string) => http.post<Contract>(`/contracts/${id}/close`, { reason, comment }),
     share: (id: number) => http.post<Contract>(`/contracts/${id}/share`),
     esign: (id: number) => http.post<Contract>(`/contracts/${id}/esign`),

@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { DealsAnalytics } from '../features/deals/Analytics';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileText, Plus, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, RotateCcw, FileText, Plus, XCircle } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
 import type { Deal } from '../api/types';
-import { FIELD_FILTER, atLeast } from '../api/types';
+import { FIELD_FILTER } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useActionDialog } from '../components/ActionDialog';
 import { errText, useToast } from '../components/toast';
@@ -57,6 +57,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
   const { user, isStaff } = useAuth();
   const ask = useActionDialog();
   const loc = useLocation();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
   const { data: d, isLoading, error } = useQuery({ queryKey: ['deal', id], queryFn: () => api.deals.get(id) });
@@ -65,6 +66,8 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
   const nameOf = useUserNames();
   const refresh = () => { qc.invalidateQueries({ queryKey: ['deal', id] }); qc.invalidateQueries({ queryKey: ['deals'] }); qc.invalidateQueries({ queryKey: ['evals', id] }); };
   const confirm = useMutation({ mutationFn: () => api.deals.confirm(id), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['lead'] }); qc.invalidateQueries({ queryKey: ['leads'] }); toast('Сделка подтверждена'); }, onError: (e) => toast(errText(e), true) });
+  // David 11-23: the lease ends → the agent puts his rented object back from his deal, not via the archive
+  const back = useMutation({ mutationFn: () => api.properties.resume(d!.property!.id), onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['property', p.id] }); toast(t('Объект снова в работе')); navigate(`${loc.pathname.startsWith('/m/') ? '/m/properties' : '/objects'}/${p.id}`); }, onError: (e) => toast(errText(e), true) });
   const cancel = useMutation({
     mutationFn: (reason: string) => api.deals.cancel(id, reason || undefined),
     onSuccess: () => {
@@ -81,7 +84,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
   });
   if (error) return <ErrorBox error={error} />;
   if (isLoading || !d) return <Loading />;
-  const canCancel = isStaff ? d.status !== 'cancelled' : atLeast(user, 'agent') && user?.id === d.agent_id && d.status === 'pending';
+  const canCancel = isStaff ? d.status !== 'cancelled' : user?.id === d.agent_id && d.status === 'pending';
   const cancelDeal = async () => {
     const reason = await ask(t('Отменить сделку?'), { label: t('Причина отмены'), required: !isStaff });
     if (reason !== null) cancel.mutate(reason.trim());
@@ -109,6 +112,7 @@ export function DealView({ id, onClose, initialEval }: { id: number; onClose: ()
         ['Аренда', d.rent_from ? `${fmtDate(d.rent_from)} — ${fmtDate(d.rent_to)}` : '—'], ['День 14', d.t14_date ? `${fmtDate(d.t14_date)} · ${d.t14_status || ''}` : '—'],
         ['Создана', fmtDateTime(d.created_at)], ['Заявка', d.lead_id ? `#${d.lead_id}` : '—'],
       ]} />
+      {d.status === 'confirmed' && d.property && <Button variant="secondary" loading={back.isPending} onClick={() => back.mutate()}><RotateCcw size={16} />{t('Вернуть объект в работу')}</Button>}
       <Link to={`${loc.pathname.startsWith('/m/') ? '/m' : ''}/contracts?${d.lead_id ? `lead_id=${d.lead_id}` : `deal_id=${d.id}`}`} className="btn btn-secondary"><FileText size={16} />Подготовить договор</Link>
       {((isStaff && d.status === 'pending') || canCancel) && (
         <div className="row row-wrap">
@@ -226,7 +230,8 @@ export function DealsPage({ newDeal }: { newDeal?: boolean }) {
   if (newDeal) {
     return (
       <>
-        <PageHead label={leadId ? `Заявка #${leadId} · Сделка` : "Сделки · C9b"} title="Оформить сделку" />
+        <PageHead label={leadId ? `Заявка #${leadId} · Сделка` : "Сделки · C9b"} title="Оформить сделку"
+          actions={<Button variant="secondary" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate(propertyId ? `/objects/${propertyId}` : leadId ? `/leads/${leadId}` : '/deals'))}><ArrowLeft size={16} />{t('Назад')}</Button>} />
         {propertyId && !leadId && (pick.isLoading || pickLead) ? <Loading />
           : <DealForm key={leadId ?? propertyId} leadId={leadId} propertyId={leadId ? undefined : propertyId} onDone={(d) => navigate(leadId ? `/leads/${leadId}` : `/deals?open=${d.id}`)} />}
       </>

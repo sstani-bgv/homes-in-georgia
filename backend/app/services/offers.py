@@ -220,7 +220,7 @@ def publish(db: Session, model, oid: int, actor: User, text: str | None = None, 
     if keys is not None and not set(keys) <= set(own):
         raise DomainError("not_found", "media not found")
     if tg:
-        post = SimpleNamespace(id=None, address=o.title, district=None, price=o.price, description=o.description,
+        post = SimpleNamespace(id=None, post_channel="cars", address=o.title, district=None, price=o.price, description=o.description,
                                owner_id=None, post_text=(text or "").strip() or post_text(db, o),
                                post_media_keys=[("video" if k == o.video else "photo", k) for k in (own if keys is None else keys)])
         try:

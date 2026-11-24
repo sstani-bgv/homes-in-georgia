@@ -139,6 +139,27 @@ def test_period_report_and_kpis(client, db, boss):
     assert "📅 Период: Октябрь 2026" in x["period_report"] and "Di, Airbnb" in x["period_report"] and "владельцу $80" in x["period_report"]
 
 
+def test_reports_in_three_languages_and_the_owner_language(client, db, boss):
+    a = apartment(client, boss)
+    b = api(client, boss, "POST", "/bookings", {"apartment_id": a["id"], "platform": "Airbnb", "gross": 1234.5, "tax_pct": 0,
+                                                "check_in": "2026-10-10", "check_out": "2026-10-12", "guest_name": "Di"})
+    api(client, boss, "POST", "/expenses", {"booking_id": b["id"], "category": "cleaning", "amount": 25, "currency": "USD"})
+    b = api(client, boss, "GET", f"/bookings/{b['id']}")
+    r = b["reports"]
+    assert b["report_lang"] == "ru" and b["report"] == r["ru"] and "Чистая прибыль" in r["ru"]
+    assert "📅 Period: 10 October — 12 October (2 nights)" in r["en"] and "Net profit: $1,209.50" in r["en"] and "Cleaning: $25" in r["en"]
+    assert "📅 პერიოდი: 10 ოქტომბერი — 12 ოქტომბერი (2 ღამე)" in r["ka"] and "წმინდა მოგება: $1 209,50" in r["ka"]
+    assert "დასუფთავება" in r["ka"] and "👤 სტუმარი: Di" in r["ka"]  # what people typed stays as typed
+    x = api(client, boss, "GET", f"/apartments/{a['id']}?month_from=2026-10&month_to=2026-10")
+    assert "📅 Period: October 2026" in x["period_reports"]["en"] and "📅 პერიოდი: ოქტომბერი 2026" in x["period_reports"]["ka"]
+    api(client, boss, "PATCH", f"/apartments/{a['id']}", {"report_lang": "ka"})  # the owner speaks Georgian
+    assert api(client, boss, "GET", f"/bookings/{b['id']}")["report"] == r["ka"]
+    from app.services import daily_rent_auto as A
+    [rep] = [o for o in A.owner_reports(db, "2026-10") if o["apartment_id"] == a["id"]]
+    assert rep["lang"] == "ka" and "პერიოდი: ოქტომბერი 2026" in rep["text"]
+    assert client.patch(f"/api/daily-rent/apartments/{a['id']}", headers=auth(boss), json={"report_lang": "de"}).status_code == 422
+
+
 def test_delete_stay_takes_its_expenses_and_everything_is_audited(client, db, boss):
     a = apartment(client, boss)
     b = api(client, boss, "POST", "/bookings", {"apartment_id": a["id"], "gross": 100})

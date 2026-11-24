@@ -3,7 +3,8 @@ agents' copies of an exclusive (the owner's photos re-posted 30 times) never rea
 narrow myhome search is made — its district, the rooms, the area ±12 %, agents included — then every rental on its
 street with the same rooms and area; the ads found are kept as listings with status «copy» (never shown to clients,
 not marked gone by the parser's sync) with their photos' dHash, so «Похожие» scores them like any other ad
-(shared photos, the house, floor, area). Run for exclusives when they are taken / published, and by the card's button."""
+(shared photos, the house, floor, area). Stanislav 11-23: run on publishing, on «Сравнить по ссылке» and by the card's
+«Найти копии» only (no daily pass); the link's photos drive a wide search (link_copies)."""
 import json
 import logging
 import re
@@ -110,6 +111,8 @@ def _mh_row(i: dict) -> dict:
     return {"id": f"mh{i['id']}", "source": "myhome.ge",
             "url": f"https://www.myhome.ge/pr/{i['id']}/{i.get('dynamic_slug') or ''}",
             "photos": [x.get("large") for x in i.get("images") or [] if x.get("large")],
+            "thumbs": [x.get("thumb") or x.get("large") for x in i.get("images") or [] if x.get("thumb") or x.get("large")],
+            "user_type": (i.get("user_type") or {}).get("type"),  # physical | agent | broker
             "address": i.get("address"), "area": i.get("area"), "floor": i.get("floor"),
             "bedrooms": int(i["bedroom"]) if str(i.get("bedroom") or "").isdigit() else None,
             "district": districts.label(i.get("urban_name")) or i.get("urban_name"), "price_usd": _usd(i),
@@ -131,6 +134,8 @@ def save(db: Session, items: list[dict]) -> int:
         l.status, l.urls = STATUS, json.dumps([r["url"]])
         l.address, l.area, l.floor, l.bedrooms = r["address"], r["area"], r["floor"], r["bedrooms"]
         l.district, l.price_usd, l.text = r["district"], r["price_usd"], r["text"]
+        if r.get("user_type"):  # who posted it: «Где ещё выложен» shows собственник / агент
+            l.details = json.dumps({**(json.loads(l.details or "{}") or {}), "user_type": r["user_type"]})
         if l.photos != json.dumps(r["photos"]):
             l.photos, l.photo_hashes = json.dumps(r["photos"]), json.dumps(_hashes(r["photos"]))
         l.last_seen = l.updated_at = t
@@ -193,6 +198,7 @@ def _ss_row(i: dict) -> dict:
     a = i.get("address") or {}
     return {"id": f"ss{i['applicationId']}", "source": "ss.ge", "url": f"https://home.ss.ge/ka/udzravi-qoneba/{i['detailUrl']}",
             "photos": [x["fileName"].replace("_Thumb", "") for x in i.get("appImages") or [] if x.get("fileName")],
+            "thumbs": [x["fileName"] for x in i.get("appImages") or [] if x.get("fileName")],
             "address": " ".join(str(x) for x in (a.get("streetTitle"), a.get("streetNumber")) if x) or None,
             "area": i.get("totalArea"), "floor": int(i["floorNumber"]) if str(i.get("floorNumber") or "").isdigit() else None,
             "bedrooms": i.get("numberOfBedrooms"), "district": districts.label(a.get("subdistrictTitle")) or a.get("subdistrictTitle"),
@@ -267,64 +273,308 @@ def _mh_detail(mid: str) -> dict:
     return _mh_row(st)
 
 
+# ------------------------------------------------------------------ korter.ge (David 11-23: «MyHome, SS, Livo, Korter»)
+# Livo is a front of myhome's own base (same statements, same ids: bot/fetch_livo.py), so the myhome search finds its
+# agents' ads already. Korter is its own base (18k rentals, agents included): its search page filters by district
+# (the path), area and floor; the app state (window.INITIAL_STATE) carries the ads, the ad page all its photos.
+KR = "https://korter.ge"
+KR_PAGES = 5        # 20 ads a page
+KR_DETAILS = 15     # ad pages opened per card (the closest area first): their photos are what gets compared
+GEL_PER_USD = 2.7   # = bot/ingest.py
+KR_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+
+
+def _kr_state(html: str) -> dict:
+    i = html.find("window.INITIAL_STATE")
+    if i < 0:
+        raise ValueError("korter: no INITIAL_STATE on the page")
+    return json.JSONDecoder().raw_decode(html, html.index("{", i))[0]
+
+
+def _kr_get(path: str) -> str | None:
+    import httpx
+    r = httpx.get(KR + path, headers={"User-Agent": KR_UA}, timeout=30, follow_redirects=True)
+    return None if r.status_code == 404 else r.raise_for_status().text
+
+
+def kr_search(slug: str | None, query: str, pause: float = 0.5) -> list[dict]:
+    """Korter rentals of a district path (None: the city), up to KR_PAGES pages; an unknown district -> the city."""
+    out, n = [], 0
+    while n < KR_PAGES:
+        n += 1
+        html = _kr_get(f"/en/apartments-for-rent-tbilisi{'-' + slug if slug else ''}?{query}&page={n}")
+        if html is None:
+            if not slug:
+                break
+            slug, n = None, 0  # Korter has no page for this district: the city
+            continue
+        items = [i for i in _kr_state(html)["apartmentListingStore"]["apartments"] if i.get("section") == "rent"]
+        out += items
+        if len(items) < 20:
+            break
+        time.sleep(pause)
+    return out
+
+
+def _kr_row(obj_id, d: dict, link: str) -> dict:
+    """An ad page's layout (+ the search item for the district) -> a row like _mh_row."""
+    lay = d["layout"]
+    price = lay.get("price")
+    if price and lay.get("currency") == "GEL":
+        price = round(price / GEL_PER_USD)
+    fl = ((lay.get("floorsByHouse") or [{}])[0].get("floorNumbers") or [None])[0]
+    rooms = lay.get("roomCount")
+    return {"id": f"kr{obj_id}", "source": "korter.ge", "url": KR + link,
+            "photos": [im["mediaSrc"]["default"]["x1"] for im in lay.get("images") or [] if im.get("mediaSrc")],
+            "address": lay.get("address"), "area": lay.get("area"), "floor": int(fl) if str(fl or "").isdigit() else None,
+            "bedrooms": lay.get("bedroomCount") if lay.get("bedroomCount") is not None else (max(rooms - 1, 0) if rooms else None),
+            "district": districts.label(d.get("district")) or d.get("district"), "price_usd": price,
+            "text": lay.get("description") or ""}
+
+
+def _kr_detail(link: str, district: str | None = None) -> dict:
+    s = _kr_state(_kr_get(link) or "")["layoutLandingStore"]
+    return _kr_row(s["objectId"], {"layout": s["layout"], "district": district}, link)
+
+
+def kr_candidates(p, pause: float = 0.5) -> list[dict]:
+    """Korter ads that could be the object: its district (Korter's path, the city when it has none), area ±12 %,
+    floor ±1; kept: in the district or on the street, the same bedrooms; the closest areas' ad pages opened."""
+    if not p.area:
+        return []
+    a = float(p.area)
+    q = f"min_area={int(a * (1 - AREA_TOL))}&max_area={int(a * (1 + AREA_TOL)) + 1}"
+    if p.floor is not None:
+        q += f"&min_floor_number={max(int(p.floor) - 1, 1)}&max_floor_number={int(p.floor) + 1}"
+    tag, street = districts.tag(p.district), _street(p.address)
+    slug = re.sub(r"[^a-z]+", "-", districts.BY_TAG[tag][2].lower()).strip("-") if tag else None
+
+    def fits(i):
+        ours = (tag and districts.tag(i.get("subLocalityNominative")) == tag) or \
+            (street and _same_street(street, _street(re.sub(r"\s*\(.*\)", "", i.get("address") or ""))))
+        rooms = i.get("roomCount")
+        return ours and (p.bedrooms is None or not rooms or max(rooms - 1, 0) == int(p.bedrooms))
+    found = {i["objectId"]: i for i in kr_search(slug, q, pause) if fits(i)}
+    out = []
+    for i in sorted(found.values(), key=lambda i: abs(float(i.get("area") or 0) - a))[:KR_DETAILS]:
+        try:
+            out.append(_kr_detail(i["link"], i.get("subLocalityNominative")))
+        except Exception as e:  # noqa: BLE001 — one ad page failed: the others stand
+            log.warning("korter ad %s: %r", i.get("objectId"), e)
+        time.sleep(pause)
+    return out
+
+
+# ------------------------------------------------------------------ copies by the photos of a link (Stanislav 11-23)
+# The owner posts on myhome / ss.ge, agents re-post his photos everywhere with their own area / floor / rooms, and our
+# shoot shares none of them. So the ad the agent links («Сравнить по ссылке», or the object's own source ad) is what is
+# searched for: every rental in its district and on its street, rooms ±1, no area / floor filter; each one's first
+# THUMBS thumbnails are dHashed against the link's photos; then a second round with the found copies' own photos (a
+# copy may lead with a shot the owner's ad does not have). A copy re-cut / watermarked past dHash is caught later by the
+# photo vectors (embeddings: the narrow candidates are saved with their photos too).
+THUMBS = 3
+WIDE_STREETS, WIDE_URBANS = 2, 1  # searches of 120 ads (myhome) / 90 (ss.ge) each
+
+
+def _bits():
+    from app.services.similar import PHOTO_BITS
+    return PHOTO_BITS
+
+
+def _hit(hs: list[int], ref: set[int]) -> bool:
+    b = _bits()
+    return any(bin(x ^ y).count("1") <= b for x in hs if x for y in ref)
+
+
+def by_photos(rows: list[dict], ref: list[int]) -> list[dict]:
+    """The rows (shaped like _mh_row / _ss_row) whose first THUMBS thumbnails share a photo with ref (dHash), then a
+    second round with the found ones' own photos -> the copies."""
+    ref_s = {h for h in ref if h}
+    if not ref_s:
+        return []
+    thumbs = {r["id"]: _hashes((r.get("thumbs") or r["photos"])[:THUMBS]) for r in rows}
+    got = [r for r in rows if _hit(thumbs[r["id"]], ref_s)]
+    more = ref_s | {h for r in got for h in _hashes(r["photos"]) if h}
+    ids = {r["id"] for r in got}
+    return got + [r for r in rows if r["id"] not in ids and _hit(thumbs[r["id"]], more)]
+
+
+def _rooms(c) -> str:
+    rooms = c.rooms or (c.bedrooms + 1 if c.bedrooms is not None else None)
+    return f"room_types={','.join(str(x) for x in range(max(int(rooms) - 1, 1), min(int(rooms) + 1, 6) + 1))}" if rooms else ""
+
+
+def wide_mh(c, pause: float = 1.0) -> list[dict]:
+    """myhome rentals in the district and on the street of c (the link's ad), rooms ±1, any area / floor -> rows.
+    myhome's ids of them come from a city search (rooms, area), the street's from the district's ads too: a city search
+    of 120 rarely has the street (#15509 11-23 searched Vake's newest only, 0 of 21 copies found)."""
+    tag, street = districts.tag(c.district), _street(c.address)
+    rq = _rooms(c)
+    with_rooms = lambda q: f"{q}&{rq}" if rq else q  # noqa: E731
+    found = {i["id"]: i for i in search(_filters(c), pause)}
+    urbans = list({i["urban_id"] for i in found.values() if tag and i.get("urban_id") and districts.tag(i.get("urban_name")) == tag})
+    for x in urbans[:WIDE_URBANS]:
+        found.update({i["id"]: i for i in search(with_rooms(f"urbans={x}"), pause)})
+    streets = list({i["street_id"] for i in found.values() if street and i.get("street_id")
+                    and _same_street(street, _street(i.get("address")))})
+    for x in streets[:WIDE_STREETS]:
+        found.update({i["id"]: i for i in search(with_rooms(f"streets={x}"), pause)})
+    return [_mh_row(i) for i in found.values()]
+
+
+def wide_ss(c) -> list[dict]:
+    """ss.ge rentals in the district and on the street of c, any area / floor / rooms -> rows (3 Apify runs: the city by
+    area for the district's id, the district for the street's, the street)."""
+    tag, street = districts.tag(c.district), _street(c.address)
+    a = float(c.area) if c.area else None
+    addr = lambda i: i.get("address") or {}  # noqa: E731
+    found = {i["applicationId"]: i for i in ss_search([{"areaFrom": int(a * (1 - AREA_TOL)), "areaTo": int(a * (1 + AREA_TOL)) + 1}] if a else [{}])}
+    subs = list({addr(i)["subdistrictId"] for i in found.values() if tag and addr(i).get("subdistrictId")
+                 and districts.tag(addr(i).get("subdistrictTitle")) == tag})[:WIDE_URBANS]
+    if subs:
+        found.update({i["applicationId"]: i for i in ss_search([{"subdistrictIds": subs}])})
+    streets = list({addr(i)["streetId"] for i in found.values() if street and addr(i).get("streetId")
+                    and _same_street(street, _street(addr(i).get("streetTitle")))})[:WIDE_STREETS]
+    if streets:
+        found.update({i["applicationId"]: i for i in ss_search([{"streetIds": streets}])})
+    return [_ss_row(i) for i in found.values()]
+
+
+def link_copies(db: Session, p: Property, pause: float = 1.0) -> list[dict]:
+    """The copies of the object's linked site ads (the link, its own source ad; LINK_CARDS of them) by their photos."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from app.models import PropertyListing
+    out = {}
+    for l in db.scalars(select(Listing).join(PropertyListing, PropertyListing.listing_id == Listing.id)
+                        .where(PropertyListing.property_id == p.id, Listing.photo_hashes != "[]",
+                               Listing.source.not_in(("object", "agency")))
+                        .order_by(PropertyListing.id.desc()).limit(LINK_CARDS)):
+        ref = [h for h in json.loads(l.photo_hashes or "[]") if h]
+        if not ref or not (l.id[:2] in ("mh", "ss", "lv", "kr")):
+            continue
+        c = SimpleNamespace(address=l.address or p.address, district=l.district or p.district, area=l.area or p.area,
+                            floor=l.floor, rooms=None, bedrooms=l.bedrooms if l.bedrooms is not None else p.bedrooms)
+        rows = wide_mh(c, pause)
+        try:
+            rows += wide_ss(c)
+        except Exception as e:  # noqa: BLE001 — ss.ge / Apify down: myhome stands
+            log.warning("ss.ge wide search of #%s failed: %r", p.id, e)
+        out.update({r["id"]: r for r in by_photos([r for r in rows if r["id"] != l.id and r["id"] not in out], ref)})
+    return list(out.values())
+
+
 # /ka/pr/26740808/… and the new slug form /ka/udzravi-qoneba/qiravdeba-…-vakeshi-26740808/ (David 11-23)
 MH_LINK = re.compile(r"myhome\.ge/(?:[a-z]{2}/)?(?:pr/(\d+)|[^?#]*?-(\d{6,})/?(?:[?#]|$))")
 SS_LINK = re.compile(r"ss\.ge/.*?(\d{6,})(?:[/?#]|$)")
+# livo.ge/en/udzravi-qoneba/…/…-26740808 (myhome's own ad: the same id) and korter.ge/en/apartments-for-rent-tbilisi/…/1074541
+LIVO_LINK = re.compile(r"livo\.ge/(?:[a-z]{2}/)?(?:pr/(\d+)|[^?#]*?-(\d{6,})/?(?:[?#]|$))")
+KR_LINK = re.compile(r"korter\.ge(/[^?#]*?/\d{5,})/?(?:[?#]|$)")
 
 
 def by_link(url: str) -> dict:
-    """A myhome / ss.ge ad link -> its row (_mh_row / _ss_row shape); ValueError for another link."""
+    """A myhome / ss.ge / livo / korter ad link -> its row (_mh_row / _ss_row shape); ValueError for another link."""
     url = url.strip()
     if m := MH_LINK.search(url):
         return _mh_detail(m[1] or m[2])
     if SS_LINK.search(url):
         return _ss_detail(url.split("?")[0])
-    raise ValueError("Нужна ссылка на объявление myhome.ge или ss.ge")
+    if m := LIVO_LINK.search(url):
+        return _mh_detail(m[1] or m[2])
+    if m := KR_LINK.search(url):
+        return _kr_detail(m[1])
+    raise ValueError("Нужна ссылка на объявление myhome.ge, ss.ge, livo.ge или korter.ge")
 
 
-def compare_link(db: Session, pid: int, url: str) -> dict:
+def compare_link(db: Session, pid: int, url: str, actor=None) -> dict:
     """«Сравнить по ссылке» (David 11-22): the ad of a competitor / an owner is saved as a copy and scored against the
-    object as «Похожие» does (photos by their files now, by the rooms once the worker has their vectors)."""
-    from app.services import similar
+    object as «Похожие» does. David 11-23: the link names the object's ad — it is linked to the object (stays on the
+    card, «Объявления на других сайтах»), so the owner's photos in it become the object's and the duplicate search
+    (dup_scan, right after) finds every ad that re-posts them, though our own shoot shares none."""
+    from sqlalchemy import select
+
+    from app.models import PropertyListing
+    from app.services import matching, similar
+    from app.services import properties as P
     from app.services.common import log_event
     row = by_link(url)
     save(db, [row])
     r = similar.score_pair(db, f"p:{pid}", f"l:{row['id']}") or {}
-    log_event(db, "property", pid, "compare_link", None, label="сравнение по ссылке", url=row["url"], listing_id=row["id"],
-              pct=r.get("pct"))
+    p, l = db.get(Property, pid), db.get(Listing, row["id"])
+    owner = db.scalar(select(PropertyListing.property_id).where(PropertyListing.listing_id == l.id)) \
+        or db.scalar(select(Property.id).where(Property.listing_id == l.id, Property.id != pid))
+    if owner is None:
+        matching.attach(db, p, l, actor, ["добавлено по ссылке"], "compare_link")  # no exclusive alert: he linked it
+        P.schedule_dup_scan(db, p, "compare_link")
+    log_event(db, "property", pid, "compare_link", actor, label="сравнение по ссылке", url=row["url"], listing_id=row["id"],
+              pct=r.get("pct"), linked=owner is None)
     db.commit()
     return {"listing_id": row["id"], "url": row["url"], "address": row["address"], "area": row["area"], "floor": row["floor"],
             "bedrooms": row["bedrooms"], "price_usd": row["price_usd"], "photos": row["photos"][:4],
+            "linked": owner in (None, pid), "other_object": owner if owner not in (None, pid) else None,
             **{k: r.get(k) for k in ("pct", "level", "why", "matched", "differs")}}
 
 
-def recent(db: Session, pid: int, hours: int = 24) -> bool:
-    from datetime import timedelta
+LINK_CARDS = 2  # linked ads searched by their own address / area besides the object
+
+
+def cards(db: Session, p: Property) -> list:
+    """What the copies are searched by: the object, then (David 11-23, «по ссылке составляет карточку объекта и по ней
+    находит все матчи») each linked outside ad (the owner's ad from «Сравнить по ссылке») whose street / area / floor
+    differ from the object's — the agents copied the owner's ad, not our card."""
+    from types import SimpleNamespace
 
     from sqlalchemy import select
 
-    from app.models import Event
-    return db.scalar(select(Event.id).where(Event.entity == "property", Event.entity_id == str(pid),
-                                            Event.action == "myhome_copies", Event.at > now() - timedelta(hours=hours))
-                     .limit(1)) is not None
+    from app.models import PropertyListing
+    out, seen = [p], {(_street(p.address), float(p.area or 0), p.floor)}
+    for l in db.scalars(select(Listing).join(PropertyListing, PropertyListing.listing_id == Listing.id)
+                        .where(PropertyListing.property_id == p.id, Listing.source.not_in(("object", "agency")))
+                        .order_by(PropertyListing.id.desc())):
+        c = SimpleNamespace(address=l.address or p.address, district=l.district or p.district, area=l.area or p.area,
+                            floor=l.floor if l.floor is not None else p.floor, rooms=None,
+                            bedrooms=l.bedrooms if l.bedrooms is not None else p.bedrooms)
+        sig = (_street(c.address), float(c.area or 0), c.floor)
+        if sig not in seen and len(out) <= LINK_CARDS:
+            seen.add(sig)
+            out.append(c)
+    return out
 
 
 def run(db: Session, pid: int, pause: float = 1.0) -> int:
-    """Job myhome_copies: search, save -> how many ads were saved (an event on the object says when)."""
+    """Job myhome_copies: search (the object and its linked ads, cards()), save -> how many ads were saved (an event
+    on the object says when)."""
     from app.services.common import log_event
     p = db.get(Property, pid)
     if p is None or not (p.area or p.bedrooms is not None or p.rooms):
         return 0
-    items = candidates(p, pause)
+    cs = cards(db, p)
+    items = list({i["id"]: i for c in cs for i in candidates(c, pause)}.values())
     n = save(db, items)
     try:
-        ss = ss_candidates(p)
+        ss = list({i["id"]: i for c in cs for i in ss_candidates(c)}.values())
         n_ss = save(db, ss)
     except Exception as e:  # noqa: BLE001 — ss.ge / Apify down: the myhome copies stand
         log.warning("ss.ge copies of #%s failed: %r", pid, e)
         ss, n_ss = [], 0
-    log_event(db, "property", pid, "myhome_copies", None, label="поиск копий на myhome и ss.ge", candidates=len(items),
-              saved=n, ss_candidates=len(ss), ss_saved=n_ss)
+    try:
+        kr = list({i["id"]: i for c in cs for i in kr_candidates(c, pause / 2)}.values())
+        n_kr = save(db, kr)
+    except Exception as e:  # noqa: BLE001 — korter down / its page changed: the others stand
+        log.warning("korter copies of #%s failed: %r", pid, e)
+        kr, n_kr = [], 0
+    try:
+        by_link_ = link_copies(db, p, pause)
+        n_link = save(db, by_link_)
+    except Exception as e:  # noqa: BLE001 — the wide search failed: the narrow one stands
+        log.warning("link copies of #%s failed: %r", pid, e)
+        by_link_, n_link = [], 0
+    log_event(db, "property", pid, "myhome_copies", None, label="поиск копий на myhome, ss.ge и korter", candidates=len(items),
+              saved=n, ss_candidates=len(ss), ss_saved=n_ss, kr_candidates=len(kr), kr_saved=n_kr, cards=len(cs),
+              by_photos=len(by_link_), by_photos_saved=n_link)
     db.commit()
-    log.info("copies of #%s: myhome %s/%s, ss.ge %s/%s", pid, len(items), n, len(ss), n_ss)
-    return n + n_ss
+    log.info("copies of #%s: myhome %s/%s, ss.ge %s/%s, korter %s/%s, by the link's photos %s/%s", pid, len(items), n,
+             len(ss), n_ss, len(kr), n_kr, len(by_link_), n_link)
+    return n + n_ss + n_kr + n_link

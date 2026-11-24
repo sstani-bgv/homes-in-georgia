@@ -6,7 +6,7 @@ import { Archive, ArchiveRestore, CalendarClock, CheckCircle2, FileText, Hand, M
 import { api } from '../../api';
 import { itemsOf, thumbUrl } from '../../api/client';
 import type { ClientProfile, Lead } from '../../api/types';
-import { atLeast, can } from '../../api/types';
+import { can } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { CopyPhone, LeadStatusBadge, ListingModal, Place, SlaChip, Timeline } from '../../components/domain';
 import { MorePhones } from '../../components/PhonesField';
@@ -241,7 +241,7 @@ export function LeadDetail({ id, compact }: { id: number; compact?: boolean }) {
   const c = lead.client;
   const isAgent = lead.agent_id === user?.id || lead.agent?.id === user?.id;
   const canContract = (isAgent || isStaff) && can(user, 'contracts', 'c');  // recruits make contracts (Irakli 11-22), not deals (11-12)
-  const canDeal = canContract && atLeast(user, 'agent');
+  const canDeal = canContract;  // recruits file deals too (Stanislav 11-23)
   const liveContract = lead.contract && lead.contract.status !== 'closed_no_deal' ? lead.contract : null;  // closed: a new one can be made
   const closed = ['rented', 'refused'].includes(lead.status);
   const l = lead.listing;

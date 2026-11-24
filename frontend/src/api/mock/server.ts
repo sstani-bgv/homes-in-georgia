@@ -36,7 +36,17 @@ function mockPhones(list: unknown, main: unknown, old?: { phone?: string | null;
     .filter((r) => !seen.has(r.phone) && !!seen.add(r.phone));
 }
 
+// «Где ещё выложен» (backend properties.copies): the found copies of a card on the sites
+const COPIES: NonNullable<Property['copies']> = [
+  { listing_id: 'mh26740808', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26740808/', pct: null, level: 'linked', who: 'собственник', blocking: false, asked: null },
+  { listing_id: 'mh26738483', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26738483/', pct: 96, level: 'confirmed', who: 'агент', blocking: false, asked: null },
+  { listing_id: 'mh26720465', where: 'myhome.ge', url: 'https://www.myhome.ge/pr/26720465/', pct: 91, level: 'confirmed', who: 'агент', blocking: false,
+    asked: { at: new Date(Date.now() - 3 * 3600e3).toISOString(), by: 'Вика' } },
+  { listing_id: 'ss31877412', where: 'ss.ge', url: 'https://home.ss.ge/ka/udzravi-qoneba/31877412', pct: 88, level: 'confirmed', who: null, blocking: false, asked: null },
+  { listing_id: 'kr1073432', where: 'korter', url: 'https://korter.ge/en/1073432', pct: 72, level: 'probable', who: null, blocking: false, asked: null },
+];
 function propOut(p: Property, u: User): Property {
+  if (!p.copies) p.copies = COPIES.map((c) => ({ ...c, blocking: c.level === 'linked' && !!p.is_exclusive }));
   const canPhone = isStaff(u) || p.agent_id === u.id;
   return { ...p, photo: p.photo ?? p.media?.find((m) => m.kind === 'photo')?.path ?? null, owner: p.owner ? { ...p.owner, phone: canPhone ? p.owner.phone : null, phones: canPhone ? p.owner.phones : null } : null };
 }
@@ -225,7 +235,31 @@ on('GET', '/listings/:id', (m) => {
   return l && p?.owner && (isStaff(u) || p.agent_id === u.id) ? { ...l, contacts_visible: true, owner: { name: p.owner.name, phone: p.owner.phone, phones: p.owner.phones, is_agent: p.owner.is_agent } } : l;
 });
 on('GET', '/listings/:id/similar', () => ({ items: [] }));
-on('GET', '/properties/:id/similar', (m) => ({ items: getProp(Number(m[1])).duplicate_scan?.n ? DUPS : [] }));
+// backend properties.similar_with_sites: the object's site ads lead («привязано» first), with the takedown marks
+on('GET', '/properties/:id/similar', (m) => {
+  const p = getProp(Number(m[1]));
+  propOut(p, currentUser());
+  const sites: SimilarItem[] = (p.copies || []).map((c, i) => ({
+    key: `l:${c.listing_id}`, kind: 'ad', property_id: null, listing_id: c.listing_id, where: c.where, url: c.url,
+    level: c.level === 'probable' ? 'maybe' : 'same', pct: c.pct ?? undefined,
+    reasons: c.level === 'linked' ? ['привязано к объекту'] : [`общих фото: ${5 - Math.min(i, 3)}`, 'спальни совпадают', 'этаж совпадает'],
+    address: 'რამიშვილი ნ. ქ. 3', district: 'Ваке', bedrooms: 1, area: 56 + i, floor: 8, price_usd: 800, photos: [],
+    linked: c.level === 'linked', blocking: c.blocking, site: true, who: c.who, asked: c.asked, removed: REMOVED.has(c.listing_id),
+  }));
+  return { items: [...sites, ...(p.duplicate_scan?.n ? DUPS.filter((x) => !x.key.startsWith('l:mh')) : [])] };
+});
+const REMOVED = new Set<string>();
+on('POST', '/properties/:id/myhome-copies', (m) => { dupScan(getProp(Number(m[1])), 'manual'); return { ok: true }; });
+on('POST', '/properties/:id/listings/:lid/takedown', (m) => {
+  const p = getProp(Number(m[1]));
+  p.copies = (p.copies || []).map((c) => c.listing_id === m[2] ? { ...c, asked: { at: new Date().toISOString(), by: currentUser().name } } : c);
+  return propOut(p, currentUser());
+});
+on('POST', '/properties/:id/listings/:lid/removed', (m) => {
+  const p = getProp(Number(m[1]));
+  REMOVED.add(m[2]);
+  return propOut(p, currentUser());
+});
 on('POST', '/similar/decide', (_m, b) => ({ ok: true, verdict: (b as { verdict?: string }).verdict || 'different', linked_to: null }));
 const dealOf = (p: Property) => (p.post_fields?.deal === 'Sale' ? 'sale' : 'rent');
 const dealOk = (q: URLSearchParams) => (p: Property) => !q.get('deal') || dealOf(p) === q.get('deal');
@@ -825,7 +859,7 @@ on('POST', '/ndas/:id/text/preview', (_m, b) => ({ html: `<h1>Preview</h1>${(b.b
 // one generated rent contract with a saved registry extract: the card, e-sign and /esign/mock-owner-9001-… (Irakli 11-13)
 const contracts: Record<string, unknown>[] = [{ id: 9001, kind: 'rent', lang: 'EN', lead_id: null, deal_id: null, cadastral: '01.10.14.016.017.01.001',
   address: 'თბილისი, ტაბიძის ქ. 43', has_pdf: true, status_label: 'Сгенерирован', filename: 'contract.pdf', created_at: new Date().toISOString(),
-  generated_at: new Date().toISOString(), data: { extract_file: 'private/registry-extracts/mock.pdf' } }];
+  generated_at: new Date().toISOString(), data: { extract_file: 'private/registry-extracts/mock.pdf'} }];
 // a contract signed from the object card, no lead (Irakli 11-18: «Оформить сделку» on it)
 const cardProp = F.properties.find((p) => p.agent_id === 3 && p.status === 'published') || F.properties[0];
 contracts.push({ id: 9002, kind: 'rent', lang: 'RU', status: 'signed', status_label: 'Договор подписан', lead_id: null, deal_id: null, property_id: cardProp.id,
@@ -837,6 +871,7 @@ const cxOut = (c: Record<string, unknown>) => ({ status: 'draft', status_label: 
 on('GET', '/contracts', (_m, _b, q) => page(contracts.filter((c) => (!q.get('lead_id') || c.lead_id === Number(q.get('lead_id')))
   && (!q.get('deal_id') || c.deal_id === Number(q.get('deal_id'))) && (!q.get('property_id') || c.property_id === Number(q.get('property_id')))
   && (!q.get('status') || q.get('status') === 'all' || String(q.get('status')).replace('active', 'draft,signed').split(',').includes(String(c.status || 'draft')))).map(cxOut)));
+on('POST', '/contracts/translate', (_m, b) => Object.fromEntries((b.to as string[]).map((l) => [l, `[${l}] ${b.text}`])));  // no model in the mock
 on('POST', '/contracts/draft', (_m, b) => {
   let c = contracts.find((x) => x.id === b.id);
   if (!c) { c = { id: nextId(), lead_id: b.lead_id || null, deal_id: b.deal_id || null, property_id: b.property_id || null, created_at: new Date().toISOString() }; contracts.push(c); }
@@ -1103,6 +1138,8 @@ on('POST', '/offers/:kind/:id/publish', (m, b) => {
 on('GET', '/geo/search', (_m, _b, q) => ({ point: false, items: (q.get('q') || '').length < 3 ? [] : [{ label: `${q.get('q')}, Тбилиси`, lat: 41.7105, lng: 44.7612 }] }));
 on('GET', '/geo/point', (_m, _b, q) => ({ district: 'Ваке', address: `Ilia Chavchavadze Avenue ${Math.abs(Math.round(Number(q.get('lat')) * 10000)) % 90 + 1}, Tbilisi`, metro: 'Rustaveli', metro_m: 640 }));
 on('POST', '/properties/:id/site', (m, b) => { const u = currentUser(); const p = getProp(Number(m[1])); p.site_hidden = !b.on; return propOut(p, u); });
+on('POST', '/properties/:id/unpost', (m) => { const p = getProp(Number(m[1])); p.post_url = null; return propOut(p, currentUser()); });
+on('POST', '/properties/:id/unpublish', (m) => { const p = getProp(Number(m[1])); Object.assign(p, { status: 'archived' as PropertyStatus, archive_reason: 'unpublished', post_url: null }); return propOut(p, currentUser()); });
 
 async function formToBody(fd: FormData): Promise<Record<string, unknown>> {
   const files: { name: string; url: string }[] = [];

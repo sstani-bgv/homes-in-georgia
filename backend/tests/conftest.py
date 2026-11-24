@@ -216,3 +216,13 @@ def _one_photo_is_enough(monkeypatch):
     """Most tests build an object with a photo or two; the 9-photo minimum has its own tests (test_object_prep)."""
     from app.services import properties
     monkeypatch.setattr(properties, "MIN_PHOTOS", 1)
+
+
+@pytest.fixture(autouse=True)
+def _no_copies_network(monkeypatch):
+    """dup_scan searches myhome / ss.ge / korter (services/myhome_copies.py) for any object in work since 11-23: never the real
+    sites in tests (test_myhome_copies fakes search / ss_search itself)."""
+    from app.services import myhome_copies
+    monkeypatch.setattr(myhome_copies, "_page", lambda query: None)
+    monkeypatch.setattr(myhome_copies, "ss_search", lambda queries, pages=3: [])
+    monkeypatch.setattr(myhome_copies, "kr_search", lambda slug, query, pause=0.5: [])

@@ -43,7 +43,11 @@ TWIN_KM = 1.5        # pins this far apart are still «рядом» (weight only
 # point 11-21), not a building: «рядом на карте, 0 м» there said nothing (#15494 / #15491 at 80 %, other streets)
 CROWD = 10
 _crowded: dict = {"t": 0.0, "pts": frozenset()}
-LIVE = ("published", "pending_review", "copy")  # copy: a myhome copy found for an object (services/myhome_copies.py)
+LIVE = ("published", "pending_review", "copy", "rejected")  # copy: a myhome copy found for an object (services/myhome_copies.py)
+# rejected (11-23): competitors' tg posts (2,184 on prod, all «rejected» by the bot) and agents' FB ads are most often
+# the agents' copies of our objects — candidates of an object's «Похожие» only (find), never of an ad's; never
+# shown to clients (the bot's search reads «published»). ponytail: dHash only, no photo vectors (embeddings.LIVE_AD)
+AD_ONLY_LIVE = ("published", "pending_review", "copy")  # an ad's own «Похожие»
 CADASTRAL = re.compile(r"(?<![\d.])\d{2}\.\d{2}\.\d{2}\.\d{3}\.\d{3}(?:\.\d{2}\.\d{3})?(?![\d])")
 # «похожие фото (другой ракурс)»: meanbest of the two photo sets (each photo's best cosine to the other set, averaged
 # over both), SigLIP vectors in photo_vectors (app/embeddings.py). Measured 11-20 on 4,053 myhome Tbilisi rentals, 112
@@ -815,7 +819,8 @@ def find(db: Session, subject: str, user: User | None = None, limit: int = 30, i
     ads, ad_idx, ad_keys = _ads(db, competitors) if include_ads else ([], {}, {})
     linked = {key("l", x) for x in db.scalars(select(PropertyListing.listing_id))} if ads else set()
     # a linked ad is its object's: never listed on its own (the cache may predate the link)
-    cands = [o for o in objs if o["key"] not in skip] + [a for a in ads if a["key"] not in skip and a["key"] not in linked]
+    cands = [o for o in objs if o["key"] not in skip] + [a for a in ads if a["key"] not in skip and a["key"] not in linked
+                                                       and (kind == "p" or a["out"]["status"] in AD_ONLY_LIVE)]
     # Only a candidate with an identifying signal (score(): `identifying`) can be shown, so only those are scored:
     # the ones sharing an index key, a photo (dHash pigeonhole, photo vectors) or a decision. The rest stay < 65 %.
     want: set[str] = set()
@@ -1016,9 +1021,11 @@ def scan_exclusive(db: Session, pid: int, trigger: str = "exclusive") -> dict | 
     """«При эксклюзиве — сразу поиск дублей везде»: find() over the whole base (any status) and every live outside ad,
     competitors' channels too. Stored as a «duplicate_scan» event (the card shows «Найдены возможные дубли: N»);
     candidates with a strong signal not seen by the previous scan go to the object's agent and the operators.
-    A re-scan after new ads (trigger «new_ads») is logged only when the candidates changed. Commits."""
+    A re-scan after new ads (trigger «new_ads») is logged only when the candidates changed. David 11-23: an object in
+    work / published that is not an exclusive is searched too, shown on the card and in «Похожие» only (no alerts:
+    there is no exclusive to defend). Commits."""
     p = db.get(Property, pid)
-    if p is None or not p.is_exclusive:
+    if p is None or not (p.is_exclusive or p.status in P.DUP_LIVE):
         return None
     items = find(db, key("p", pid), None, limit=500)
     strong = [{"key": x["key"], "where": x["where"], "property_id": x["property_id"], "listing_id": x["listing_id"],
@@ -1031,14 +1038,26 @@ def scan_exclusive(db: Session, pid: int, trigger: str = "exclusive") -> dict | 
     gate_open = w is not None and w.status == "pending" and not (w.payload or {}).get("dups")
     if trigger == "new_ads" and prev.get("sig") == sig and not gate_open:  # new photos change the reasons: always
         return None
-    log_event(db, "property", pid, "duplicate_scan", None, n=len(items), strong=strong[:20], trigger=trigger, sig=sig)
+    # «Где ещё выложен» (David 11-23, any object): the outside ads it is confirmed / probably the same as
+    copies = [{"key": x["key"], "listing_id": x["listing_id"], "where": x["where"], "url": x["url"], "pct": x.get("pct"),
+               "level": dup_level(x)} for x in items if x["kind"] == "ad" and dup_level(x) in P.COPY_LEVELS
+              and P.source_type_of(Listing(id=x["listing_id"], source="")) in P.COPY_SITES][:50]
+    log_event(db, "property", pid, "duplicate_scan", None, n=len(items), strong=strong[:20], trigger=trigger, sig=sig,
+              copies=copies)
     gate = no_esign_gate(db, p, w, items, trigger == "dup_recheck")
     db.commit()
     if gate:
         P._notify("exclusive_dups_gate", p, *gate)
     fresh = [s for s in strong if s["key"] not in prev_keys]
-    if fresh and not gate:  # the gate's message lists them already
+    told = set()
+    if fresh and not gate and p.is_exclusive:  # the gate's message lists them already
         P._notify("exclusive_duplicates", p, len(items), fresh)
+        told = {s["key"] for s in fresh}
+    # new copies → one message to the object's agent; a scan before 11-23 stored none: it is the baseline, not news
+    if not prev or "copies" in prev:
+        was = {c["key"] for c in prev.get("copies") or []} | told
+        if new := [c for c in copies if c["key"] not in was]:
+            P._notify("object_copies", p, new)
     return {"n": len(items), "strong": strong, "fresh": fresh, "gate": gate[0] if gate else None}
 
 

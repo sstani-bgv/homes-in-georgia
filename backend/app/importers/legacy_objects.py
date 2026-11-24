@@ -183,8 +183,8 @@ def body_key(t: str) -> str | None:
 
 
 # channel announcements, not flats: «❗️#Rented Commercial space in 📍Vera has found a business», «#FlatRented ... found a
-# tenant», «Daily Actual Listing», «#NewUpdate Hi, Friends!»
-ANNOUNCEMENT = re.compile(r"found (?:a |new )*(?:tenant|business)|daily actual listing|#newupdate", re.I)
+# tenant», «#Sold ... found a new owner», «Daily Actual Listing», «#NewUpdate Hi, Friends!»
+ANNOUNCEMENT = re.compile(r"found (?:a |new )*(?:tenant|business|owner)|daily actual listing|#newupdate", re.I)
 
 
 def is_object_text(t: str | None) -> bool:

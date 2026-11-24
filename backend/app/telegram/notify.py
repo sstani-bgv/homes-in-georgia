@@ -384,18 +384,33 @@ WRITE_FIRST = {"ru": ("Чтобы оператор прислал вам вре�
                       "💬 მიწერეთ ოპერატორს")}
 
 
+INTRO_AGAIN_MIN = 10  # «💬 Contact» tapped again within this: no second greeting
+
+
 @safe
-def operator_intro(lead):
+def operator_intro(lead, always=False):
     """Right after the first ❤️ of a client the operator's account never talked to: the userbot writes first (it
     checks that this needs no Stars / Premium and that the client is reachable). If it can't, the bot gives the client
-    the prefilled DM link instead -> 'userbot' | 'link' | None."""
+    the prefilled DM link instead -> 'userbot' | 'link' | None. always («💬 Contact» under a channel post, Stanislav
+    11-23): every client gets it, known or not, naming this object; once per lead in INTRO_AGAIN_MIN minutes."""
     cl, i, lang = ctx(lead)
     lid = g(lead, "id")
-    ids = [r["id"] for r in store.q("SELECT id FROM leads WHERE client_id = %s ORDER BY id", (g(lead, "client_id"),))]
-    if ids and ids[0] < lid:  # two ❤️ at once both looked «first» (knows_operator): only the earliest lead writes
-        return None
+    if always:
+        if not store.q("INSERT INTO events (entity, entity_id, action, actor_label, data, at) SELECT 'lead', %s, 'operator_intro', "
+                       "'bot', '{}'::jsonb, now() WHERE NOT EXISTS (SELECT 1 FROM events WHERE entity = 'lead' AND entity_id = %s "
+                       f"AND action = 'operator_intro' AND at > now() - interval '{INTRO_AGAIN_MIN} minutes') RETURNING id",
+                       (str(lid), str(lid)), one=True):
+            return None
+        ids = [lid]
+    else:
+        ids = [r["id"] for r in store.q("SELECT id FROM leads WHERE client_id = %s ORDER BY id", (g(lead, "client_id"),))]
+        if ids and ids[0] < lid:  # two ❤️ at once both looked «first» (knows_operator): only the earliest lead writes
+            return None
     # the client picked it in the bot: name it as the bot's card does, no links (Stanislav 11-16; the street is agent-only)
     what = headline(i, lang) + (f" ({MORE[lang].format(n=len(ids) - 1)})" if len(ids) > 1 else "")
+    # «💬 Contact» under a channel post: the link to that post (Irakli 11-24 «надо чтобы была ссылка на пост»)
+    if always and (link := channel_post_of(g(lead, "listing_id"))) and "t.me/c/" not in link:
+        what += f"\n{link}"
     from app.telegram import userbot
     if userbot.send_to_client(cl, INTRO[lang].format(what=what)):
         return "userbot"
@@ -759,6 +774,19 @@ def fmt_date(d):
 
 
 @safe
+def deal_created(deal):
+    """A deal written by an agent / a recruit waits for the operator's confirmation (David 11-23: «уведомления не
+    пришло оператору»)."""
+    ag = store.user(g(deal, "agent_id")) or {}
+    did = g(deal, "id")
+    t = (f"🤝 <b>Новая сделка на подтверждение</b> #{did}\n\n"
+         f"🏠 {html.escape(g(deal, 'address') or '—')}\n👤 Агент: {html.escape(ag.get('name') or '—')}\n"
+         f"💵 Цена: <b>{texts.money(g(deal, 'price'))}</b> · комиссия {texts.money(g(deal, 'commission_total'))}\n"
+         f"🙋 Клиент: {html.escape(g(deal, 'client_name') or '—')}")
+    to_operators(None, did, t, lambda private: kb([[app_btn("📋 Открыть сделку", links.deal_app(did), private)]]))
+
+
+@safe
 def deal_confirmed(deal):
     """C9c to the agent. Everything else lives in the CRM: no #Rented to a work group (Stanislav 2026-11-08)."""
     ag = store.user(g(deal, "agent_id")) or {}
@@ -770,6 +798,14 @@ def deal_confirmed(deal):
         if g(deal, "rent_to"):
             t += f"\n🔔 Конец договора {fmt_date(g(deal, 'rent_to'))}: напомню за 30, 7 и 1 день"
         tg.send(ag["tg_id"], t, kb([[app_btn("📝 T0: оценить сделку", links.deal_app(g(deal, "id")))]]))
+
+
+@safe
+def level_changed(user_id, level):
+    """11-23 G: an agent's level changed (a confirmed / cancelled exclusive deal, or an admin's edit)."""
+    u = store.user(user_id) or {}
+    if u.get("tg_id") and u.get("is_active", True):
+        tg.send(u["tg_id"], f"📊 <b>Ваш уровень теперь {level}%</b>\nЭксклюзивных сделок: {u.get('exclusive_deals') or 0}")
 
 
 T14_INTRO = {"ru": "{name}, вы живёте в новой квартире 14 дней 🏡\nВсё ли хорошо? Оцените, пожалуйста, три пункта (это 10 секунд):",
@@ -883,6 +919,18 @@ def owner_transferred(agent_id, owner_name, by_name, props, reason=None):
 
 
 @safe
+def owner_transferred_away(agent_id, owner_name, to_name, by_name, props):
+    """The previous agent of a transferred owner (11-23 inventory G): his objects went along."""
+    ag = store.user(agent_id) or {}
+    if not ag.get("tg_id"):
+        return
+    ids = ", ".join(f"#{p['id']}" for p in props[:10])
+    tg.send(ag["tg_id"], f"👤 {e(by_name or 'Оператор')} передал собственника <b>{e(owner_name or '—')}</b> агенту {e(to_name)}"
+            + (f"\nОбъекты: {ids}" if ids else ""),
+            kb([[app_btn(f"🏠 Объект #{p['id']}", links.property_app(p["id"]))] for p in props[:5]]) if props else None)
+
+
+@safe
 def property_owner_followup(prop):
     ag = store.user(g(prop, "agent_id")) or {}
     if ag.get("tg_id"):
@@ -935,6 +983,24 @@ def exclusive_duplicates(prop, n, strong):
     if ag.get("tg_id"):
         tg.send(ag["tg_id"], text, kb([[app_btn("🏠 Открыть объект", links.property_app(pid))]]))
     to_operators("exclusive_duplicates", pid, text, lambda private: kb([[app_btn("🏠 Открыть объект", links.property_app(pid), private)]]))
+
+
+@safe
+def object_copies(prop, copies):
+    """David 11-23: the duplicate search found new ads of the object elsewhere → its agent, one message per scan
+    (only the ones not reported before). The card's «Где ещё выложен» has «Попросить снять» on each."""
+    pid = g(prop, "id")
+    ag = store.user(g(prop, "agent_id")) or {}
+    if not ag.get("tg_id"):
+        return
+    def line(c):
+        pct = f" · {round(c['pct'])}%" if c.get("pct") is not None else ""
+        return f"• {e(c.get('where') or 'другой сайт')}{pct}" + (f"\n{e(c['url'])}" if c.get("url") else "")
+    more = f"\n…и ещё {len(copies) - 10}" if len(copies) > 10 else ""
+    text = (f"📍 <b>Объект #{pid} выложен ещё где-то: {len(copies)}</b>\n{e(prop_title(prop))}\n\n"
+            + "\n".join(line(c) for c in copies[:10]) + more
+            + "\n\nВ карточке → «Где ещё выложен»: «Попросить снять» или «Не дубль».")
+    tg.send(ag["tg_id"], text, kb([[app_btn("🏠 Открыть объект", links.property_app(pid))]]))
 
 
 CHDUP_DONE = {"deleted": "🗑 Новый пост удалён, объект #{drop} объединён с #{keep}", "kept": "✅ Отмечено: не дубль",
@@ -1050,6 +1116,37 @@ def change_request_decided(cr):
 def agency_chat():
     ch = conf("PUBLISH_CHAT_ID").strip() or "@" + conf("AGENCY_CHANNEL", "rent_tbilisi_ge").lstrip("@")
     return ch
+
+
+# David / Stanislav 11-23: flats / houses for rent → the agency channel; sale → @sale_in_tbilisi, commercial → @homesingeorgia
+# (the Homes in Georgia community). Управление → Настройки: settings publish_chat_<kind>, empty → the agency channel.
+
+
+def _can_post(chat):
+    """The bot may post and delete posts in the chat (getChatMember of itself; not a member → Telegram refuses)."""
+    bot = conf("BOT_TOKEN").split(":")[0]
+    m = tg.call("getChatMember", chat_id=chat, user_id=bot) if bot.isdigit() else None
+    return bool(m) and (m.get("status") == "creator" or (m.get("status") == "administrator" and bool(m.get("can_post_messages"))
+                                                        and bool(m.get("can_delete_messages"))))
+
+
+def post_chat(kind):
+    """-> (chat, warning) for a post of this kind (rent | sale | commercial | cars | daily | developments). The bot without the rights there:
+    the agency channel and the warning (the object card shows it) — publishing never breaks over the channel."""
+    main = agency_chat()
+    from app.services.settings import DEFAULTS  # store.setting reads the row only: no row = the default
+    key = f"publish_chat_{kind}"
+    raw = store.setting(key)
+    chat = (DEFAULTS.get(key, "") if raw is None else raw).strip() or main
+    if chat == main or _can_post(chat):
+        return chat, None
+    log.warning("publish: the bot can't post to %s (%s), the post goes to %s", chat, kind, main)
+    return main, f"Бот не админ в {chat} — пост ушёл в основной канал {main}"
+
+
+def _topic(chat, key):
+    """PUBLISH_TOPIC_* are topics of PUBLISH_CHAT_ID only."""
+    return chat_and_topic("PUBLISH_CHAT_ID", key)[1] if chat == agency_chat() else None
 
 
 def _album(items, n_photos=9):
@@ -1306,11 +1403,12 @@ def publish_post(prop):
     PUBLISH_TOPIC_ALBUM; the files without watermark as documents into PUBLISH_TOPIC_ORIGINALS; the owner's contact
     with the post link into PUBLISH_TOPIC_OWNER (topics only when set). Caption: prop.post_text (services.properties.
     publish) or the description; the footer lines become links. -> (message_id, url, chat, [every message id of the
-    post: originals, album, owner card]) or None; the ids let properties.unpost delete the whole post later."""
-    chat = agency_chat()
-    _, album_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ALBUM")
-    _, originals_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_ORIGINALS")
-    _, owner_topic = chat_and_topic("PUBLISH_CHAT_ID", "PUBLISH_TOPIC_OWNER")
+    post: originals, album, owner card], warning) or None; the ids let properties.unpost delete the whole post later.
+    The chat: post_chat(prop.post_channel) — rent by default; warning: it went to the agency channel instead."""
+    chat, warning = post_chat(g(prop, "post_channel") or "rent")
+    album_topic = _topic(chat, "PUBLISH_TOPIC_ALBUM")
+    originals_topic = _topic(chat, "PUBLISH_TOPIC_ORIGINALS")
+    owner_topic = _topic(chat, "PUBLISH_TOPIC_OWNER")
     keys = g(prop, "post_media_keys")  # [(photo|video, storage key)]: sale objects and cars keep keys in the row
     # a property (no keys) is on the site as o<id>; cars have no «APARTMENTS ON MAP»
     caption = post_html(g(prop, "post_text") or g(prop, "description") or prop_title(prop),
@@ -1359,7 +1457,56 @@ def publish_post(prop):
                                             o["name"] and f"👤 {e(o['name'])}", rows and "📞 " + e(phones_text(rows, "\n📞 ")),
                                             url and f'🔗 <a href="{e(url)}">Ссылка на объявление</a>') if x),
                             thread_id=owner_topic))
-    return m["message_id"], url, chat, [x["message_id"] for x in sent if x]
+    return m["message_id"], url, chat, [x["message_id"] for x in sent if x], warning
+
+
+@safe
+def originals_post(pid, chat, text):
+    """«HIG Original Photos» (Irakli / David 11-23, their sample): every photo without the watermark as documents (albums
+    of 10), then the post text (HTML), then the videos as documents. A video over BOT_UPLOAD_MAX (the Bot API's 50 MB) is
+    left out with a line in the text. -> how many files went out, or None."""
+    with tempfile.TemporaryDirectory() as tmp:
+        rows = store.q("SELECT kind, path FROM property_media WHERE property_id = %s AND kind IN ('photo', 'video') "
+                       "ORDER BY position, id", (pid,))
+        files = [(r["kind"], p, r["path"]) for r in rows if (p := storage.fetch(r["path"], tmp))]
+        photos = [p for k, p, _ in files if k == "photo"]
+        videos, big = [], []
+        for k, p, key in files:
+            if k == "video":
+                (videos if os.path.getsize(p) <= BOT_UPLOAD_MAX else big).append((p, key))
+        if not photos:
+            return None
+        n = 0
+        for i in range(0, len(photos), 10):
+            if send_group(chat, None, [("document", p) for p in photos[i:i + 10]]):
+                n += len(photos[i:i + 10])
+        tg.send(chat, text)
+        for p, _ in videos:
+            if tg.call("sendDocument", files={"document": p}, chat_id=chat):
+                n += 1
+        from app.telegram import userbot
+        for p, key in big:  # over the Bot API's 50 MB: the operator account sends it (Stanislav 11-24)
+            if userbot.send_media(chat, key):
+                n += 1
+                continue
+            log.warning("originals of %s: video %s is %d MB, the operator account didn't send it", pid, key, os.path.getsize(p) >> 20)
+            tg.send(chat, f"🎥 Видео {os.path.getsize(p) >> 20} МБ не отправилось (больше 50 МБ, аккаунт оператора не смог) — "
+                          "скачайте в карточке CRM (кнопка «Скачать видео»)")
+        return n or None
+
+
+@safe
+def rented_post(pid, text, chat=None):
+    """«Сдано» in the channel (David 11-23): the object's first photo (watermarked) with the short text, as the agency's
+    own #FlatRented posts; a text post without a photo. chat: where the object's post was (default the agency channel).
+    -> (message_id, url) or None."""
+    chat = chat or agency_chat()
+    topic = _topic(chat, "PUBLISH_TOPIC_ALBUM")
+    with tempfile.TemporaryDirectory() as tmp:
+        photo = next(((k, p) for k, p, _ in media_paths(pid, tmp) if k == "photo"), None)
+        res = send_group(chat, topic, _bot_media([photo], tmp), text) if photo else [tg.send(chat, text, thread_id=topic)]
+    m = res[0] if res else None
+    return (m["message_id"], post_link(m, chat)) if m else None
 
 
 @safe
@@ -1437,6 +1584,26 @@ def daily_rent_conflicts(conflicts, names):
             tg.send(t, text, kb([[app_btn("📅 Открыть шахматку", url, True)]]) if url else None)
 
 
+@safe
+def daily_rent_digest(text):
+    """«Посуточная аренда»: the morning «Сегодня» (services/daily_rent_auto.digest_text, already HTML) → the Daily Rent
+    managers in private, with the button to the screen."""
+    url = links.miniapp("daily-rent/today")
+    for t in store.staff_tg_ids(("daily_rent_manager",)):
+        tg.send(t, text, kb([[app_btn("☀️ Открыть «Сегодня»", url, True)]]) if url else None)
+
+
+@safe
+def daily_rent_owner_reports(reports, month):
+    """On the 1st: every apartment's report for the past month (services/daily_rent_auto.owner_reports) → the Daily Rent
+    managers, one message per apartment, ready to forward to the owner."""
+    for t in store.staff_tg_ids(("daily_rent_manager",)):
+        tg.send(t, f"📊 <b>Отчёты собственникам за {e(month)}</b>\nПерешлите каждый собственнику ({len(reports)}).")
+        for r in reports:
+            head = f"Для собственника: {e(r['owner_contact'])}\n\n" if r.get("owner_contact") else ""
+            tg.send(t, head + e(r["text"]))
+
+
 def lead_btn(lid):
     return lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]])
 
@@ -1470,3 +1637,76 @@ def evaluation_alert(evaluation):
 
 
 CARDS = {"slots": _slots_card, "remind": _remind_card, "survey": _survey_card, "reason": _reason_card, "t14": _t14_card}
+
+
+# ---------- key actions → the agent and the operator (David 11-23: «на каждое ключевое действие и агенту, и оператору»)
+
+OPEN = {"property": ("🏠 Открыть объект", links.property_app), "lead": ("📋 Открыть заявку", links.lead_app),
+        "deal": ("🤝 Открыть сделку", links.deal_app), "contract": ("📄 Открыть договор", lambda i: links.miniapp(f"contracts?id={i}"))}
+
+
+@safe
+def staff_event(text, kind, ref, agents=(), actor=None, ops=True):
+    """To the agents (user ids), the one who pressed it (actor: a confirmation, David 11-24 «уведомление не пришло что
+    снято») and, ops, the operators (operators_targets: the connected operator account), nobody twice. The button
+    opens the object / lead / deal / contract."""
+    label, url = OPEN[kind]
+    skip: set[str] = set()
+    for aid in dict.fromkeys(a for a in (*agents, actor) if a):
+        u = store.user(aid) or {}
+        if u.get("tg_id") and u.get("is_active", True) and str(u["tg_id"]) not in skip:
+            skip.add(str(u["tg_id"]))
+            tg.send(u["tg_id"], text, kb([[app_btn(label, url(ref))]]))
+    if ops:
+        for chat, topic in operators_targets():
+            if str(chat) not in skip:
+                tg.send(chat, text, kb([[app_btn(label, url(ref), is_private(chat))]]), thread_id=topic)
+
+
+def _note(note):
+    return f"\n\n{e(note)}" if note else ""
+
+
+@safe
+def prop_event(prop, head, actor=None, agents=None, ops=True, note=None):
+    """head (HTML) · объект #N + address · price; agents: default the object's agent."""
+    pid = g(prop, "id")
+    staff_event(f"{head} · объект #{pid}\n{e(prop_title(prop))}{_note(note)}", "property", pid,
+                [g(prop, "agent_id")] if agents is None else agents, actor, ops)
+
+
+@safe
+def lead_event(lead, head, actor=None, agents=None, ops=True, note=None):
+    """head · заявка #N + the client and the flat; agents: default the lead's agent."""
+    cl, i, _ = ctx(lead)
+    lid = g(lead, "id")
+    staff_event(f"{head} · заявка #{lid}\n👤 {e(client_name(cl))}" + (f" · 🏠 {e(address(i))}" if i else "") + _note(note),
+                "lead", lid, [g(lead, "agent_id")] if agents is None else agents, actor, ops)
+
+
+@safe
+def deal_event(deal, head, actor=None, agents=None, ops=True, note=None):
+    """head · сделка #N + address · price; agents: default the deal's agent."""
+    did = g(deal, "id")
+    staff_event(f"{head} · сделка #{did}\n🏠 {e(g(deal, 'address') or '—')} · {texts.money(g(deal, 'price'))}{_note(note)}",
+                "deal", did, [g(deal, "agent_id")] if agents is None else agents, actor, ops)
+
+
+@safe
+def contract_event(contract, head, actor=None, ops=True, note=None):
+    """head · договор #N; to the lead's agent (else the contract's author) and the operators."""
+    cid, ld = g(contract, "id"), store.lead(g(contract, "lead_id")) or {}
+    agent = ld.get("agent_id") or g(contract, "created_by")
+    who = " · ".join(e(x) for x in (g(contract, "address"), g(contract, "client_name")) if x)
+    staff_event(f"{head} · договор #{cid}" + (f"\n🏠 {who}" if who else "") + (f" · заявка #{ld['id']}" if ld else "") + _note(note),
+                "contract", cid, [agent], actor, ops)
+
+
+@safe
+def deal_overdue(contract, agents):
+    """24 h after both parties signed and no deal (David 11-23): the agent / recruit and the operators."""
+    cid = g(contract, "id")
+    who = " · ".join(e(x) for x in (g(contract, "address"), g(contract, "client_name")) if x)
+    staff_event(f"⛔ <b>Оформите сделку по договору #{cid}</b>" + (f"\n🏠 {who}" if who else "")
+                + "\n\nДоговор подписан обеими сторонами больше 24 часов назад, а сделки нет. "
+                  "Пока сделка не оформлена, остальная работа в CRM закрыта.", "contract", cid, agents)

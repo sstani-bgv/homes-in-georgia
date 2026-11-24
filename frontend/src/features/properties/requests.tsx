@@ -19,7 +19,8 @@ function val(field: string, v: unknown) {
   if (field === 'archive_reason') return ARCHIVE_REASON[String(v)] || String(v);
   if (['price', 'deposit', 'sale_price'].includes(field)) return money(Number(v));
   if (field === 'duplicate_of') return `#${v}`;
-  if (Array.isArray(v)) return phonesLine(v) || '—';  // owner_phones
+  if (Array.isArray(v)) return v.every((x) => typeof x !== 'object') ? v.join(', ') : phonesLine(v) || '—';  // owner_phones
+  if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
 }
 
@@ -89,7 +90,7 @@ export function RequestRow({ r, link = (id: number) => `/objects/${id}`, showObj
       <div className="col gap-sm" style={{ fontSize: 13 }}>
         {r.changes.map((c) => (
           <div key={c.field} className="row row-wrap gap-sm">
-            <span className="muted" style={{ minWidth: 150 }}>{CR_FIELD[c.field] || c.field}</span>
+            <span className="muted" style={{ minWidth: 150 }}>{CR_FIELD[c.field] || (c.field.startsWith('pf:') ? t('Пост: {k}', { k: c.field.slice(3) }) : c.field)}</span>
             <s className="muted">{val(c.field, c.old)}</s><span>→</span><b>{val(c.field, c.new)}</b>
           </div>
         ))}

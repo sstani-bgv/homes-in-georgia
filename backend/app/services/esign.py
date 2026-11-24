@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Contract, ContractSigner, User
 from app.services import contracts as C, jobs
-from app.services.common import TZ, log_event, now
+from app.services.common import TZ, log_event, notify_later, now
 from app.services.errors import DomainError
 
 log = logging.getLogger(__name__)
@@ -217,6 +217,7 @@ def sign(db: Session, token: str, data: dict, ip: str | None, user_agent: str | 
     else:
         _notify(db, c, f"✍️ Договор #{c.id}: {CRM_ROLE[s.role].lower()} {s.full_name} подписал(а) электронно. "
                        f"Ждём вторую сторону.")
+        _staff(c, f"✍️ <b>{CRM_ROLE[s.role]} подписал(а) электронно</b>", f"{s.full_name}. Ждём вторую сторону.")
     return view(db, token)
 
 
@@ -329,12 +330,23 @@ def finalize(db: Session, cid: int) -> str:
     pdf = C.render_pdf(signed_html(c, rows))
     c.signed_pdf_path = C._store_pdf(c, pdf, signed=True)
     c.status, c.signed_at, c.signed_by, c.drive_file_id, c.updated_at = "signed", now(), None, None, now()
+    C.start_deal_due(db, c)
     jobs.schedule(db, "contract_drive", c.id, now())
     log_event(db, "contract", c.id, "signed", None, label="Электронная подпись", esign=True,
               pdf_sha256=hashlib.sha256(pdf).hexdigest())
     db.commit()
     _notify(db, c, f"✅ Договор #{c.id} подписан электронно обеими сторонами.", pdf)
+    _staff(c, "✅ <b>Договор подписан электронно обеими сторонами</b>")
     return "ok"
+
+
+def _staff(c: Contract, head: str, note: str | None = None) -> None:
+    """David 11-23: the lead's agent and the operator too (the author has his message above)."""
+    from app.telegram import notify
+    try:
+        notify.contract_event(c, head, c.created_by, True, note)
+    except Exception:  # noqa: BLE001
+        log.exception("notify.contract_event failed")
 
 
 def _notify(db: Session, c: Contract, text: str, pdf: bytes | None = None) -> None:

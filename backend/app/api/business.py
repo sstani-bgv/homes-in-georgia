@@ -73,7 +73,7 @@ class EvaluationIn(BaseModel):
 
 
 @router.post("/deals/calc")
-def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
+def deals_calc(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("recruit"))):
     data = body.model_dump()
     staff = at_least(user, "operator")
     if not staff:  # the same payout inputs deals.create takes from an agent (his own deal only, so his own level)
@@ -107,7 +107,7 @@ def deals_find(cadastral: str, db: Session = Depends(get_db, scope="function"), 
 
 
 @router.post("/deals")
-def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
+def deals_create(body: DealIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("recruit"))):
     d = deals.create(db, body.model_dump(exclude_none=True), user)
     return deals.out(d, user)
 
@@ -132,7 +132,7 @@ def deals_confirm(deal_id: int, db: Session = Depends(get_db, scope="function"),
 
 @router.post("/deals/{deal_id}/cancel")
 def deals_cancel(deal_id: int, body: ReasonIn, db: Session = Depends(get_db, scope="function"),
-                 user: User = Depends(require_level("agent"))):
+                 user: User = Depends(require_level("recruit"))):
     return deals.out(deals.cancel(db, deal_id, user, body.reason), user)
 
 

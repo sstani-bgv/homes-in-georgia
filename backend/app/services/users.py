@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import FIELD, FIELD_SQL, ROLES, SUPER, User, at_least
-from app.services.common import get_or_404, log_event
+from app.services.common import get_or_404, log_event, notify_later
 from app.services.errors import DomainError
 
 EDITABLE = ("name", "first_name", "last_name", "username", "phone", "role", "level", "mentor_id", "districts", "is_active", "login", "photo_url",
@@ -280,6 +280,8 @@ def update(db: Session, uid: int, data: dict, actor: User | None = None, full_pr
     log_event(db, "user", u.id, "updated", actor, **changed)
     if diff := {s: {"from": was[s], "to": a} for s, a in perms.for_user(u).items() if a != was[s]}:
         log_event(db, "user", u.id, "perms", actor, role=u.role, changes=diff)  # GET /users/{id}/perms-history
+    if "level" in changed and (actor is None or actor.id != u.id):  # 11-23 G: the agent learns his new level
+        notify_later(db, "level_changed", u.id, changed["level"])
     db.commit()
     if changed.get("ie_number"):
         from app.services import nda

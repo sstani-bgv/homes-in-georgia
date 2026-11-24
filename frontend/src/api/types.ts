@@ -33,10 +33,12 @@ export interface Page<T> { items: T[]; total: number }
 
 export interface UserRef { id: number; name: string; username?: string | null; photo_url?: string | null; agent_tag?: string | null }
 
-export interface Plans { photo: number; showing: number; stickers: number; rental: number }
+export interface Plans { photo: number; showing: number; stickers: number; rental: number; /** «Поднять пост» a day (backend REPOST_LIMIT 3) */ reposts?: number }
 
 export interface User {
   id: number;
+  /** /auth/me: a signed contract whose 24 h for the deal ran out — the CRM opens only that deal (features/contracts/DealLock) */
+  deal_overdue?: { id: number; address: string | null; client_name: string | null; lead_id: number | null; due_at: string } | null;
   tg_id?: number | null;
   username?: string | null;
   name: string;
@@ -126,6 +128,12 @@ export interface Listing {
 export interface ListingMatch { property_id: number; address?: string | null; score: number; reasons: string[] }
 /** a live outside ad of an exclusive object (url hidden unless you may see the owner contacts) */
 export interface ExternalAd { listing_id: string; source?: string | null; url?: string | null }
+/** «Где ещё выложен» (backend properties.copies): a linked outside ad (level linked; an exclusive's block its publication)
+ * or one the duplicate search calls confirmed / probable. */
+export interface CopyAd {
+  listing_id: string; where: string; url?: string | null; pct?: number | null; level: 'linked' | 'confirmed' | 'probable';
+  who?: 'собственник' | 'агент' | null; blocking: boolean; asked?: { at: string; by?: string | null } | null;
+}
 export interface Elsewhere extends ExternalAd { verdict: 'linked' | 'same' | 'similar'; reasons: string[] }
 
 /** «Похожие объекты» (backend services/similar.py): our object or a live outside ad that may be the same flat. */
@@ -143,6 +151,11 @@ export interface SimilarItem {
   price_usd?: number | null; photos: string[]; url?: string | null; agent?: string | null; is_exclusive?: boolean;
   /** the object's card opens for this user (others' objects: closed, the reasons and the ad photos still show) */
   can_open?: boolean;
+  /** «Похожие» of an object (Stanislav 11-24, «Где ещё выложен» merged in): linked — the object's own ad (first, «привязано»),
+   * blocking — an exclusive's, publication closed until «Проверено: снято»; site — a MyHome / SS / Livo / Korter ad with
+   * who posted it, «Попросили снять» and «Проверено: снято» */
+  linked?: boolean; blocking?: boolean; site?: boolean; who?: string | null;
+  asked?: { at: string; by?: string | null } | null; removed?: boolean;
 }
 
 export interface SimilarFlat {
@@ -192,6 +205,7 @@ export interface Property {
   duplicate_scan?: { n?: number; pending?: boolean; at?: string; trigger?: string;
     strong?: { key: string; where: string; property_id: number | null; listing_id: string | null; url: string | null; address: string | null; reasons: string[] }[] } | null;
   missing?: string[]; // what still blocks «Отправить оператору» (backend properties.missing_fields)
+  photo_rooms?: string[]; // Управление → Настройки: the room tags offered under a photo
   room_picker?: boolean; // Управление → Настройки: the per-photo room tag (optional) is shown
 
   id: number;
@@ -249,11 +263,16 @@ export interface Property {
   deals?: PropertyDeal[];
   /** exclusive objects: live outside ads → «Эксклюзив висит на …», publishing as exclusive is blocked */
   exclusive_conflict?: ExternalAd[];
+  copies?: CopyAd[];
   /** stage 6: the operator's first approve / publish; after it locked_fields go through «Запрос оператору» for the agent */
   verified_at?: string | null;
   /** stage 10: «Собственник согласен показать клиентам» */
   fast_track_at?: string | null;
   locked_fields?: string[];
+  /** published, by hand today: agents' left of 3 (null: staff, no limit); an agent's post edit goes to the operator */
+  reposts_left?: number | null;
+  reposts_limit?: number | null;
+  post_moderated?: boolean;
   /** stage 7: «Новый объект из сделки — проверить» (typed in the deal form, not verified yet) */
   needs_check?: boolean;
   /** full card, staff and the object's agent: pending «Запросы оператору» */
@@ -292,7 +311,7 @@ export interface ChangeRequest {
 /** GET /properties/:id/post: the channel caption built from the object (services.properties.post_text). */
 export interface PostDraft { text: string; hashtags: string[]; channels: string[] }
 
-export interface Publication { id: number; channel: string; status: 'draft' | 'published' | 'removed'; url?: string | null; message_id?: string | null; published_at?: string | null; removed_at?: string | null; /** the post could not be deleted from Telegram (repost / rented) */ delete_error?: string | null }
+export interface Publication { id: number; channel: string; status: 'draft' | 'published' | 'removed'; url?: string | null; message_id?: string | null; published_at?: string | null; removed_at?: string | null; /** the post could not be deleted from Telegram (repost / rented) */ delete_error?: string | null; /** the post went to the main channel: the bot can't post to its own one */ warning?: string | null }
 export interface PropertyAd { listing_id: string; source?: string | null; status?: string | null; url?: string | null; price_usd?: number | null; first_seen?: string | null; last_seen?: string | null; origin: boolean; removed_checked_at?: string | null }
 export interface PropertyDeal { id: number; status: string; deal_type?: string | null; price?: number | null; agent?: string | null; rent_from?: string | null; rent_to?: string | null; created_at?: string | null }
 
@@ -442,6 +461,7 @@ export interface Contract extends ContractSummary {
   lead_status?: string | null;
   /** the lead's deal while it is pending (deal_id comes with its confirm) */
   lead_deal_id?: number | null;
+  deal_due_at?: string | null;  // signed: the deal is due by then, else the agent's CRM is locked (David 11-23)
   /** the wizard's CxData + _step/_dep/_end, _edits = clause edits (templates.ts CxEdits) (full payloads) */
   data?: Record<string, string | number | boolean | object | null> | null;
   title?: string | null;

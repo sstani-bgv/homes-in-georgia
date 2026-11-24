@@ -122,7 +122,7 @@ def leads_contract(lead_id: int, db: Session = Depends(get_db, scope="function")
 
 
 @router.get("/leads/{lead_id}/deal-prefill")
-def leads_deal_prefill(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("agent"))):
+def leads_deal_prefill(lead_id: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("recruit"))):
     """Deal page («Оформить сделку»): the fields of the lead's signed contract; the form's own lead/object prefill
     covers the rest (contacts, agent, object)."""
     lead = _visible(db, lead_id, user)

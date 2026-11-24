@@ -106,6 +106,7 @@ class Contract(Base):
     status = Column(Text, nullable=False, server_default="draft")
     signed_at = Column(DateTime(timezone=True))
     signed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    deal_due_at = Column(DateTime(timezone=True))  # signed: the deal is due by then, else the agent is locked (0037)
     close_reason = Column(Text)
     close_comment = Column(Text)
     closed_at = Column(DateTime(timezone=True))

@@ -299,7 +299,7 @@ def test_rent_object_site_button(db, client):
     db.add(PropertyMedia(property_id=p.id, kind="photo", path="properties/x/1.jpg", position=0))
     db.commit()
     assert client.get(f"/api/public/site/listings/o{p.id}").status_code == 200
-    assert client.post(f"/api/properties/{p.id}/site", headers=auth(agent), json={"on": False}).status_code == 403
+    assert client.post(f"/api/properties/{p.id}/site", headers=auth(make_user(db, "agent", "Чужой")), json={"on": False}).status_code == 403
     r = client.post(f"/api/properties/{p.id}/site", headers=auth(op), json={"on": False}).json()
     assert r["site_hidden"] is True and r["status"] == "published"
     assert client.get(f"/api/public/site/listings/o{p.id}").status_code == 404

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, paginate, require
+from app.api.deps import current_user, paginate, require, require_level
 from app.db import get_db
 from app.models import User
 from app.services import contracts as C, esign as E
@@ -106,6 +106,17 @@ def contracts_list(status: str | None = None, lead_id: int | None = None, deal_i
     return paginate(db, C.query(db, user, status, lead_id, q, deal_id, agent_id, property_id), lambda c: C.out(db, c), limit, offset)
 
 
+class TranslateIn(BaseModel):
+    text: str = Field(max_length=10_000)
+    to: list[str] = Field(max_length=3)
+
+
+@router.post("/contracts/translate")
+def contracts_translate(body: TranslateIn):
+    """An edited / added clause of a bilingual contract into the other column's language (frontend changeClause)."""
+    return C.translate(body.text, body.to)
+
+
 @router.get("/properties/{pid}/contract", dependencies=[CREATE])
 def property_contract(pid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     """The wizard's prefill from the object card («Оформить договор аренды», Irakli 11-15), as GET /leads/{id}/contract:
@@ -188,6 +199,12 @@ def contracts_esign_cancel(cid: int, db: Session = Depends(get_db, scope="functi
 @router.post("/contracts/{cid}/close", dependencies=[UPDATE])
 def contracts_close(cid: int, body: CloseIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
     return C.out(db, C.close(db, cid, user, body.reason, body.comment), full=True)
+
+
+@router.post("/contracts/{cid}/deal-due/lift")
+def contracts_deal_due_lift(cid: int, db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("operator"))):
+    """«Снять блокировку»: the agent's 24 h lock for this contract's deal is lifted (the contract is cancelled, …)."""
+    return C.out(db, C.lift_deal_due(db, cid, user), full=True)
 
 
 @router.post("/contracts/{cid}/share", dependencies=[UPDATE])

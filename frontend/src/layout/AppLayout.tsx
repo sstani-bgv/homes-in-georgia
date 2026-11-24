@@ -12,6 +12,7 @@ import { itemsOf, IS_MOCK } from '../api/client';
 import type { Role } from '../api/types';
 import { useAuth, useTgBackButton } from '../auth/AuthContext';
 import { useScrollMemory } from './back';
+import { DealLock } from '../features/contracts/DealLock';
 import { Avatar, Badge, Drawer, Modal, Seg } from '../components/ui';
 import { ROLE_LABEL } from '../lib/format';
 import { LANG, LANGS, setLang, t } from '../lib/i18n';
@@ -23,6 +24,7 @@ export const NAV: NavItem[] = [
   { to: '/objects', label: t('Объекты'), icon: Building2 },
   { to: '/leads', label: t('Заявки'), icon: Inbox },
   { to: '/contracts', label: t('Договоры'), icon: FileText, perm: 'contracts' },  // «Права»; default: recruits too (Irakli 11-22)
+  { to: '/deals', label: t('Сделки'), icon: Handshake, roles: STAFF },  // operators confirm agents' deals here (David 11-23)
   { to: '/calendar', label: t('Календарь'), icon: CalendarDays },
   // hge.ge's cars (sales are objects: «Объекты» → Продажа, Stanislav 11-15)
   { to: '/cars', label: t('Авто'), icon: Car, roles: CARS_ROLES },
@@ -38,7 +40,7 @@ export const NAV: NavItem[] = [
 /** «+ Добавить» sheet from the old CRM (quickAction: object, deal, contract, report, showing, check). */
 const QUICK: { to: string; title: string; sub: string; icon: LucideIcon; agent?: boolean; perm?: PermSection }[] = [  // perm: «Права» create
   { to: '/objects?new=1', title: t('Объект'), sub: t('Завести вручную'), icon: Plus },
-  { to: '/deals/new', title: t('Сделку'), sub: t('Расчёт и День 0'), icon: Handshake, agent: true },  // Irakli 2026-11-11: back in «Добавить»
+  { to: '/deals/new', title: t('Сделку'), sub: t('Расчёт и День 0'), icon: Handshake },  // Irakli 2026-11-11: back in «Добавить»; recruits too (Stanislav 11-23)
   { to: '/contracts?new=1', title: t('Договор'), sub: t('Создать договор'), icon: FileText, perm: 'contracts' },
   { to: '/reports?kind=general', title: t('Отчёт'), sub: t('Общий отчёт'), icon: ClipboardList },
   { to: '/reports?kind=showing', title: t('Показ'), sub: t('Отчёт о показе'), icon: Eye },
@@ -140,7 +142,7 @@ export function AppLayout() {
           {!only && <button className="btn btn-sm" onClick={() => setAdd(true)} aria-label={t('Добавить')}><Plus size={16} /><span className="hide-mobile">{t('Добавить')}</span></button>}
         </header>
         <main className="content">
-          <Outlet />
+          <DealLock><Outlet /></DealLock>
         </main>
       </div>
       <nav className="bottom-nav">

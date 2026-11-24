@@ -15,13 +15,22 @@ DEFAULTS = {
     "take_idle_min": "1440",  # an object taken from «Новые объявления» and not in work goes back after N min (a day, David 11-22); 0 = off
     "owner_lease_remind_days": "30,7",  # «Собственник сдал»: Telegram to the agent N days before the lease ends
     "room_picker": "1",  # media upload: the per-photo room tag (always optional); 0 hides it
+    # the room tags offered under a photo, one per line (Управление → Настройки, David 11-23); «Ванная» is now «Санузел»
+    "photo_rooms": "\n".join(("Гостиная", "Кухня", "Спальня 1", "Спальня 2", "Спальня 3", "Санузел", "Балкон", "Терраса",
+                              "Вид из окна", "Прихожая", "Гардероб", "Кабинет", "Подъезд", "Фасад")),
+    # the Telegram channel of a post per kind (notify.post_chat, David / Stanislav 11-23): the community's channels; empty =
+    # PUBLISH_CHAT_ID (cars, daily rent, developments: channels not known yet; daily / developments are not posted yet)
+    "publish_chat_rent": "", "publish_chat_sale": "@sale_in_tbilisi", "publish_chat_commercial": "@homesingeorgia",
+    "publish_chat_cars": "", "publish_chat_daily": "", "publish_chat_developments": "",
+    "originals_chat_id": "",  # photos without the watermark after a publication (Irakli 11-23); the bot's /originals_here
     "dashboard_metrics": '["deals","platform","active_objects","leaderboard","funnel","response_times"]',
 }
 
 
 # userbot_session: the operator's Telegram login (a full account access), never leaves the server
 HIDDEN = ("client_catalog", "userbot_tg_id", "userbot_session", "source_runs", "source_every_min", "llm_usage")
-PROTECTED = ("group_chat_id", "lead_target")  # Telegram routing (an integration): superadmin only (Irakli 11-12)
+PROTECTED = ("group_chat_id", "lead_target", "publish_chat_rent", "publish_chat_sale", "publish_chat_commercial",
+             "publish_chat_cars", "publish_chat_daily", "publish_chat_developments", "originals_chat_id")  # Telegram routing (an integration): superadmin only (Irakli 11-12)
 NUMERIC_MINUTES = ("sla_operator_take_min", "sla_agent_slots_min", "sla_slots_to_client_min", "client_promise_min")
 _MISS = object()
 

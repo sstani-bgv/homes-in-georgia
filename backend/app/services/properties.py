@@ -27,7 +27,7 @@ from app.models import (ARCHIVE_REASONS, PUBLICATION_CHANNELS, ChannelPost, Clie
 from app.services import jobs
 from app.services import users as users_svc
 from app.services import settings as settings_svc
-from app.services.common import aware, clean_cadastral, get_or_404, jload, log_event, now, now_text
+from app.services.common import aware, clean_cadastral, get_or_404, jload, log_event, notify_later, now, now_text
 from app.services.dedup import (address_match, e164, extract_phones, norm_address, norm_phone, owner_phones, phone_match,
                                  phone_rows, set_owner_phones)
 from app.services.errors import DomainError, forbidden
@@ -597,8 +597,16 @@ def schedule_lease_reminders(db: Session, p: Property) -> None:
 
 
 def is_locked_for(p: Property, user: User) -> bool:
-    """The agent's key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY)."""
-    return not at_least(user, "operator") and p.verified_at is not None
+    """Someone else's verified object: key fields and archiving go through «Запрос оператору» (LOCKED_AFTER_VERIFY).
+    Stanislav 11-23: the object's own agent has every button the operator has on it — applied at once, logged, and the
+    operator is told (agent_did)."""
+    return not at_least(user, "operator") and p.verified_at is not None and p.agent_id != user.id
+
+
+def agent_did(p: Property, actor: User | None, head: str, note: str | None = None) -> None:
+    """The agent changed his verified object himself (no «Запрос оператору» any more): the operators hear of it."""
+    if actor is not None and not at_least(actor, "operator") and p.verified_at is not None:
+        _notify("prop_event", p, head, actor.id, [], True, note)
 
 
 def _current(db: Session, p: Property, k: str):
@@ -657,21 +665,64 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
     locked = {}
     if is_locked_for(p, actor):
         data, locked = split_locked(db, p, data)
+    if post_moderated(db, p, actor):
+        data, more = split_post(p, data)
+        locked.update(more)
+    was = {k: _norm(k, _current(db, p, k)) for k in LOCKED_AFTER_VERIFY}
     apply_update(db, p, data, actor)
     p.change_request = None  # transient, read by the API
+    key = [k for k in LOCKED_AFTER_VERIFY if _norm(k, _current(db, p, k)) != was[k]]
     if locked:
         from app.services import change_requests  # local: change_requests imports this module
         p.change_request = change_requests.create(db, "property", p.id, "edit", locked, actor, reason)
     db.commit()
     if p.change_request is not None:
         _notify("change_request_new", p.change_request)
+    if key:
+        agent_did(p, actor, "✏️ <b>Агент изменил проверенные поля</b>", ", ".join(key))
     return p
 
 
+def post_moderated(db: Session, p: Property, actor: User) -> bool:
+    """David 11-24: an agent's edit of a live post reposts it, so it goes to the operator like a new post («Редактирование
+    = новый пост»); the operator's approval applies it and the post follows (apply_update → tg_repost)."""
+    return not at_least(actor, "operator") and p.status == "published" and has_post(db, p)
+
+
+def _pv(v):
+    """Comparable, JSON-safe value of a post field: numbers as floats ("45" = 45.0), text stripped, empty = None."""
+    if isinstance(v, (bool, list, dict)) or v is None:
+        return v if v not in ([], {}) else None
+    if isinstance(v, (int, float, Decimal)):
+        return float(v)
+    return str(v).strip() or None
+
+
+def split_post(p: Property, data: dict) -> tuple[dict, dict]:
+    """(what applies now, {field: {old, new}} for the operator) for the POST_KEYS; post_fields go key by key as «pf:key»
+    (deposit / sale_price by their own names, as split_locked). Unchanged fields are dropped."""
+    data, locked = dict(data), {}
+    if isinstance(data.get("post_fields"), dict):
+        new_pf, old_pf = clean_post_fields(data.pop("post_fields")), p.post_fields or {}
+        for k in sorted(set(new_pf) | set(old_pf)):
+            o, n = _pv(old_pf.get(k)), _pv(new_pf.get(k))
+            if o != n:
+                locked[k if k in POST_LOCKED else f"pf:{k}"] = {"old": o, "new": n}
+    for k in POST_KEYS:
+        if k in data and k != "post_fields":
+            o, n = _pv(getattr(p, k)), _pv(data.pop(k))
+            if o != n:
+                locked[k] = {"old": o, "new": n}
+    return data, locked
+
+
 def apply_update(db: Session, p: Property, data: dict, actor: User) -> None:
-    """No commit (an approved change request applies through here too)."""
-    was_exclusive, was_rent_to = p.is_exclusive, p.rent_to
+    """No commit (an approved change request applies through here too). A published object whose post shows a changed
+    field is reposted (David 11-23: «Правка» / «% Скидка» → the channel follows)."""
+    was_exclusive, was_rent_to, was_post = p.is_exclusive, p.rent_to, _post_key(p)
     _apply(p, data)
+    if p.status == "published" and _post_key(p) != was_post and has_post(db, p):
+        schedule_repost(db, p)
     if p.rent_to != was_rent_to:
         schedule_lease_reminders(db, p)
     _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor, bool(data.get("owner_separate")),
@@ -684,6 +735,50 @@ def apply_update(db: Session, p: Property, data: dict, actor: User) -> None:
     fields = sorted(k for k in data if k in EDITABLE or k in ("owner_name", "owner_phone", "owner_phones"))
     if fields:
         log_event(db, "property", p.id, "updated", actor, fields=fields)
+
+
+POST_KEYS = ("address", "district", "lat", "lng", "price", "currency", "bedrooms", "rooms", "area", "floor", "total_floors",
+             "description", "is_exclusive", "post_fields")  # what the channel post shows (post_text / post_rich)
+
+
+def _post_key(p: Property) -> tuple:
+    return tuple(str(getattr(p, k)) if k != "post_fields" else repr(sorted((p.post_fields or {}).items())) for k in POST_KEYS)
+
+
+def has_post(db: Session, p: Property) -> bool:
+    """The object has a live post in the channel (ours or a legacy post_url)."""
+    return bool(p.post_url) or bool(db.scalar(select(PropertyPublication.id).where(
+        PropertyPublication.property_id == p.id, PropertyPublication.channel == "tg",
+        PropertyPublication.status == "published").limit(1)))
+
+
+REPOST_PER = 5  # David / Irakli 11-24: 1 bump a day per 5 of the agent's published objects (15 → 3, 60 → 12), at least 1;
+# users.plans["reposts"] set in the admin's user form overrides it (voice 287351). Operators moderate: no limit.
+
+
+def reposts_left(db: Session, user: User) -> int | None:
+    """Reposts by hand the agent has left today (Tbilisi day); None for operators."""
+    if at_least(user, "operator"):
+        return None
+    day = now().astimezone(_tz()).replace(hour=0, minute=0, second=0, microsecond=0)
+    done = db.scalar(select(func.count()).select_from(Event).where(
+        Event.action == "reposted", Event.actor_id == user.id, Event.at >= day)) or 0
+    return max(0, repost_limit(db, user) - done)
+
+
+def repost_limit(db: Session, user: User) -> int:
+    v = (user.plans or {}).get("reposts")
+    if isinstance(v, (int, float)) and v >= 0:
+        return int(v)
+    n = db.scalar(select(func.count()).select_from(Property).where(Property.agent_id == user.id,
+                                                                   Property.status == "published")) or 0
+    return max(1, n // REPOST_PER)
+
+
+def schedule_repost(db: Session, p: Property) -> None:
+    """The worker posts the object again (job tg_repost -> publish: the new post out, then the old ones deleted, so the
+    channel never holds two). One pending job per object: a second edit just replaces it. No commit."""
+    jobs.schedule(db, "tg_repost", p.id, now())
 
 
 def _mask_phone(phone: str | None) -> str:
@@ -923,6 +1018,9 @@ def check_archive(db: Session, p: Property, reason: str | None, comment: str | N
     return {"reason": reason, "comment": comment, "duplicate_of": dup}
 
 
+ARCHIVE_HEAD = {"paused": "⏸ <b>Приостановлен</b>", "unpublished": "🚫 <b>Снят с публикации</b>"}
+
+
 def _archive_now(db: Session, p: Property, actor: User | None, reason: str, comment: str | None = None,
                  duplicate_of: int | None = None, action: str | None = None) -> None:
     """Into the archive with a reason (ARCHIVE_REASONS); reminders are cancelled. No commit, no validation."""
@@ -934,7 +1032,10 @@ def _archive_now(db: Session, p: Property, actor: User | None, reason: str, comm
         jobs.cancel(db, kind, p.id)
     _status(db, p, "archived", actor, action, reason=reason, comment=p.archive_comment,
             **({"duplicate_of": duplicate_of} if duplicate_of else {}))
-    if reason in RENTED_REASONS:
+    if reason not in ("owner_refused", "idle_return"):  # David 11-23: архив / пауза / снятие → агенту и оператору
+        head = ARCHIVE_HEAD.get(reason) or f"🗄 <b>В архив: {ARCHIVE_REASONS[reason]}</b>"
+        notify_later(db, "prop_event", p, head, actor.id if actor else None, None, True, p.archive_comment)
+    if reason != "duplicate":  # any archive takes the post down (Stanislav 11-23); a duplicate: dup_purge
         _unpost_later(db, p)
     if reason == "duplicate" and duplicate_of:
         _merge_duplicate(db, p, duplicate_of, actor)
@@ -1179,10 +1280,12 @@ def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, 
             p.agent_id, p.updated_at = to.id, now()
         log_event(db, "property", p.id, "owner_transferred", by_user, owner_id=o.id, moved=moved, **data)
         props.append({"id": p.id, "address": p.address, "status": p.status, "archive_reason": p.archive_reason})
+    # David 11-22: the new agent learns it from the bot, with the objects (an archived one: «Снова в работу» on its card)
+    notify_later(db, "owner_transferred", to.id, o.name, by_user.name, props, reason)
+    if old is not None and old.id != by_user.id:
+        notify_later(db, "owner_transferred_away", old.id, o.name, to.name, by_user.name, props)
     if commit:
         db.commit()
-    # David 11-22: the new agent learns it from the bot, with the objects (an archived one: «Снова в работу» on its card)
-    _notify("owner_transferred", to.id, o.name, by_user.name, props, reason)
     return o
 
 
@@ -1220,6 +1323,7 @@ def _tz():
 
 
 # ---------------------------------------------------------------- media, checklist, review (C4, B7)
+ROOM_ALIAS = {"Ванная": "Санузел"}  # renamed room tags (David 11-23): old tags read as the new name, no data rewrite
 
 def media_root() -> Path:
     return Path(env.MEDIA_DIR)
@@ -1275,7 +1379,7 @@ def upload_media(db: Session, pid: int, files: list[tuple[str, bytes]], room: st
             _status(db, p, "media_uploaded", actor, files=len(files))
         else:
             log_event(db, "property", p.id, "media_added", actor, files=len(files))
-        if p.is_exclusive and "photo" in kinds:
+        if (p.is_exclusive or p.status in DUP_LIVE) and "photo" in kinds:
             # the photos come after the exclusive's first search (a manual object: made, then the photos): searched
             # again with them, or the ad they were taken from is never found (Irakli 11-19, myhome 26699303)
             schedule_dup_scan(db, p, "media")
@@ -1553,6 +1657,7 @@ def sign_contract(db: Session, token: str, data: dict, pdf: bytes, ip: str | Non
               user_agent=(user_agent or "")[:300], pdf_sha256=hashlib.sha256(pdf).hexdigest())
     p.sign_draft = {}
     schedule_dup_scan(db, p, "contract")
+    notify_later(db, "prop_event", p, "✍️ <b>Собственник подписал эксклюзивный договор</b>", None, None, True, f["full_name"])
     db.commit()
     if draft.get("id_doc_file"):  # copied into the object's owner docs above; the extract key is shared (content hash)
         try:
@@ -1599,11 +1704,19 @@ def contract_done(db: Session, p: Property) -> bool:
     return w is not None and w.status == "approved"
 
 
+# David 11-23: not only exclusives — an object taken into work or published looks for its copies and duplicates too
+DUP_LIVE = (*AGENT_MEDIA_STATUSES, "review", "published")
+SITE_TRIGGERS = ("published", "compare_link", "manual")  # dup_scan triggers that search the sites too (Stanislav 11-23)
+
+
 def schedule_dup_scan(db: Session, p: Property, trigger: str) -> None:
     """«При эксклюзиве — сразу поиск дублей везде» (Irakli 11-18): the worker runs similar.scan_exclusive within ~30 s
     (a whole-base search takes a second or two, not for a save request). No commit."""
-    if not jobs.pending(db, "dup_scan", p.id):  # one is waiting already: it runs the same search
-        jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": trigger}, replace=False)
+    pend = jobs.pending(db, "dup_scan", p.id)
+    sites = lambda t: t in SITE_TRIGGERS  # noqa: E731
+    # one waiting already runs the same search — unless this one searches the sites and that one only the base
+    if not pend or (sites(trigger) and not any(sites((j.payload or {}).get("trigger")) for j in pend)):
+        jobs.schedule(db, "dup_scan", p.id, now(), {"trigger": trigger}, replace=bool(pend))
 
 
 def dup_scan(db: Session, pid: int) -> dict | None:
@@ -1616,7 +1729,7 @@ def dup_scan(db: Session, pid: int) -> dict | None:
         return {"pending": True} if pending else None
     d = ev.data or {}
     return {"n": d.get("n", 0), "strong": d.get("strong") or [], "trigger": d.get("trigger"), "at": ev.at.isoformat(),
-            "sig": d.get("sig"), "pending": pending}
+            "sig": d.get("sig"), "pending": pending, **({"copies": d["copies"]} if "copies" in d else {})}
 
 
 def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: User) -> PropertyMedia:
@@ -1626,7 +1739,7 @@ def set_media_room(db: Session, pid: int, mid: int, room: str | None, actor: Use
     m = db.get(PropertyMedia, mid)
     if not m or m.property_id != p.id:
         raise DomainError("not_found", "media not found")
-    m.room = ((room or "").strip() or None) if m.kind == "photo" else None  # a video has no room
+    m.room = ((room or "").strip()[:60] or None) if m.kind == "photo" else None  # a video has no room; an agent's own tag is free text
     db.commit()
     return m
 
@@ -1747,6 +1860,7 @@ def submit_for_review(db: Session, pid: int, agent: User, other_flat: bool = Fal
     _status(db, p, "review", agent)
     db.commit()
     _notify("property_review_request", p)
+    _notify("prop_event", p, "🕵️ <b>Отправлен на проверку</b>", agent.id, None, False)  # staff sent it for the agent
     return p
 
 
@@ -1762,6 +1876,7 @@ def review(db: Session, pid: int, operator: User, approve: bool, comment: str | 
     _status(db, p, "returned", operator, comment=comment)
     db.commit()
     _notify("property_returned", p)
+    _notify("prop_event", p, "↩️ <b>Возвращён на доработку</b>", operator.id, [], True, comment)
     return p
 
 
@@ -1844,21 +1959,22 @@ def clean_post_fields(v) -> dict:
 
 # ---------------------------------------------------------------- generator prefill from the parsed ad (David 2026-11-08)
 
-# Tbilisi metro stations (OpenStreetMap railway=station subway, 2026-11-08) -> the generator's metro tag
+# Tbilisi metro stations (OpenStreetMap railway=station subway, 2026-11-08) -> the generator's metro tag. The channel's own
+# tags (Irakli 11-24, as the old sheet): #STUniversity = State University (Universiteti), #TCUniversity = Technical
 METRO = {"LibertySquare": (41.69452, 44.80056), "Rustaveli": (41.7035, 44.78965), "Marjanishvili": (41.70959, 44.79687),
          "StationSquare": (41.72256, 44.7971), "Tsereteli": (41.72641, 44.78766), "Gotsiridze": (41.74294, 44.78405),
          "Nadzaladevi": (41.7334, 44.79643), "Didube": (41.74945, 44.77999), "Grmagele": (41.76497, 44.78996),
          "Guramishvili": (41.77576, 44.79558), "Sarajishvili": (41.78406, 44.79992), "AhmeteliTheatre": (41.79106, 44.815),
-         "STUniversity": (41.72035, 44.77664), "VazhaPshavela": (41.72403, 44.73085), "Delisi": (41.72549, 44.74534),
-         "TCUniversity": (41.72283, 44.71851), "MCUniversity": (41.72728, 44.76384), "AvlabariMetro": (41.69226, 44.81584),
+         "TCUniversity": (41.72035, 44.77664), "VazhaPshavela": (41.72403, 44.73085), "Delisi": (41.72549, 44.74534),
+         "STUniversity": (41.72283, 44.71851), "MCUniversity": (41.72728, 44.76384), "AvlabariMetro": (41.69226, 44.81584),
          "IsaniMetro": (41.68663, 44.83996), "300Aragveli": (41.68799, 44.82623), "SamgoriMetro": (41.68552, 44.85448),
          "Varketili": (41.6919, 44.87088)}
 METRO_NAME = {"Liberty Square": "LibertySquare", "Rustaveli": "Rustaveli", "Marjanishvili": "Marjanishvili",
               "Station Square": "StationSquare", "Tsereteli": "Tsereteli", "Gotsiridze": "Gotsiridze",
               "Nadzaladevi": "Nadzaladevi", "Didube": "Didube", "Grmagele": "Grmagele", "Ghrmaghele": "Grmagele",
               "Guramishvili": "Guramishvili", "Sarajishvili": "Sarajishvili", "Akhmeteli Theatre": "AhmeteliTheatre",
-              "Technical University": "STUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
-              "State University": "TCUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
+              "Technical University": "TCUniversity", "Vazha-Pshavela": "VazhaPshavela", "Delisi": "Delisi",
+              "State University": "STUniversity", "Medical University": "MCUniversity", "Avlabari": "AvlabariMetro",
               "Isani": "IsaniMetro", "300 Aragveli": "300Aragveli", "Samgori": "SamgoriMetro", "Varketili": "Varketili"}
 METRO_RADIUS_M = 8000  # the nearest station always fills (Stanislav 11-11); only points clearly outside Tbilisi get none
 _P_TYPE = {"apartment": "Apartment", "house": "House", "commercial": "Commercial"}
@@ -2055,11 +2171,99 @@ def prose(text: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
 
 
+METRO_EN = {"STUniversity": "University", "TCUniversity": "Technical University", "MCUniversity": "Medical University",
+            "AvlabariMetro": "Avlabari", "IsaniMetro": "Isani", "SamgoriMetro": "Samgori", "AhmeteliTheatre": "Akhmeteli Theatre",
+            "300Aragveli": "300 Aragveli", "VazhaPshavela": "Vazha-Pshavela"}  # the rest: the tag split (Liberty Square)
+_ADDR_DROP = re.compile(r"^(\d{4}|tbilisi|georgia|тбилиси|грузия|თბილისი|საქართველო)$|district|raion|район|რაიონი|\bblocks?\b", re.I)
+_ADDR_ABBR = ((r"\bStreet\b", "St"), (r"\bAvenue\b", "Ave"), (r"\bLane\b", "Ln"), (r"\bHighway\b", "Hwy"))
+
+
+_KA = dict(zip("აბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ", "a b g d e v z t i k l m n o p zh r s t u p k gh q sh ch ts dz ts ch kh j h".split()))
+_RU = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя", "a b v g d e e zh z i y k l m n o p r s t u f kh ts ch sh shch - y - e yu ya".split()))
+_KIND = ((r"ქ\.|ქუჩა|ул\.|улица", "St"), (r"გამზ\.|გამზირი|пр-т|просп\.|проспект", "Ave"),
+         (r"შეს\.|შესახვევი|пер\.|переулок", "Ln"), (r"ჩიხი|тупик", "Dead End"), (r"მოედ\.|მოედანი|пл\.|площадь", "Sq"))
+
+
+def _latin(part: str) -> str:
+    """A Georgian / Russian address part in Latin letters, the street kind as the English word after the name (David
+    11-24: «либо всё на английском, либо всё на грузинском — у нас шаблон английский»): «ცაგარელის ქ. 21» → «Tsagareli
+    St 21», «ул. Чавчавадзе 33» → «Chavchavadze St 33»."""
+    if not re.search(r"[а-яА-ЯёЁა-ჰ]", part):
+        return part
+    kind = None
+    for pat, word in _KIND:
+        if re.search(pat, part, re.I):
+            kind, part = word, re.sub(pat, " ", part, flags=re.I)
+    nums = re.findall(r"\d+[a-zA-Zა-ჰ]?", part)
+    words = [w for w in re.sub(r"\d+[a-zA-Zა-ჰ]?", " ", part).replace(",", " ").split() if w.strip(".")]
+    if kind and words and words[-1].endswith("ის"):  # Georgian genitive: ცაგარელის ქ. = Tsagareli St, ჭავჭავაძის = Chavchavadze
+        words[-1] = words[-1][:-3] + "ძე" if words[-1].endswith("ძის") else words[-1][:-1]
+    lat = " ".join("".join(_KA.get(c, _RU.get(c.lower(), c)).replace("-", "") for c in w) for w in words)
+    lat = " ".join(w[:1].upper() + w[1:] for w in lat.split())
+    return " ".join(x for x in (lat, kind, " ".join(nums)) if x)
+
+
+def short_address(address: str | None, district: str | None = None) -> str | None:
+    """The post's address without the geocoder's tail (Irakli 11-24 «адрес короче, без индекса»): «Biota Park, 20, Anna
+    Politkovskaya Street, Saburtalo, Vazha-Pshavela Blocks, Vake District, Tbilisi, 0168» → «Biota Park · Anna
+    Politkovskaya St 20». A short address stays as it is."""
+    if not address:
+        return None
+    parts = [x.strip() for x in address.split(",") if x.strip()]
+    names = {d[i].lower() for d in districts.DISTRICTS for i in (1, 2, 3)} | {(district or "").lower()}
+    out, num = [], None
+    for x in parts:
+        if _ADDR_DROP.search(x) or all(w in names for w in re.split(r"[-\s]+", x.lower()) if w):  # «Vake-Saburtalo» too
+            continue
+        x = _latin(x)
+        if re.fullmatch(r"\d+[a-zA-Zა-ჰ]?", x):
+            num = x
+            continue
+        for a, b in _ADDR_ABBR:
+            x = re.sub(a, b, x)
+        out.append(f"{x} {num}" if num else x)
+        num = None
+    return " · ".join(out[:2]) or address.strip()
+
+
+_FOREIGN = re.compile(r"[а-яА-ЯёЁა-ჰ]")
+
+
+def post_description(db: Session, p: Property) -> str:
+    """The description for the post, in English (David 11-24: «почему по-русски опять»): Russian / Georgian prose is
+    translated once and kept in post_fields.description_en (with the source's hash, so an edit translates again).
+    No model or a failure: the description as it is."""
+    text = prose(p.description)
+    if not text or not _FOREIGN.search(text):
+        return text
+    f = p.post_fields or {}
+    key = hashlib.sha1(text.encode()).hexdigest()[:12]
+    if f.get("description_en") and f.get("description_en_of") == key:
+        return f["description_en"]
+    if not os.environ.get("OPENAI_API_KEY"):
+        return text
+    try:
+        from app.services.contracts import _llm
+        out = _llm().ask("Translate this apartment listing description into natural English for a Telegram rental channel. "
+                         "Keep facts, numbers, street and place names (transliterated); no additions, no emojis, no hashtags."
+                         "\n\n" + text, {"type": "object", "additionalProperties": False, "required": ["en"],
+                                         "properties": {"en": {"type": "string"}}}, retries=1, timeout=60,
+                         purpose="post_translate")
+        en = str(out.get("en") or "").strip()
+    except Exception as e:  # noqa: BLE001
+        log.warning("post description translate failed for %s: %s", p.id, e)
+        return text
+    if not en:
+        return text
+    p.post_fields = {**f, "description_en": en, "description_en_of": key}
+    return en
+
+
 def post_rich(db: Session, p: Property, media: list[str]) -> str:
     """The post as a Telegram rich message (Bot API sendRichMessage) in the @tbilisi_rent style (Irakli's video
     2026-11-09): photo slideshow, «$price · beds · district» title, «building · m² · floor · ID» line, 📍 address (the
     map link) and Ⓜ metro, the description, collapsed «Parameters and amenities» (a table + one ✅ line) and «Tags», then
-    two buttons in a row: «On the map» (our /map page with the pin) and «I like it» (a bot button: a lead). No map block,
+    the buttons «On the map» (our /map page with the pin) and «Contact» (the bot: a lead). No map block,
     no footer (the contacts sit in Tags); an old-base description is cut to its own words (prose()). media: the slideshow items as rich-message links (tg://photo?id=m0, tg://video?id=m1)."""
     f, h = p.post_fields or {}, lambda x: html_.escape(str(x), quote=True)
     sale = f.get("deal") == "Sale"
@@ -2069,48 +2273,61 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
     head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
                                   _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district))) if x)
-    marks = [x for x, on in (("Exclusive", p.is_exclusive), ("Discount", f.get("discount"))) if on]
-    sub = " · ".join(x for x in (*marks, f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
-                                 p.floor and (f"{p.floor}/{p.total_floors} floor" if p.total_floors else f"{p.floor} floor"),
-                                 f"ID: {p.id}") if x)
+    # Irakli 11-24 (his sample post): «🏢 building · m² · floor», the headline and the description, 📍 a short address ·
+    # Ⓜ️ Metro <station>, ✅ the amenities and 💰 deposit · lease open, one collapsed «Parameters, amenities and tags»,
+    # «ID …» at the bottom; «Exclusive» stands out when it is one
+    marks = [x for x, on in (("💎 Exclusive", p.is_exclusive), ("❗️ Discount", f.get("discount"))) if on]
+    sub = " · ".join(x for x in (f.get("building") and _human(f["building"]), p.area and f"{float(p.area):g} m²",
+                                 p.floor and (f"floor {p.floor}/{p.total_floors}" if p.total_floors else f"floor {p.floor}")) if x)
     out = []
     if media:
         out.append("<tg-slideshow>" + "".join(f'<video src="{m}"/>' if "video" in m else f'<img src="{m}"/>' for m in media)
                    + "</tg-slideshow>")
-    out.append(f"<h2>{h(head)}</h2><p>{h(sub)}</p>")
-    url = maps_url(db, p) if p.address else None
-    where = [f'📍 <a href="{h(url)}">{h(p.address)}</a>' if url else (p.address and f"📍 {h(p.address)}"),
-             f.get("metro") and f"Ⓜ️ {h(_split(f['metro']))}"]
-    if any(where):
-        out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
-    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", prose(p.description)) if x)
+    out.append(f"<h2>{h(head)}</h2>" + (f"<p><b>{h(' · '.join(marks))}</b></p>" if marks else "")
+               + (f"<p>🏢 {h(sub)}</p>" if sub else ""))
+    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", post_description(db, p)) if x)
     if text:
         out.append("<p>" + h(text).replace("\n", "<br>") + "</p>")
+    url = maps_url(db, p) if p.address else None
+    short = short_address(p.address, p.district)
+    where = [f'📍 <a href="{h(url)}">{h(short)}</a>' if url and short else (short and f"📍 {h(short)}"),
+             f.get("metro") and f"Ⓜ️ Metro {h(METRO_EN.get(f['metro']) or _split(f['metro']))}"]
+    if any(where):
+        out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
     am = f.get("amenities") or []
+    # the main ones in sight, as Irakli's sample («✅ Conditioner · Central heating · Balcony»); the rest in the block
+    key = ("Conditioner", "Balcony", "Terrace")
+    feats = [_human(a) for a in key if a in am] + ([_human(f["heating"])] if f.get("heating") else [])
+    rest = [_human(a) for a in am if a not in key]
+    months = sorted(int(x[:-5]) for x in f.get("periods") or [] if x.endswith("Month") and x[:-5].isdigit())
+    dep = f.get("deposit", price)
+    money_line = " · ".join(x for x in ((not sale and price and (f"Deposit ${dep}" if dep else "No deposit")),
+                                        months and f"from {months[0]} month{'s' if months[0] != 1 else ''}") if x)
+    lines = [feats and f"✅ {' · '.join(feats)}", money_line and f"💰 {money_line}"]
+    if any(lines):
+        out.append("<p>" + "<br>".join(h(x) for x in lines if x) + "</p>")
     rows = [("Rooms", p.rooms), ("Bathrooms", (f.get("bathrooms") or "")[:1] or (1 if p.bedrooms is not None else None)),
             ("Air conditioners", "yes" if "Conditioner" in am else None), ("Balconies", "yes" if "Balcony" in am else None),
             ("Heating", f.get("heating") and _human(f["heating"])), ("Design", f.get("design") and _human(f["design"])),
             ("Condition", sale and f.get("condition") and _human(f["condition"])),
             ("Pets", f.get("pets") and _human(f["pets"])), ("Tenants", f.get("tenants") and f"up to {f['tenants']}"),
             ("Lease term", f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
-            ("Deposit", not sale and price and (f"${f.get('deposit', price)}" if f.get("deposit", price) else "none")),
+            ("Deposit", not sale and price and (f"${dep}" if dep else "none")),
             ("Commission", "0%")]
     table = "".join(f"<tr><td>{h(k)}</td><td>{h(v)}</td></tr>" for k, v in rows if v)
-    rest = [_human(a) for a in am if a not in ("Conditioner", "Balcony")]
-    params = f"<table striped compact>{table}</table>" + (f"<p>✅ {h(' · '.join(rest))}</p>" if rest else "")
-    out.append(f"<details><summary>Parameters and amenities</summary>{params}</details>")
     agent = db.get(User, p.agent_id) if p.agent_id else None
     tags = " ".join(hashtags(post_text(db, p)))
-    out.append(f"<details><summary>Tags</summary><p>ID: {p.id}<br>{h(tags)}</p>"
+    out.append(f"<details><summary>Parameters, amenities and tags</summary><table striped compact>{table}</table>"
+               + (f"<p>✅ {h(' · '.join(rest))}</p>" if rest else "") + f"<p>{h(tags)}</p>"
                f"<p>📲 {h(phone_line(agent))}<br>"
                '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 All listings</a> · <a href="https://t.me/reviews_rent_tbilisi">Reviews</a> · '
                '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">Instagram</a> · '
                '<a href="https://www.facebook.com/share/18GSsdio3b/?mibextid=LQQJ4d">FB</a> · '
                '<a href="https://youtube.com/@rentintbilisi">YouTube</a></p></details>')
+    out.append(f"<p>ID {p.id}</p>")
     btn = lambda text, href, style="": f'<tg-button type="url"{style} url="{h(href)}">{h(text)}</tg-button>'  # noqa: E731
     # «On the map»: our map Mini App page with the object's pin (as «📍 На карте» on the bot's cards; a channel can't
-    # open a web_app button, so it's a link), Google Maps without a point. «I like it»: a plain bot button (callback
-    # plike:<id>); the bot answers with t.me/<bot>?start=p<id> -> the same lead as before (bot.on_button)
+    # open a web_app button, so it's a link), Google Maps without a point
     listing = db.get(Listing, p.listing_id) if p.listing_id else None
     pin, at = None, None
     if p.lat is not None and p.lng is not None:  # the agent checked it on the map (AddressField)
@@ -2122,9 +2339,11 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     if at:
         pin = f"{env.PUBLIC_URL.rstrip('/')}/map?" + urlencode({"pin": f"{at[0]:.6f},{at[1]:.6f}", "prec": prec,
                                                                 "title": head, "lang": "en"})
-    like = f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button>'
-    where = hge_map_url(p.id) if not p.site_hidden else pin or url  # the site's map on this object, else our pin map
-    out.append("<tg-button-row>" + (btn("📍 On the map", where) if where else "") + like + "</tg-button-row>")
+    # David 11-23: only «On the map» and «Contact» (no «I like it»; the bot keeps answering plike: of the old posts)
+    # the site's map on this object (its point, or the ad's: site_feed.pins), else our pin map; no point at all: Google
+    where = (hge_map_url(p.id) if not p.site_hidden else pin) if at else url
+    if where:
+        out.append("<tg-button-row>" + btn("📍 On the map", where) + "</tg-button-row>")
     # «Contact» (back by Stanislav 11-11, own full-width row): /start p<id> -> journey.on_post_start, a lead as before
     out.append("<tg-button-row>" + btn("💬 Contact", f"https://t.me/{env.BOT_USERNAME.lstrip('@')}?start=p{p.id}")
                + "</tg-button-row>")
@@ -2206,10 +2425,87 @@ def unpost(db: Session, p: Property, actor: User | None, keep: int | None = None
 
 
 def _unpost_later(db: Session, p: Property) -> None:
-    """Rented: the worker deletes the posts (job tg_unpost) — the status change never waits on Telegram."""
+    """Rented / paused / unpublished: the worker deletes the posts (job tg_unpost) — the status change never waits on
+    Telegram. A repost still pending is dropped."""
+    jobs.cancel(db, "tg_repost", p.id)
     jobs.schedule(db, "tg_unpost", p.id, now())
     from app.services import site_feed
     site_feed.clear_cache()
+
+
+RESIDENTIAL = (None, "Apartment", "House", "Duplex", "Townhouse")
+
+
+def channel_kind(p: Property) -> str:
+    """Which channel the post goes to (notify.post_chat, David 11-23): rent of a flat / house, sale, commercial."""
+    if is_sale(p):
+        return "sale"
+    return "rent" if (p.post_fields or {}).get("prop_type") in RESIDENTIAL else "commercial"
+
+
+def rented_text(p: Property) -> str:
+    """The channel's own «found a tenant» announcement (as the agency posts it by hand: ❗️#FlatRented, the district)."""
+    tag = district_tag(p.district)
+    name = districts.BY_TAG[tag[1:]][2] if tag[1:] in districts.BY_TAG else _human(tag[1:])
+    what = "Nice apartment" if (p.post_fields or {}).get("prop_type") in RESIDENTIAL else "Commercial space"
+    if is_sale(p):  # e2e 11-23: a sold flat went out as «#FlatRented … found a tenant» into the sale channel
+        return f"❗️#Sold\n{what} in 📍{name} found a new owner 🤝👏🎉\n{tag}"
+    if what == "Commercial space":
+        return f"❗️#Rented\nCommercial space in 📍{name} has found a business 🤝👏🎉\n{tag}"
+    return f"❗️#FlatRented\nNice apartment in 📍{name} found a tenant 🤝👏🎉\n{tag}"
+
+
+def rented_post(db: Session, p: Property) -> str:
+    """Rented (David 11-23): one photo + rented_text() in the channel, once per rent of a flat that was in the channel.
+    It stays there (unpost deletes only the object's tg publications). No commit."""
+    pub = db.scalar(select(PropertyPublication).where(PropertyPublication.property_id == p.id, PropertyPublication.channel == "tg")
+                    .order_by(PropertyPublication.id.desc()).limit(1))
+    if pub is None:
+        return "never posted"
+    last = db.scalar(select(func.max(Event.at)).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                                      Event.action == "tg_rented_posted"))
+    if last and (not p.published_at or aware(last) >= aware(p.published_at)):
+        return "already"
+    ref = _notify("rented_post", p.id, rented_text(p), (pub.messages or {}).get("chat"))  # the channel of its post
+    if not ref:
+        return "not sent"
+    log_event(db, "property", p.id, "tg_rented_posted", None, post_url=ref[1])
+    db.flush()
+    return "ok"
+
+
+def originals_text(db: Session, p: Property, text: str | None = None) -> str:
+    """The originals chat's text: the post as in the channel (`text`: the caption it went out with, default post_text),
+    then links to the post and the CRM card."""
+    crm = notify.links.property_app(p.id)
+    return "\n\n".join(x for x in (
+        notify.post_html(text or post_text(db, p), p.id),
+        p.post_url and f'🔗 <a href="{html_.escape(p.post_url)}">Пост в канале</a>',
+        crm and f'🗂 <a href="{html_.escape(crm)}">Карточка в CRM #{p.id}</a>') if x)
+
+
+def send_originals(db: Session, p: Property, text: str | None = None) -> str:
+    """Job tg_originals: the photos and videos without the watermark + the post text into settings originals_chat_id
+    (Irakli 11-23) — at the first publication and when the media changed since the last send; a repost with the same
+    media sends nothing. text: the caption the post went out with. No commit."""
+    chat = (settings_svc.get(db, "originals_chat_id") or "").strip()
+    if not chat:
+        return "no chat"
+    keys = sorted(db.scalars(select(PropertyMedia.path).where(PropertyMedia.property_id == p.id,
+                                                       PropertyMedia.kind.in_(("photo", "video")))))
+    if not keys:
+        return "no photos"
+    sig = hashlib.sha1("\n".join(keys).encode()).hexdigest()
+    last = db.scalar(select(Event.data).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                              Event.action == "tg_originals_sent").order_by(Event.id.desc()).limit(1))
+    if last and last.get("sig") == sig and last.get("chat") == chat:
+        return "same photos"
+    n = _notify("originals_post", p.id, chat, originals_text(db, p, text))
+    if not n:
+        return "not sent"
+    log_event(db, "property", p.id, "tg_originals_sent", None, sig=sig, chat=chat, files=n)
+    db.flush()
+    return "ok"
 
 
 def hashtags(text: str) -> list[str]:
@@ -2225,8 +2521,13 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
     review approves it. Without BOT_TOKEN in dev the post is a dry run (recorded without a link); a Telegram failure
     leaves it unpublished."""
     p = _prop(db, pid, lock=True)
-    if not at_least(actor, "operator"):
-        raise forbidden("only operators publish")
+    if actor is not None and not at_least(actor, "operator"):  # None: the worker's repost (job tg_repost)
+        _require_owner(p, actor)  # Stanislav 11-23: the agent reposts his own object once the operator has published it
+        if p.status != "published":
+            raise forbidden("only operators publish")
+        text = None  # the post is built from the fields
+        if tg and reposts_left(db, actor) == 0:
+            raise DomainError("repost_limit", f"Лимит: {repost_limit(db, actor)} в день (1 на каждые {REPOST_PER} ваших опубликованных объектов). Завтра снова можно")
     if not (tg or site):
         raise DomainError("no_target", "Отметьте, куда публиковать: сайт или Telegram")
     if channel not in PUBLICATION_CHANNELS:
@@ -2239,6 +2540,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         if not set(media_ids) <= own:
             raise DomainError("not_found", "media not found")
     first = p.status != "published"
+    approved = p.status == "review"
     ref, dry_run = None, False
     if tg:
         auto = post_text(db, p)
@@ -2246,6 +2548,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         # the rich post is built from the fields: a caption the operator rewrote by hand goes out as the plain album
         p.post_rich = (lambda ids: post_rich(db, p, ids)) if p.post_text == auto and not is_sale(p) else None
         p.post_media_ids = media_ids
+        p.post_channel = channel_kind(p)
         p.progress_key = f"publish:{p.id}"  # the card polls GET /properties/{id}/publish/progress
         _legacy_pub(db, p)  # before post_url turns into the new post's link
         ref = _notify("publish_post", p)
@@ -2261,19 +2564,25 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         p.site_hidden = True
     p.published_at = now()
     p.verified_at = p.verified_at or p.published_at
-    if p.status == "review":
+    if p.status == "review" and actor is not None:
         p.review_comment, p.reviewed_by, p.reviewed_at = comment, actor.id, now()
         log_event(db, "property", p.id, "approved", actor, comment=comment)
     if tg:
         pub = record_publication(db, p, channel, p.post_url if ref else None, p.post_message_id if ref else None)
         if ref and len(ref) > 3:
-            pub.messages = {"chat": str(ref[2]), "ids": ref[3]}
+            pub.messages = {"chat": str(ref[2]), "ids": ref[3], **({"warning": ref[4]} if len(ref) > 4 and ref[4] else {})}
         if ref:  # a repost: the old post leaves the channel (Stanislav 11-16)
             unpost(db, p, actor, keep=pub.id, action="tg_reposted")
-        if ref:  # the same flat already in the channel? the operator decides (services/channel_dups.py, David 11-20)
-            jobs.schedule(db, "channel_dups", p.id, now())
+        if actor is not None:  # a repost by hand: the pending automatic one is not needed
+            jobs.cancel(db, "tg_repost", p.id)
+        if ref and first:  # the same flat already in the channel? the operator decides (services/channel_dups.py, David 11-20);
+            jobs.schedule(db, "channel_dups", p.id, now())  # a repost of a published one (a price, a fix) was checked then
+        if ref:  # the originals chat, once per photo set (send_originals)
+            jobs.schedule(db, "tg_originals", p.id, now(), {"text": p.post_text})
     _status(db, p, "published", actor, post_url=p.post_url if ref else None, channel=channel if tg else None,
             site=not p.site_hidden, **({"dry_run": True} if dry_run else {}))
+    if first:  # David 11-23: on publishing any object looks for its copies at once; a repost (11-24: a price change
+        schedule_dup_scan(db, p, "published")  # re-ran the 9-min sites' search) does not
     db.commit()
     from app.services import catalog, site_feed
     site_feed.clear_cache()
@@ -2281,55 +2590,128 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         db.commit()
     if tg:
         _notify("property_published", p)
+        if not first:
+            agent_did(p, actor, "🔄 <b>Агент перевыложил пост</b>")
+            if actor is not None and not at_least(actor, "operator"):
+                log_event(db, "property", p.id, "reposted", actor)
+                db.commit()
+    if first and actor is not None:  # David 11-23: одобрено / опубликовано → и оператору (the agent: property_published)
+        head = ("✅ <b>Одобрен и опубликован</b>" if approved else "📢 <b>Опубликован</b>") + \
+            (" (канал + сайт)" if tg and site else " (канал)" if tg else " (сайт)")
+        _notify("prop_event", p, head, actor.id, [] if tg else None, True, comment)
     return p
 
 
 def set_site(db: Session, pid: int, actor: User, on: bool) -> Property:
     """«Опубликовать на сайте» / «Снять с сайта»: a published object is on hge.ge unless hidden (site_feed.public_filter);
-    the Telegram post (publish) is the other button. Operators only."""
+    the Telegram post (publish) is the other button. Staff and the object's own agent (a published one)."""
     p = _prop(db, pid, lock=True)
-    if not at_least(actor, "operator"):
+    _require_owner(p, actor)
+    if not at_least(actor, "operator") and p.status != "published":
         raise forbidden("only operators publish")
     if on and p.status != "published":
         raise DomainError("bad_status", "На сайт попадает опубликованный объект — сначала опубликуйте его в Telegram")
     p.site_hidden = not on
     log_event(db, "property", p.id, "site_on" if on else "site_off", actor)
     db.commit()
+    agent_did(p, actor, "🌐 <b>Агент вернул объект на сайт</b>" if on else "🌐 <b>Агент снял объект с сайта</b>")
     from app.services import site_feed
     site_feed.clear_cache()
     return p
 
 
+def unpost_channel(db: Session, pid: int, actor: User) -> Property:
+    """«Снять только из канала» (Stanislav 11-23): deletes the object's Telegram posts now; the status, the site and the
+    bot stay. «Выложить в канал» is publish(tg=True). Staff and the object's own agent."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, actor)
+    jobs.cancel(db, "tg_repost", p.id)
+    res = unpost(db, p, actor, action="tg_removed")
+    if res["failed"]:
+        db.commit()
+        raise DomainError("unpost_failed", "Telegram не удалил пост — попробуйте ещё раз", 502)
+    db.commit()
+    agent_did(p, actor, "📤 <b>Агент удалил пост из канала</b>")
+    return p
+
+
+def unpublish(db: Session, pid: int, actor: User) -> Property:
+    """«Снять с публикации» (David 11-23, instead of «Снять с сайта»): off everywhere — the site, the bot's catalog and
+    the channel (job tg_unpost) — the object waits in the archive (reason «unpublished») for «Опубликовать снова»
+    (resume). Staff and the object's agent, no operator request."""
+    p = _prop(db, pid, lock=True)
+    _require_owner(p, actor)
+    _require_status(p, "published")
+    _archive_now(db, p, actor, "unpublished", action="unpublished")
+    db.commit()
+    from app.services import catalog
+    if catalog.sync(db, p):
+        db.commit()
+    return p
+
+
 BACK_TO_WORK = ("rented_by_owner", "not_actual", "idle_return")  # «Снова в работу» from the archive
+RESUMABLE = ("paused", "unpublished")  # «Снять с паузы» / «Опубликовать снова»: back to published
 
 
-def resume(db: Session, pid: int, actor: User) -> Property:
-    """«Снять с паузы»: a paused object goes back to the base as it was before (published, if it ever was).
-    «Снова в работу» («Собственник сдал», the lease ends): back to «Взят» with its agent (an agent: him) to call the owner."""
+def _republish(db: Session, p: Property, actor: User | None, action: str) -> None:
+    """Back on the market as published (the site as it was) and posted again if it had a channel post. No commit."""
+    p.archive_reason, p.archive_comment, p.archived_at = None, None, None
+    jobs.cancel(db, "tg_unpost", p.id)
+    _status(db, p, "published", actor, action)
+    if db.scalar(select(PropertyPublication.id).where(PropertyPublication.property_id == p.id,
+                                                      PropertyPublication.channel == "tg").limit(1)) or p.post_url:
+        schedule_repost(db, p)
+
+
+def resume(db: Session, pid: int, actor: User, republish: bool = False) -> Property:
+    """«Снять с паузы» / «Опубликовать снова» (paused, unpublished): back to published, the post goes out again.
+    «Снова в работу» («Собственник сдал», the lease ends, a rented object): back to «Взят» with its agent (an agent:
+    him) to call the owner. republish (staff, David 11-23): a rented one is published again right away instead."""
     p = _prop(db, pid, lock=True)
     o = db.get(Owner, p.owner_id) if p.owner_id else None
     owners_agent = o is not None and o.agent_id == actor.id
     if not owners_agent:
         _require_owner(p, actor)
+    rented = p.status == "rented" or (p.status == "archived" and p.archive_reason in RENTED_REASONS)
+    if republish and rented:
+        _require_owner(p, actor)  # Stanislav 11-23: his own object, the agent too (it was published by the operator)
+        if not p.published_at:
+            raise DomainError("bad_status", "Объект ещё не публиковался — сначала верните его в работу")
+        _republish(db, p, actor, "republished")
+    elif p.status == "rented" or (p.status == "archived" and p.archive_reason in BACK_TO_WORK):
+        _back_to_work(db, p, actor, owners_agent)
+        _notify("prop_event", p, "🔁 <b>Снова в работу</b>", actor.id)
+        return p
+    elif p.status != "archived" or p.archive_reason not in RESUMABLE:
+        raise DomainError("bad_status", "Объект не на паузе")
+    elif p.published_at:
+        _republish(db, p, actor, "resumed")
+    else:
+        p.archive_reason, p.archive_comment, p.archived_at = None, None, None
+        _status(db, p, "media_uploaded", actor, "resumed")
+    db.commit()
+    _notify("prop_event", p, "▶️ <b>Снова опубликован</b>" if p.status == "published" else "🔁 <b>Снова в работу</b>", actor.id)
+    from app.services import catalog, site_feed
+    site_feed.clear_cache()
+    if catalog.sync(db, p):
+        db.commit()
+    return p
+
+
+def _back_to_work(db: Session, p: Property, actor: User, owners_agent: bool) -> None:
+    """«Снова в работу» / «Вернуть в работу» (a rented flat is free again): «Взят», the agent calls the owner."""
     # David 11-22 #8462: an old-base / dropped object whose ad came back («Дубль» on a new ad) goes back to work with the
     # owner's agent — the owner moved to him (transfer_owner leaves archived objects with the old agent)
-    if p.status == "archived" and p.archive_reason in BACK_TO_WORK:
-        if owners_agent:
-            p.agent_id = actor.id
-        p.archive_reason, p.archive_comment, p.archived_at = None, None, None
-        if not at_least(actor, "operator") or not p.agent_id:
-            p.agent_id = actor.id
-        p.taken_at, p.rent_from, p.rent_to = now(), None, None
-        schedule_lease_reminders(db, p)  # cancels what's left
-        _status(db, p, "taken", actor, "back_to_work")
-        db.commit()
-        return p
-    if p.status != "archived" or p.archive_reason != "paused":
-        raise DomainError("bad_status", "Объект не на паузе")
+    if owners_agent:
+        p.agent_id = actor.id
     p.archive_reason, p.archive_comment, p.archived_at = None, None, None
-    _status(db, p, "published" if p.published_at else "media_uploaded", actor, "resumed")
+    if not at_least(actor, "operator") or not p.agent_id:
+        p.agent_id = actor.id
+    p.taken_at, p.rent_from, p.rent_to = now(), None, None
+    schedule_lease_reminders(db, p)  # cancels what's left
+    _status(db, p, "taken", actor, "back_to_work")
     db.commit()
-    return p
 
 
 def mark_rented(db: Session, pid: int, actor: User | None) -> None:
@@ -2382,11 +2764,123 @@ def ad_removed(db: Session, pid: int, listing_id: str, actor: User) -> Property:
     p = _prop(db, pid, lock=True)
     link = db.scalar(select(PropertyListing).where(PropertyListing.property_id == p.id,
                                                    PropertyListing.listing_id == listing_id))
-    if link is None:
+    copy = None if link else _site_ad(db, listing_id)
+    if link is None and copy is None:  # a site ad «Похожие» lists (David 11-23): not linked
         raise DomainError("not_found", "the ad is not linked to this object")
-    link.removed_checked_at, link.removed_checked_by = now(), actor.id
-    log_event(db, "property", p.id, "ad_removed_checked", actor, listing_id=listing_id, source=link.source, url=link.url)
+    if link:
+        link.removed_checked_at, link.removed_checked_by = now(), actor.id
+    source, url = (link.source, link.url) if link else (copy["where"], copy["url"])
+    log_event(db, "property", p.id, "ad_removed_checked", actor, listing_id=listing_id, source=source, url=url)
     db.commit()
+    _notify("prop_event", p, f"✅ <b>Проверено: объявление на {source or 'сайте'} снято</b>", actor.id, None, False, url)
+    return p
+
+
+# ---------------------------------------------------------------- «Где ещё выложен» (David 11-23: any object)
+
+COPY_LEVELS = ("confirmed", "probable")  # similar.dup_level of an ad the duplicate search found: listed as a copy
+COPY_SITES = ("myhome", "ss", "livo", "korter")  # Stanislav 11-23: the block lists the sites only, not TG / FB posts
+
+
+def _who(l: Listing, competitors: set[str]) -> str | None:
+    """Who posted the ad, as far as we know: a competitor's / agency channel or the bot's agent check → агент, an ad
+    that passed the bot's owner check → собственник; a myhome copy by myhome's user_type; other copies are unknown."""
+    d = jload(l.details, {}) or {}
+    ut = d.get("user_type") if isinstance(d, dict) else None
+    if ut:  # myhome's own mark on a copy: physical | agent | broker
+        return "собственник" if ut == "physical" else "агент"
+    if l.source in competitors or l.source == "agency" or l.agent_suspect or (l.agent_reasons or "[]") != "[]":
+        return "агент"
+    return "собственник" if l.status in ("published", "pending_review") else None
+
+
+def copies(db: Session, p: Property) -> list[dict]:
+    """Where else the object is advertised on MyHome / SS / Livo / Korter: its linked outside ads (an exclusive's «висит на …», they block its
+    publication) + the ads its last duplicate search (similar.scan_exclusive → event data «copies») calls confirmed /
+    probable. Without ads gone from the feed, checked as removed by an operator or marked «Не дубль».
+    -> [{listing_id, where, url, pct, level linked|confirmed|probable, who, asked {at, by}, blocking}], linked first."""
+    from app.services import similar  # local: similar imports this module
+    linked = external_ads(db, [p.id]).get(p.id, [])
+    ev = db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                        Event.action == "duplicate_scan").order_by(Event.id.desc())).first()
+    found = [c for c in ((ev.data or {}).get("copies") or [] if ev else []) if c["listing_id"] not in {a["listing_id"] for a in linked}]
+    if not linked and not found:
+        return []
+    asked, removed = _ad_marks(db, p)
+    different = {k for k, d in similar._decisions(db, similar.key("p", p.id)).items() if d["verdict"] == "different"}
+    ls = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([a["listing_id"] for a in linked + found])))}
+    competitors = set(db.scalars(competitor_sources()))
+    out = []
+    for c, level in [(a, "linked") for a in linked] + [(c, c["level"]) for c in found]:
+        l = ls.get(c["listing_id"])
+        if l is None or source_type_of(l) not in COPY_SITES or (level != "linked" and (
+                l.status == "gone" or l.id in removed or similar.key("l", l.id) in different)):
+            continue
+        a = asked.get(l.id)
+        out.append({"listing_id": l.id, "where": similar._ad_source(l, competitors), "url": c.get("url") or (jload(l.urls, []) or [None])[0],
+                    "pct": c.get("pct"), "level": level, "who": _who(l, competitors), "blocking": level == "linked" and p.is_exclusive,
+                    "asked": a})
+    return out
+
+
+def _ad_marks(db: Session, p: Property) -> tuple[dict, set]:
+    """The object's «Попросить снять» ({listing id: {at, by name}}) and «Проверено: снято» (listing ids) so far."""
+    asked, removed = {}, set()
+    for e_ in db.scalars(select(Event).where(Event.entity == "property", Event.entity_id == str(p.id),
+                                             Event.action.in_(("ad_takedown_asked", "ad_removed_checked"))).order_by(Event.id)):
+        lid = (e_.data or {}).get("listing_id")
+        if e_.action == "ad_removed_checked":
+            removed.add(lid)
+        else:
+            asked[lid] = {"at": e_.at.isoformat(), "by": e_.actor_id}
+    names = dict(db.execute(select(User.id, User.name).where(User.id.in_({a["by"] for a in asked.values() if a["by"]}))).all()) if asked else {}
+    return {k: {"at": a["at"], "by": names.get(a["by"])} for k, a in asked.items()}, removed
+
+
+def _site_ad(db: Session, listing_id: str) -> dict | None:
+    """A MyHome / SS / Livo / Korter ad (linked or listed in «Похожие»): {where, url, who}; None for another one."""
+    l = db.get(Listing, listing_id)
+    if l is None or source_type_of(l) not in COPY_SITES:
+        return None
+    from app.services import similar
+    competitors = set(db.scalars(competitor_sources()))
+    return {"where": similar._ad_source(l, competitors), "url": (jload(l.urls, []) or [None])[0], "who": _who(l, competitors)}
+
+
+def similar_with_sites(db: Session, p: Property, items: list[dict]) -> list[dict]:
+    """«Похожие объекты» of an object is also where else it is advertised (Stanislav 11-24: one list, not a «Где ещё
+    выложен» block beside it): its linked MyHome / SS / Livo / Korter ads lead with «привязано» (an exclusive's block
+    its publication), every site ad carries who posted it, «Попросили снять» and «Проверено: снято»."""
+    from app.services import similar
+    competitors = set(db.scalars(competitor_sources()))
+    ids = [a["listing_id"] for a in external_ads(db, [p.id]).get(p.id, [])]
+    ls = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_(ids)))}
+    head = [{**similar._listing_profile(l, competitors)["out"], "key": similar.key("l", l.id), "level": "same",
+             "level_text": "привязано", "reasons": ["привязано к объекту"], "decided": None, "linked": True,
+             "blocking": bool(p.is_exclusive)} for lid in ids if (l := ls.get(lid)) is not None and source_type_of(l) in COPY_SITES]
+    asked, removed = _ad_marks(db, p)
+    out = head + [x for x in items if x.get("listing_id") not in ls]
+    site = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([x["listing_id"] for x in out if x["kind"] == "ad"])))}
+    for x in out:
+        l = site.get(x.get("listing_id"))
+        if l is not None and source_type_of(l) in COPY_SITES:
+            x.update(site=True, who=_who(l, competitors), asked=asked.get(l.id), removed=l.id in removed)
+    return out
+
+
+def ad_takedown(db: Session, pid: int, listing_id: str, actor: User) -> Property:
+    """«Попросить снять»: a task for the object's agent — contact whoever posted the ad (or the owner) to take it down;
+    the operator checks it later («Проверено: снято»). A history event + a message to the agent."""
+    p = _prop(db, pid)
+    _require_owner(p, actor)
+    c = _site_ad(db, listing_id)
+    if c is None:
+        raise DomainError("not_found", "not a MyHome / SS / Livo / Korter ad")
+    log_event(db, "property", p.id, "ad_takedown_asked", actor, listing_id=listing_id, source=c["where"], url=c["url"])
+    db.commit()
+    who = "собственником" if c["who"] == "собственник" else "тем, кто выложил, или с собственником"
+    _notify("prop_event", p, f"📣 <b>Попросить снять объявление на {html_.escape(c['where'])}</b>\nСвяжитесь с {who}; оператор потом "
+            "проверит, что его нет", actor.id if p.agent_id != actor.id else None, None, True, c["url"])
     return p
 
 
@@ -2561,6 +3055,8 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
                                     "total_floors", "description", "is_exclusive", "site_hidden", "checklist", "ai_flags",
                                     "duplicate_of", "dup_check", "review_comment", "reviewed_by", "post_url",
                                     "post_message_id", "owner_id", "post_fields", "archive_reason", "archive_comment")}
+    if d["checklist"]:
+        d["checklist"] = {ROOM_ALIAS.get(k, k): v for k, v in d["checklist"].items()}
     for c in ("taken_at", "next_call_at", "shoot_at", "reviewed_at", "published_at", "verified_at", "archived_at",
               "fast_track_at", "created_at", "updated_at"):
         v = getattr(p, c)
@@ -2573,6 +3069,9 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     d["agent"] = ref(agent)
     d["locked"] = bool(p.agent_id) and p.agent_id != user.id and not at_least(user, "operator")
     d["locked_fields"] = list(LOCKED_AFTER_VERIFY) if is_locked_for(p, user) else []
+    if full and p.status == "published":
+        d["reposts_left"], d["post_moderated"] = reposts_left(db, user), not at_least(user, "operator")
+        d["reposts_limit"] = None if d["reposts_left"] is None else repost_limit(db, user)
     d["needs_check"] = needs_check(p)
     owner = get(Owner, p.owner_id)
     if owner:
@@ -2589,18 +3088,21 @@ def out(db: Session, p: Property, user: User, full: bool = False, cache: dict | 
     visible = can_see_owner(p, user)  # ad links lead to the owner's phone
     d["exclusive_conflict"] = [{**a, "url": a["url"] if visible else None} for a in cache.get(k, [])] if p.is_exclusive else []
     if full:
-        d["media"] = [{"id": m.id, "kind": m.kind, "room": m.room, "position": m.position, "url": f"/api/media/{m.path}",
+        d["copies"] = [{**c, "url": c["url"] if visible else None} for c in copies(db, p)]
+    if full:
+        d["media"] = [{"id": m.id, "kind": m.kind, "room": ROOM_ALIAS.get(m.room, m.room), "position": m.position, "url": f"/api/media/{m.path}",
                        "preview": f"/api/media/{m.path}?p=1"}
                       for m in media(db, p.id)]
         d["missing"] = missing_fields(p)  # what still blocks «Отправить оператору»
         d["room_picker"] = settings_svc.get(db, "room_picker") != "0"  # Управление → Настройки; rooms never required
+        d["photo_rooms"] = [r.strip() for r in (settings_svc.get(db, "photo_rooms") or "").splitlines() if r.strip()]
         c = contract(db, p.id) if p.is_exclusive else None
         d["exclusive_contract"] = {"id": c.id, "url": f"/api/media/{c.path}", "created_at": c.created_at} if c else None
         w = no_esign(db, p.id) if p.is_exclusive and not c else None
         d["no_esign"] = _no_esign_out(db, w, can_see_owner(p, user)) if w else None
         if p.is_exclusive and not c and not (w and w.status == "approved"):
             d["missing"].append("эксклюзивный договор (PDF)")
-        scan = dup_scan(db, p.id) if p.is_exclusive else None
+        scan = dup_scan(db, p.id)
         if scan and not can_see_owner(p, user):  # ad links lead to the owner's phone
             scan["strong"] = [{**x, "url": None} for x in scan.get("strong") or []]
         d["duplicate_scan"] = scan
@@ -2672,7 +3174,8 @@ def card(db: Session, p: Property, user: User) -> dict:
                           "price": float(dl.price) if dl.price is not None else None, "agent": names.get(dl.agent_id),
                           "rent_from": iso(dl.rent_from), "rent_to": iso(dl.rent_to), "created_at": iso(dl.created_at)})
     return {"publications": [{"id": x.id, "channel": x.channel, "status": x.status, "url": x.url, "message_id": x.message_id,
-                              "published_at": iso(x.published_at), "removed_at": iso(x.removed_at), "delete_error": x.delete_error} for x in pubs],
+                              "published_at": iso(x.published_at), "removed_at": iso(x.removed_at), "delete_error": x.delete_error,
+                              "warning": (x.messages or {}).get("warning")} for x in pubs],
             "listings": ads, "deals": deals}
 
 

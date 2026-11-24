@@ -2,7 +2,7 @@
 answer and a mass «gone» (t.me down) change nothing. No network: a fake httpx transport."""
 import httpx
 
-from app.models import Event, Property
+from app.models import Event, Job, Property
 from app.services import post_sync
 from tests.conftest import make_user
 from tests.test_similar import _object
@@ -34,14 +34,18 @@ def _pubs(db, client, msgs):
     return out
 
 
-def test_a_deleted_post_takes_the_object_off_the_site(db, client, monkeypatch):
+def test_a_deleted_post_counts_the_object_as_rented(db, client, monkeypatch):
+    """Stanislav 11-23: a post deleted in the channel by hand = rented («Сдал сам»): off the site and the bot, no #FlatRented."""
     live, dead, odd = _pubs(db, client, (101, 102, 103))
     _fake(monkeypatch, {101: LIVE, 102: GONE})  # 103: a 502
     assert post_sync.run(db, pause=0) == 1
     db.expire_all()
-    assert [db.get(Property, x).site_hidden for x in (live, dead, odd)] == [False, True, False]
-    ev = db.query(Event).filter_by(entity="property", entity_id=str(dead), action="site_off").one()
-    assert ev.actor_label == "сверка с каналом" and ev.data["reason"] == "пост удалён в канале"
+    assert [db.get(Property, x).status for x in (live, dead, odd)] == ["published", "archived", "published"]
+    p = db.get(Property, dead)
+    assert (p.archive_reason, p.archive_comment) == ("rented_by_owner", "пост удалён в канале")
+    ev = db.query(Event).filter_by(entity="property", entity_id=str(dead), action="archived").one()
+    assert ev.actor_label == "сверка с каналом"
+    assert not db.query(Job).filter_by(kind="tg_unpost", ref=str(dead)).count()  # the post is gone already: no #FlatRented
 
 
 def test_mass_gone_hides_nothing(db, client, monkeypatch):
@@ -49,4 +53,18 @@ def test_mass_gone_hides_nothing(db, client, monkeypatch):
     _fake(monkeypatch, {200 + n: GONE for n in range(12)})
     assert post_sync.run(db, pause=0) == 0
     db.expire_all()
-    assert not any(db.get(Property, x).site_hidden for x in pids)
+    assert all(db.get(Property, x).status == "published" for x in pids)
+
+
+def test_both_channels_are_checked(db, client, monkeypatch):
+    """David 11-23: sale / commercial / cars are posted to @homesingeorgia — its deleted posts count as well."""
+    rent, homes = _pubs(db, client, (301, 302))
+    db.get(Property, homes).post_url = "https://t.me/homesingeorgia/302"
+    db.commit()
+    asked = []
+    monkeypatch.setattr(post_sync, "alive", lambda channel, msgs: asked.append(channel) or None)
+    _fake(monkeypatch, {301: LIVE, 302: GONE})
+    assert post_sync.run(db, pause=0) == 1
+    assert sorted(asked) == ["homesingeorgia", "rent_tbilisi_ge"]
+    db.expire_all()
+    assert [db.get(Property, x).status for x in (rent, homes)] == ["published", "archived"]

@@ -126,14 +126,14 @@ def test_matrix_objects_contracts_deals(db, client, role):
     r = client.post(f"/api/contracts/{r.json()['id']}/close", json={"reason": "client_changed_mind"}, headers=h)
     assert r.status_code == 200, r.text  # cancels his own contract with a reason
 
-    # deals: none for a recruit; an agent cancels his own pending deal (with a reason), not others'
+    # deals: a recruit / agent files and cancels his own pending deal (with a reason), not others' (recruits: 11-23)
     deal = {"price": 850, "rent_from": "2030-01-01", "address": "ул. Тест 1", "property_id": mine}
     r = client.post("/api/deals", json=deal, headers=h)
-    assert (r.status_code == 200) == (lvl >= 2), r.text
+    assert r.status_code == 200, r.text
     theirs_d = client.post("/api/deals", json={**deal, "property_id": theirs}, headers=auth(other)).json()["id"]
     can_cancel_theirs = client.post(f"/api/deals/{theirs_d}/cancel", json={"reason": "x"}, headers=h).status_code == 200
     assert can_cancel_theirs == (lvl >= 3)
-    if lvl == 2:
+    if lvl <= 2:
         own_d = r.json()["id"]
         assert client.post(f"/api/deals/{own_d}/cancel", json={}, headers=h).status_code == 400  # reason required
         assert client.post(f"/api/deals/{own_d}/cancel", json={"reason": "клиент передумал"}, headers=h).status_code == 200

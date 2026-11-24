@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api, type PublishProgress } from '../../api';
 import { ApiError, itemsOf, mediaUrl, thumbUrl, withKeepalive } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
@@ -25,7 +25,7 @@ import { keepAwake, pool, shrinkPhoto } from '../../lib/upload';
 import { addMonths, isoDate, parseIsoDate } from '../../lib/dates';
 import { Autosaver, type AutosaveState } from '../../lib/autosave';
 import { AddressField, type Point } from '../../components/AddressField';
-import { t, LOCALE } from '../../lib/i18n';
+import { t, lx, LOCALE } from '../../lib/i18n';
 
 const REQUEST_SENT = t('Изменение ушло оператору на проверку');
 
@@ -43,7 +43,12 @@ export function fewPhotos(media: { kind: string }[]): string | null {
   const n = media.filter((m) => m.kind === 'photo').length;
   return n < MIN_PHOTOS ? t('Нужно минимум {min} фото, сейчас {n}', { min: MIN_PHOTOS, n }) : null;
 }
-export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Ванная', 'Балкон', 'Вид из окна', 'Подъезд'];
+export const ROOMS = ['Гостиная', 'Кухня', 'Спальня 1', 'Спальня 2', 'Спальня 3', 'Санузел', 'Балкон', 'Терраса', 'Вид из окна', 'Прихожая', 'Гардероб', 'Кабинет', 'Подъезд', 'Фасад'];
+/** Room tags under a photo: Управление → Настройки (photo_rooms), the built-in list until the backend sends one. */
+export const roomsOf = (p?: Property) => (p?.photo_rooms?.length ? p.photo_rooms : ROOMS);
+// «Кабинет» is also the nav's «My account» in the shared dictionary: the room gets its own translation
+const CUSTOM_ROOM = '\u0000custom';
+const roomT = (r: string) => (r === 'Кабинет' ? lx(r, 'კაბინეტი', 'Study') : t(r));
 const STEPS = ['Взят', 'Звонок', 'Собственник', 'Съёмка', 'Пост и фото', 'Проверка', 'Публикация'].map((s) => t(s));
 
 function stepOf(p: Property): number {
@@ -113,12 +118,29 @@ function IdleTimer({ at }: { at: string }) {
   return <div className="alert alert-warn">⏳ {t('вернётся в «Новые объявления» через {left}, если собственник не подтвердит', { left })}</div>;
 }
 
+/** David 11-24: «Собственник закреплён за #Tag» — offer the agent a request to the operator to move that owner to him
+ * (backend change_requests.request_owner); any other error: the toast as before. */
+function useOwnerTaken(p: Property) {
+  const { toast } = useProp(p.id);
+  const confirm = useConfirm();
+  return async (e: unknown, phone?: string) => {
+    if (e instanceof ApiError && e.code === 'owner_taken' && phone) {
+      if (await confirm(`${e.message}. ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`)) {
+        try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
+      }
+      return;
+    }
+    toast(errText(e), true);
+  };
+}
+
 function CallStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [reached, setReached] = useState(false);
   const [isOwner, setIsOwner] = useState<'owner' | 'agent'>('owner');
   const [name, setName] = useState(p.owner?.name || '');
   const [phones, setPhones] = useState(() => phoneRows(p.owner));  // David 11-18: the ad's number + the one given on the call
+  const onTaken = useOwnerTaken(p);
   const fail = useMutation({ mutationFn: () => api.properties.call(p.id, false), onSuccess: (r) => { set(r); toast(t('Бот напомнит позвонить через 2 часа')); }, onError: (e) => toast(errText(e), true) });
   const save = useMutation({
     mutationFn: async () => {
@@ -127,7 +149,7 @@ function CallStep({ p }: { p: Property }) {
       return api.properties.owner(p.id, { is_owner: isOwner === 'owner', owner_name: name, owner_phone: list[0]?.phone, owner_phones: list });
     },
     onSuccess: (r) => { set(r); toast(isOwner === 'owner' ? t('Собственник подтверждён') : t('Объект в базе с пометкой «агент»')); },
-    onError: (e) => toast(errText(e), true),
+    onError: (e) => onTaken(e, cleanPhones(phones)[0]?.phone),
   });
   return (
     <div className="col">
@@ -478,6 +500,12 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const room = useMutation({ mutationFn: ([mid, r]: [number, string | null]) => api.properties.mediaRoom(p.id, mid, r), onSuccess: refresh, onError: (e) => toast(errText(e), true) });
   const check = useMutation({ mutationFn: (c: Record<string, boolean>) => api.properties.checklist(p.id, c), onSuccess: set });
   const confirmOther = useConfirm();
+  const askRoom = useActionDialog();
+  // «Свой вариант…» under a photo: the agent's own tag, saved on that photo only (not added to the settings list)
+  const pickRoom = async (id: number, r: string | null) => {
+    const v = r === CUSTOM_ROOM ? (await askRoom(t('Своя категория для этого фото'), { label: t('Категория'), required: true }))?.trim().slice(0, 60) : r;
+    if (v !== undefined && v !== '') room.mutate([id, v]);
+  };
   const submit = useMutation({
     mutationFn: async () => {
       await flush();
@@ -492,7 +520,8 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
     onSuccess: (r) => { set(r); toast(t('Отправлено на модерацию')); }, onError: (e) => toast(errText(e), true),
   });
   const post = useQuery({ queryKey: ['property-post', p.id], queryFn: () => api.properties.post(p.id) });
-  const done = ROOMS.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
+  const rooms = roomsOf(p);
+  const done = rooms.filter((r) => checklist[r] || media.some((m) => m.room === r)).length;
   const roomsOn = p.room_picker !== false;
   const missing = p.missing || [];
   const dirty = Object.keys(genDiff(ctl.confirmed, f)).length > 0 || saveState.saving;
@@ -623,13 +652,13 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
             )}
           </>
         )}
-        <MediaGrid p={p} grouped onOrder={canEdit ? (ids) => order.mutate(ids.map(Number)) : undefined} onDelete={canEdit ? (id) => del.mutate(Number(id)) : undefined} onRoom={canEdit && roomsOn ? (id, r) => room.mutate([id, r]) : undefined} />
+        <MediaGrid p={p} grouped onOrder={canEdit ? (ids) => order.mutate(ids.map(Number)) : undefined} onDelete={canEdit ? (id) => del.mutate(Number(id)) : undefined} onRoom={canEdit && roomsOn ? pickRoom : undefined} />
         {roomsOn && <>
-          <div className="row row-between"><span className="label">{t('Что снято · необязательно')}</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{ROOMS.length}</span></div>
+          <div className="row row-between"><span className="label">{t('Что снято · необязательно')}</span><span className="muted num" style={{ fontWeight: 700 }}>{done}/{rooms.length}</span></div>
           <div className="row row-wrap gap-sm">
-            {ROOMS.map((r) => {
+            {rooms.map((r) => {
               const on = !!checklist[r] || media.some((m) => m.room === r);
-              return <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit} onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>{on ? <CheckCircle2 size={14} /> : null}{t(r)}</button>;
+              return <button key={r} type="button" className={`chip ${on ? 'active' : ''}`} disabled={!canEdit} onClick={() => check.mutate({ ...checklist, [r]: !checklist[r] })}>{on ? <CheckCircle2 size={14} /> : null}{roomT(r)}</button>;
             })}
           </div>
         </>}
@@ -752,13 +781,14 @@ export function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder, off, o
       </> : <img src={thumbUrl(m.src)} alt={m.room || ''} loading="lazy" />}
       {onRoom && m.kind !== 'video' ? (
         <span className="room-pick" onClick={(e) => e.stopPropagation()}>
-          <span className={`badge badge-blue ${m.room ? '' : 'no-room'}`}>{m.room ? t(m.room) : t('Комната?')}<ChevronDown size={12} /></span>
+          <span className={`badge badge-blue ${m.room ? '' : 'no-room'}`}>{m.room ? roomT(m.room) : t('Комната?')}<ChevronDown size={12} /></span>
           <select value={m.room || ''} aria-label={t('Комната')} onChange={(e) => onRoom(Number(m.id), e.target.value || null)}>
             <option value="">{t('Не указана')}</option>
-            {ROOMS.map((r) => <option key={r} value={r}>{t(r)}</option>)}
+            {(m.room && !roomsOf(p).includes(m.room) ? [...roomsOf(p), m.room] : roomsOf(p)).map((r) => <option key={r} value={r}>{roomT(r)}</option>)}
+            <option value={CUSTOM_ROOM}>{t('Свой вариант…')}</option>
           </select>
         </span>
-      ) : m.room && m.kind !== 'video' && <span className="room badge badge-blue">{t(m.room)}</span>}
+      ) : m.room && m.kind !== 'video' && <span className="room badge badge-blue">{roomT(m.room)}</span>}
       {onToggle && (
         <label className="pick-box" onClick={(e) => e.stopPropagation()} title={off?.has(m.id) ? t('Не в посте') : t('В посте')}>
           <input type="checkbox" checked={!off?.has(m.id)} onChange={() => onToggle(m.id)} aria-label={t('В посте')} />
@@ -785,31 +815,36 @@ export function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder, off, o
   );
 }
 
-/** «Найти копии на myhome» (David 11-22): agents' copies of the object, searched by its district, street, rooms and
- * area; the worker takes about a minute, then «Похожие объекты» shows them. */
+/** «Найти копии» (David 11-22): agents' copies of the object on myhome / ss.ge / korter — by its district, street,
+ * rooms and area, and by the photos of its linked ad; a few minutes, then «Где ещё выложен» shows them. */
 function MyhomeCopies({ p }: { p: Property }) {
   const qc = useQueryClient();
   const toast = useToast();
   const run = useMutation({
     mutationFn: () => api.properties.myhomeCopies(p.id),
     onSuccess: () => {
-      toast(t('Ищем копии на myhome и ss.ge — через пару минут список обновится'));
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 75_000);
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 180_000);
+      toast(t('Ищем копии на myhome, ss.ge и korter — через пару минут список обновится'));
+      for (const ms of [75_000, 180_000, 300_000]) setTimeout(() => { qc.invalidateQueries({ queryKey: ['similar'] }); qc.invalidateQueries({ queryKey: ['property', p.id] }); }, ms);
     },
     onError: (e) => toast(errText(e), true),
   });
-  return <Button variant="secondary" size="sm" loading={run.isPending} onClick={() => run.mutate()}>{t('Найти копии на myhome и ss.ge')}</Button>;
+  return <Button variant="secondary" size="sm" loading={run.isPending} onClick={() => run.mutate()}>{t('Найти копии')}</Button>;
 }
 
-/** «Сравнить по ссылке» (David 11-22): an ad of a competitor / an owner on myhome or ss.ge scored against the object. */
+/** «Сравнить по ссылке» (David 11-22): an ad of a competitor / an owner on myhome / ss.ge / livo / korter scored against the object. */
 function CompareLink({ p }: { p: Property }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [url, setUrl] = useState('');
   const run = useMutation({
     mutationFn: () => api.properties.compareLink(p.id, url.trim()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['similar'] }),
+    onSuccess: () => {  // the ad is the object's now (David 11-23): the card lists it, the dup search runs with its photos
+      setUrl('');
+      qc.invalidateQueries({ queryKey: ['property', p.id] });
+      qc.invalidateQueries({ queryKey: ['similar'] });
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 60_000);
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['similar'] }), 180_000);
+    },
     onError: (e) => toast(errText(e), true),
   });
   const r = run.data;
@@ -818,7 +853,7 @@ function CompareLink({ p }: { p: Property }) {
     r.bedrooms != null ? `${t('спален')}: ${r.bedrooms}` : null, r.price_usd ? `$${r.price_usd}` : null].filter(Boolean).join(' · ') : '';
   return (
     <div style={{ marginTop: 12, borderTop: '1px solid var(--border, #e5e7eb)', paddingTop: 12 }}>
-      <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>{t('Сравнить с объявлением по ссылке (myhome.ge или ss.ge)')}</div>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>{t('Сравнить с объявлением по ссылке (myhome, ss.ge, livo, korter)')}</div>
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.myhome.ge/pr/…" /></div>
         <Button variant="secondary" size="sm" loading={run.isPending} disabled={!url.trim()} onClick={() => run.mutate()}>{t('Сравнить')}</Button>
@@ -829,7 +864,9 @@ function CompareLink({ p }: { p: Property }) {
           {facts && <div className="muted" style={{ marginTop: 4 }}>{facts}</div>}
           {r.why && <div style={{ marginTop: 4 }}>{r.why}</div>}
           {!!r.photos?.length && <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>{r.photos.map((src) => <img key={src} src={src} alt="" style={{ width: 72, height: 54, objectFit: 'cover', borderRadius: 6 }} />)}</div>}
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{t('Сходство по ракурсам фото досчитается в течение 10 минут — тогда объявление появится в «Похожих», если это та же квартира.')}</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{r.linked
+            ? t('Объявление привязано к объекту («Объявления на других сайтах»). По его фото ищем все копии — через пару минут они появятся в «Похожих».')
+            : t('Это объявление уже привязано к объекту #{n}', { n: r.other_object ?? '' })}</div>
         </div>
       )}
     </div>
@@ -856,7 +893,13 @@ function Gallery({ p }: { p: Property }) {
   };
   return (
     <Card label={t('Фото и видео')} title={own.length ? `${t('Файлы объекта')} · ${own.length}` : fromAd.length ? t('Фото из объявления') : t('Галерея')}
-      actions={staffOnly && own.some((x) => x.kind === 'photo') ? <Button variant="secondary" size="sm" loading={busy} onClick={originals}>{t('Скачать оригиналы')}</Button> : undefined}>
+      actions={staffOnly && own.length ? <div className="row row-wrap gap-sm">
+        {own.some((x) => x.kind === 'photo') && <Button variant="secondary" size="sm" loading={busy} onClick={originals}>{t('Скачать оригиналы')}</Button>}
+        {/* David 11-24: a video over 50 MB can't go to the originals chat (bot limit) — the operators take it here */}
+        {own.filter((x) => x.kind === 'video').map((v, i, vs) => (
+          <a key={v.id} className="btn btn-secondary btn-sm" href={mediaUrl(v.src)} download={`object_${p.id}_video${vs.length > 1 ? `_${i + 1}` : ''}.mp4`}>
+            {t('Скачать видео')}{vs.length > 1 ? ` ${i + 1}` : ''}</a>))}
+      </div> : undefined}>
       <MediaGrid items={own.length ? own : fromAd} />
     </Card>
   );
@@ -874,6 +917,7 @@ function Publications({ p }: { p: Property }) {
           <div className="grow">
             <div style={{ fontWeight: 700 }}>{t('Telegram-канал')}</div>
             <div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(x.status === 'removed' ? x.removed_at : x.published_at)}</div>
+            {x.warning && <div className="alert alert-warn" style={{ fontSize: 12, marginTop: 4 }}>⚠️ {x.warning}. {t('Добавьте бота админом с правами публикации и удаления.')}</div>}
             {x.delete_error && <div className="alert alert-warn" style={{ fontSize: 12, marginTop: 4 }}>⚠️ {t('Не удалось удалить пост в канале — удалите его вручную')}</div>}
           </div>
           <Badge tone={PUB_STATUS[x.status]?.[1] || 'grey'}>{PUB_STATUS[x.status]?.[0] || x.status}</Badge>
@@ -904,36 +948,12 @@ function Ads({ p }: { p: Property }) {
 
 const srcName = (s?: string | null) => SOURCE_LABEL[s || ''] || s || t('другой сайт');
 
-/** Exclusive still advertised elsewhere: the agent asks the owner to take the ad down, the operator checks and presses
- * «Проверено: снято» (manual on purpose: ss.ge / myhome block server checks). Until then it can't go out as an exclusive. */
-function ExclusiveConflict({ p }: { p: Property }) {
-  const confirm = useConfirm();
-  const { isStaff } = useAuth();
-  const { toast, set } = useProp(p.id);
-  const removed = useMutation({
-    mutationFn: (lid: string) => api.properties.adRemoved(p.id, lid),
-    onSuccess: (r) => { set(r); toast(t('Отмечено: объявление снято')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  const ads = p.exclusive_conflict || [];
-  if (!ads.length) return null;
-  return (
-    <Card label={t('Эксклюзив')} title={t('Эксклюзив висит на {s}', { s: [...new Set(ads.map((a) => srcName(a.source)))].join(', ') })}>
-      <div className="alert alert-warn">{t('Задача агенту: попросить собственника снять объявление. Публикация как эксклюзив закрыта, пока оператор не проверит, что объявление снято.')}</div>
-      {ads.map((a) => (
-        <div className="list-row" key={a.listing_id}>
-          <div className="grow" style={{ fontWeight: 700 }}>{srcName(a.source)}</div>
-          {a.url && <a className="btn btn-secondary btn-sm" href={a.url} target="_blank" rel="noreferrer"><ExternalLink size={14} />{t('Открыть')}</a>}
-          {isStaff && (
-            <Button size="sm" loading={removed.isPending && removed.variables === a.listing_id}
-              onClick={async () => { if (await confirm(t('Вы открыли ссылку и убедились, что объявление снято с сайта?'))) removed.mutate(a.listing_id); }}>
-              {t('Проверено: снято')}
-            </Button>
-          )}
-        </div>
-      ))}
-    </Card>
-  );
+/** An exclusive still advertised on its linked site ads (Stanislav 11-24: above «Похожие объекты», where the ads are listed
+ * with «Попросить снять» / «Проверено: снято»): its publication stays closed until the operator checks them. */
+function ExclusiveHangs({ p }: { p: Property }) {
+  const sites = [...new Set((p.copies || []).filter((a) => a.blocking).map((a) => a.where))];
+  if (!sites.length) return null;
+  return <div className="alert alert-warn" style={{ fontSize: 13 }}>{t('Эксклюзив висит на {s} — публикация закрыта до «Проверено: снято». Задача агенту: попросить собственника снять объявление.', { s: sites.join(', ') })}</div>;
 }
 
 /** Stage 7: an object typed in a deal form; its deal is confirmed only after the operator checks it here. */
@@ -1076,7 +1096,6 @@ const CAPTION_MAX = 1024; // Telegram caption limit for a post with media
 function PostComposer({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const draft = useQuery({ queryKey: ['property-post', p.id], queryFn: () => api.properties.post(p.id) });
-  const [edited, setEdited] = useState<string | null>(null); // null = the generated text
   // a published object: the target it is not on yet is checked; the first publication: both
   const [toSite, setToSite] = useState(true);
   const [toTg, setToTg] = useState(true);
@@ -1090,11 +1109,11 @@ function PostComposer({ p }: { p: Property }) {
   const picked = albumOf(ids.filter((id) => !off.has(id)), isVid);
   const shown = new Set(ids.filter((id) => !picked.includes(id)));  // unchecked in the grid: switched off or past the 9th photo
   const few = fewPhotos(files);
-  const text = edited ?? draft.data?.text ?? '';
+  const text = draft.data?.text ?? '';  // Stanislav 11-23: no free text — the post is built from the object's fields only
   const tags = [...new Set(text.match(/#[\p{L}\p{N}_]+/gu) || [])];
   const blocked = !!p.exclusive_conflict?.length;
   const publish = useMutation({
-    mutationFn: () => api.properties.publish(p.id, { text, media_ids: picked, channel: 'tg', tg: toTg, site: toSite }),
+    mutationFn: () => api.properties.publish(p.id, { media_ids: picked, channel: 'tg', tg: toTg, site: toSite }),
     onMutate: () => { lastStep.current = {}; setFailed(null); },
     onSuccess: (r) => { set(r); toast(toTg ? t('Опубликовано: агенту ушла ссылка на пост') : t('Опубликовано на сайте')); },
     onError: (e) => { setFailed(t('Не получилось: {step} — {error}', { step: stepText(lastStep.current), error: errText(e) })); toast(errText(e), true); },
@@ -1119,13 +1138,12 @@ function PostComposer({ p }: { p: Property }) {
   if (draft.error) return <ErrorBox error={draft.error} />;
   return (
     <div className="col">
-      <Field label={t('Текст поста')} hint={t('Собран из полей объекта и полей поста (метро, удобства, животные, сроки — «Править» в «Параметрах»). 📍[адрес](ссылка) станет ссылкой на карту.')}>
-        <Textarea value={text} onChange={(e) => setEdited(e.target.value)} rows={16} style={{ fontFamily: 'inherit', lineHeight: 1.45 }} />
+      <Field label={t('Текст поста')} hint={t('Собирается из параметров объекта: поменять — «Править» в «Параметрах», пост перевыложится сам.')}>
+        <div className="outcome-card" style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.45, maxHeight: 360, overflow: 'auto' }}>{text}</div>
       </Field>
       <div className="row row-between row-wrap gap-sm">
         <div className="row row-wrap gap-sm">
           {tags.map((t) => <Badge key={t} tone="grey">{t}</Badge>)}
-          {edited !== null && <Button size="sm" variant="ghost" onClick={() => setEdited(null)}><RotateCcw size={14} />{t('Исходный текст')}</Button>}
         </div>
         <span className={picked.length && text.length > CAPTION_MAX ? '' : 'faint'} style={{ fontSize: 12, fontWeight: 700, color: picked.length && text.length > CAPTION_MAX ? 'var(--red)' : undefined }}>
           {text.length}{picked.length ? ` / ${CAPTION_MAX}` : ''}
@@ -1267,21 +1285,21 @@ function NoEsign({ p, canEdit }: { p: Property; canEdit: boolean }) {
   );
 }
 
-/** Irakli 11-18: what the exclusive's duplicate search found (backend similar.scan_exclusive): the count, and the
+/** Irakli 11-18, David 11-23 (any live object): what the duplicate search found (backend similar.scan_exclusive): the count, and the
  * strong ones (a shared photo, the owner's phone, the cadastral code); the full list is «Похожие объекты» below. */
 function DupScan({ p }: { p: Property }) {
   const s = p.duplicate_scan;
   const qc = useQueryClient();
   useEffect(() => { if (s?.at) qc.invalidateQueries({ queryKey: ['similar', `p:${p.id}`] }); }, [s?.at, p.id, qc]);  // a new search → the list below again
-  if (!p.is_exclusive || !s) return null;
-  if (s.n === undefined) return <div className="alert alert-info"><Clock size={14} /> {t('Ищем дубли эксклюзива везде: в базе, на сайтах и у конкурентов…')}</div>;
+  if (!s) return null;
+  if (s.n === undefined) return <div className="alert alert-info"><Clock size={14} /> {t('Ищем дубли и копии везде: в базе, на сайтах и у конкурентов…')}</div>;
   if (!s.n) return <div className="alert alert-ok"><CheckCircle2 size={14} /> {t('Поиск дублей: ничего не найдено')}{s.at ? ` · ${fmtDateTime(s.at)}` : ''}</div>;
   return (
     <div className={`alert ${s.strong?.length ? 'alert-warn' : 'alert-info'}`}>
       <span>
         <b>{t('Найдены возможные дубли: {n}', { n: s.n })}</b>{s.at ? <span className="muted"> · {fmtDateTime(s.at)}</span> : null}
         {!!s.strong?.length && <>
-          <br />{t('Сильные совпадения — агент и оператор получили уведомление:')}
+          <br />{p.is_exclusive ? t('Сильные совпадения — агент и оператор получили уведомление:') : t('Сильные совпадения:')}
           {s.strong.slice(0, 5).map((x) => <div key={x.key} style={{ fontSize: 13 }}>• {x.where}{x.property_id ? ` #${x.property_id}` : ''}{x.address ? ` · ${x.address}` : ''}: {x.reasons.join(', ')}</div>)}
         </>}
       </span>
@@ -1312,7 +1330,7 @@ function OwnerDoc({ p, canEdit, kind, label, accept }: { p: Property; canEdit: b
 function ReviewStep({ p }: { p: Property }) {
   const { toast, set } = useProp(p.id);
   const [comment, setComment] = useState('');
-  const missing = ROOMS.slice(0, 6).filter((r) => !(p.checklist || {})[r] && !(p.media || []).some((m) => m.room === r));
+  const missing = roomsOf(p).slice(0, 6).filter((r) => !(p.checklist || {})[r] && !(p.media || []).some((m) => m.room === r));
   const back = useMutation({
     mutationFn: () => api.properties.review(p.id, false, comment),
     onSuccess: (r) => { set(r); toast(t('Возвращено агенту')); },
@@ -1325,7 +1343,7 @@ function ReviewStep({ p }: { p: Property }) {
       <div className="col gap-sm">
         <div className="row gap-sm"><AiFlagBadges flags={p.ai_flags} />{!p.ai_flags?.owner && !p.ai_flags?.agent_suspect && !p.ai_flags?.duplicate && <span className="muted">{t('Меток ИИ нет')}</span>}</div>
         <DupCheck value={p.dup_check} />
-        {p.room_picker !== false && (missing.length ? <div className="alert alert-info">{t('Комнаты не отмечены (необязательно):')} {missing.map((r) => t(r)).join(', ')}</div> : <div className="alert alert-ok">{t('Все основные комнаты отмечены')}</div>)}
+        {p.room_picker !== false && (missing.length ? <div className="alert alert-info">{t('Комнаты не отмечены (необязательно):')} {missing.map(roomT).join(', ')}</div> : <div className="alert alert-ok">{t('Все основные комнаты отмечены')}</div>)}
         {p.owner?.is_agent && <div className="alert alert-warn">{t('Телефон собственника отмечен как агентский')}</div>}
       </div>
       <div className="divider" />
@@ -1337,14 +1355,30 @@ function ReviewStep({ p }: { p: Property }) {
   );
 }
 
-/** A published object: staff can post it again (price changed, new photos) with the same generator. */
-function Republish({ p }: { p: Property }) {
-  const [open, setOpen] = useState(false);
-  return open ? <div className="col"><div className="divider" /><PostComposer p={p} /></div>
-    : <Button variant="secondary" onClick={() => setOpen(true)}><Wand2 size={16} />{p.post_url ? t('Обновить пост') : t('Опубликовать в Telegram')}</Button>;
+/** A published object with a post (Stanislav 11-24): one «Редактировать пост» — the object's form, its «Обновить пост»
+ * saves the changes and reposts (nothing changed: just reposts, «поднять пост»). No post: «Вернуть публикацию». */
+function Republish({ p, onEdit }: { p: Property; onEdit: () => void }) {
+  const { toast, set } = useProp(p.id);
+  const left = p.reposts_left;
+  const again = useMutation({
+    mutationFn: () => api.properties.publish(p.id, { channel: 'tg', tg: true, site: !p.site_hidden }),
+    onSuccess: (r) => { set(r); toast(t('Пост выложен заново наверх канала, старый удалён')); },
+    onError: (e) => toast(errText(e), true),
+  });
+  if (!p.post_url) return null;
+  return (
+    <div className="row row-wrap gap-sm">
+      <Button variant="secondary" onClick={onEdit}><Pencil size={16} />{t('Редактировать пост')}</Button>
+      {/* David 11-24: «апдейт» — the same post up the channel; agents 3 a day (backend REPOST_LIMIT) */}
+      <Button variant="secondary" loading={again.isPending} disabled={left === 0} onClick={() => again.mutate()}
+        title={t('Пост выйдет заново наверху канала, старый удалится')}>
+        <RotateCcw size={16} />{t('Поднять пост наверх')}{left != null ? ` · ${t('осталось {n} из {m} сегодня', { n: left, m: p.reposts_limit ?? 1 })}` : ''}
+      </Button>
+    </div>
+  );
 }
 
-/** «Скидка»: the new price and ❗️#Discount in the post; staff then posts it again («Обновить пост»). */
+/** «Скидка»: the new price and ❗️#Discount in the post; the post is reposted by itself (backend apply_update → tg_repost). */
 function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
   const [price, setPrice] = useState('');
@@ -1356,7 +1390,7 @@ function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClo
       const post_fields = { ...p.post_fields, discount: true, ...(sale ? { sale_price: nextPrice } : {}) };
       return api.properties.update(p.id, { price: nextPrice, post_fields });
     },
-    onSuccess: (r) => { set(r); toast(r.change_request ? t('Новая цена ушла оператору на проверку') : t('Цена снижена · в посте будет #Discount')); onClose(); },
+    onSuccess: (r) => { set(r); toast(r.change_request ? t('Новая цена ушла оператору на проверку') : r.post_url ? t('Цена снижена · пост с #Discount перевыкладывается') : t('Цена снижена · в посте будет #Discount')); onClose(); },
     onError: (e) => toast(errText(e), true),
   });
   const ok = Number(price) > 0 && Number(price) < Number(currentPrice || Infinity);
@@ -1364,7 +1398,7 @@ function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClo
     <Modal open={open} onClose={onClose} title={t('Скидка')}>
       <div className="col gap-lg">
         <Field label={t('Новая цена, $')} hint={t('Сейчас {price}. В посте появится ❗️#Discount', { price: money(currentPrice, p.currency || 'USD') })}><Input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))} /></Field>
-        {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>{t('Объект проверен оператором: новая цена уйдёт оператору, он обновит пост в канале.')}</div>}
+        {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>{t('Объект проверен оператором: новая цена уйдёт оператору, после подтверждения пост перевыложится сам.')}</div>}
         <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}>{t('Снизить цену')}</Button>
       </div>
     </Modal>
@@ -1388,30 +1422,118 @@ function PublishedActions({ p, onArchive }: { p: Property; onArchive: (reason: s
   );
 }
 
-/** «Опубликовать на сайте» / «Снять с сайта»: hge.ge shows a published object with a photo unless staff hid it
- * (backend properties.set_site); the Telegram post is the other button. */
+/** «Снять с публикации» / «Вернуть публикацию» (Stanislav 11-24): a modal with a checkbox per place — the site hge.ge
+ * and the Telegram channel. Off from every place it is in = «Снят с публикации» (archive, backend unpublish); from one
+ * = only there (site / unpost), the status stays. Back: the places it is missing from (site on / publish tg). */
 function SiteButton({ p }: { p: Property }) {
-  const confirm = useConfirm();
-  const { toast, set } = useProp(p.id);
-  const m = useMutation({
-    mutationFn: (on: boolean) => api.properties.site(p.id, on),
-    onSuccess: (r) => { set(r); toast(r.site_hidden ? t('Снято с сайта') : t('Опубликовано на сайте')); },
-    onError: (e) => toast(errText(e), true),
-  });
-  return p.site_hidden
-    ? <Button variant="ok" loading={m.isPending} onClick={() => m.mutate(true)}><Globe size={16} />{t('Опубликовать на сайте')}</Button>
-    : <>
-      <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>
-      <Button variant="ghost" loading={m.isPending} onClick={async () => { if (await confirm(t('Снять объект с сайта hge.ge? В базе и в Telegram он останется.'))) m.mutate(false); }}>{t('Снять с сайта')}</Button>
-    </>;
+  const [mode, setMode] = useState<'off' | 'on' | null>(null);
+  const [only, setOnly] = useState<'site' | 'tg' | null>(null);
+  const onSite = !p.site_hidden, onTg = !!p.post_url;
+  return <>
+    {onSite && <a className="btn btn-secondary" href={`https://hge.ge/listing/o${p.id}`} target="_blank" rel="noreferrer"><Globe size={16} />{t('На сайте')}</a>}
+    {(onSite || onTg) && <UnpublishMenu onSite={onSite} onTg={onTg} onPick={(k) => { setOnly(k); setMode('off'); }} />}
+    {(!onSite || !onTg) && <Button variant="ok" onClick={() => { setOnly(null); setMode('on'); }}><RotateCcw size={16} />{t('Вернуть публикацию')}</Button>}
+    {mode && <PlacesModal p={p} off={mode === 'off'} only={only} onClose={() => setMode(null)} />}
+  </>;
 }
 
-/** «Снять с паузы», or «Снова в работу» for «Собственник сдал» (back to «Взят», call the owner) */
-export function Resume({ p }: { p: Property }) {
+/** «Снять с публикации ▾» (Stanislav 11-24: «боюсь нажимать»): a menu that says where from; each item asks to confirm. */
+function UnpublishMenu({ onSite, onTg, onPick }: { onSite: boolean; onTg: boolean; onPick: (k: 'site' | 'tg' | null) => void }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const pick = (k: 'site' | 'tg' | null) => { if (ref.current) ref.current.open = false; onPick(k); };
+  const item = (k: 'site' | 'tg' | null, head: string, sub: string) => (
+    <button type="button" className="btn btn-ghost" style={{ justifyContent: 'flex-start', textAlign: 'left', height: 'auto', padding: '8px 12px' }} onClick={() => pick(k)}>
+      <span className="col"><b>{head}</b><span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>{sub}</span></span>
+    </button>
+  );
+  return (
+    <details ref={ref} style={{ position: 'relative' }}>
+      <summary className="btn btn-ghost" style={{ listStyle: 'none' }}>{t('Снять с публикации')}<ChevronDown size={16} /></summary>
+      <div className="card col" style={{ position: 'absolute', zIndex: 20, top: '100%', left: 0, minWidth: 300, padding: 6, marginTop: 4, boxShadow: '0 8px 24px rgba(0,0,0,.12)' }}>
+        {onSite && onTg && item('site', t('Только с сайта hge.ge'), t('Пост в канале и статус останутся'))}
+        {onSite && onTg && item('tg', t('Только из Telegram-канала'), t('Сайт и статус останутся'))}
+        {item(null, onSite && onTg ? t('Отовсюду (снять объект)') : onSite ? t('С сайта (снять объект)') : t('Из канала (снять объект)'), t('В архив «Снят с публикации», можно вернуть'))}
+      </div>
+    </details>
+  );
+}
+
+function PlacesModal({ p, off, only, onClose }: { p: Property; off: boolean; only?: 'site' | 'tg' | null; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
-  const work = p.archive_reason !== 'paused';
-  const m = useMutation({ mutationFn: () => api.properties.resume(p.id), onSuccess: (r) => { set(r); toast(work ? t('Объект снова в работе') : t('Объект снова в базе')); }, onError: (e) => toast(errText(e), true) });
-  return <Button size="sm" loading={m.isPending} onClick={() => m.mutate()}><RotateCcw size={14} />{work ? t('Снова в работу') : t('Снять с паузы')}</Button>;
+  const has = { site: !p.site_hidden, tg: !!p.post_url };
+  const places = (['site', 'tg'] as const).filter((k) => has[k] === off);
+  const [pick, setPick] = useState<Record<string, boolean>>(only ? { site: only === 'site', tg: only === 'tg' } : { site: true, tg: true });
+  const chosen = places.filter((k) => pick[k]);
+  const m = useMutation({
+    mutationFn: async () => {
+      if (off) {
+        if (chosen.length === places.length) return api.properties.unpublish(p.id);
+        return chosen[0] === 'site' ? api.properties.site(p.id, false) : api.properties.unpost(p.id);
+      }
+      if (chosen.includes('tg')) return api.properties.publish(p.id, { channel: 'tg', tg: true, site: has.site || chosen.includes('site') });
+      return api.properties.site(p.id, true);
+    },
+    onSuccess: (r) => {
+      set(r); onClose();
+      toast(off ? (chosen.length === places.length ? t('Снято с публикации · вернуть — «Опубликовать снова» в архиве')
+        : chosen[0] === 'site' ? t('Снято с сайта · канал и статус без изменений') : t('Пост удалён из канала · сайт и статус без изменений'))
+        : t('Публикация возвращена'));
+    },
+    onError: (e) => toast(errText(e), true),
+  });
+  const label = { site: t('Сайт hge.ge'), tg: t('Telegram-канал') };
+  return (
+    <Modal open onClose={onClose} title={off ? t('Снять с публикации') : t('Вернуть публикацию')}>
+      <div className="col gap-lg">
+        <span className="muted">{off ? t('Откуда снять объект:') : t('Куда вернуть объект:')}</span>
+        <div className="col gap-sm">{places.map((k) => <Checkbox key={k} checked={pick[k]} onChange={(x) => setPick({ ...pick, [k]: x })}>{label[k]}</Checkbox>)}</div>
+        {off && chosen.length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>{chosen.length === places.length
+          ? t('Объект уйдёт отовсюду и из бота, в архив «Снят с публикации». Вернуть — «Опубликовать снова».')
+          : chosen[0] === 'site' ? t('Объект пропадёт с сайта, пост в канале и статус останутся.') : t('Пост удалится из канала, на сайте и в статусе всё останется.')}</div>}
+        {!off && chosen.includes('tg') && <div className="alert alert-info" style={{ fontSize: 13 }}>{t('В канал выйдет новый пост из параметров объекта.')}</div>}
+        <div className="modal-actions"><Button block disabled={!chosen.length} loading={m.isPending} onClick={() => m.mutate()}>{t('Подтвердить')}</Button><Button block variant="ghost" onClick={onClose}>{t('Отмена')}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** «Скопировать письмо» (David 11-24, the simple version; sending it by itself is in the backlog): the copies' links on
+ * one site, the address, the cadastral code, the owner — a ready text for the site's support mail; the passport (and the
+ * exclusive contract) are attached by hand. Reads the «Похожие» list already loaded (same query). */
+function TakedownLetter({ p }: { p: Property }) {
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['similar', `p:${p.id}`], queryFn: () => api.properties.similar(p.id) });
+  const ads = (data?.items || []).filter((x) => x.site && x.url && !x.linked && !x.removed && x.decided !== 'different');
+  const sites = [...new Set(ads.map((x) => x.where))];
+  if (!sites.length) return null;
+  const letter = (site: string) => {
+    const links = ads.filter((x) => x.where === site).map((x, i) => `${i + 1}. ${x.url}`);
+    return [`Hello!`, '',
+      `We are Homes in Georgia, the agency representing the owner of this apartment${p.is_exclusive ? ' under an exclusive contract (attached)' : ''}. `
+      + `The following ads on ${site} were posted without the owner's consent. Please remove them:`, '', ...links, '',
+      `Property: ${p.address || '—'}${p.cadastral_code ? `, cadastral code ${p.cadastral_code}` : ''}`,
+      `Owner: ${p.owner?.name || '—'} — ID / passport attached.`, '', 'Thank you!', 'Homes in Georgia · +995 599 20 67 16'].join('\n');
+  };
+  const copy = async (site: string) => {
+    try { await navigator.clipboard.writeText(letter(site)); toast(t('Письмо скопировано — приложите паспорт собственника{c}', { c: p.is_exclusive ? t(' и эксклюзивный договор') : '' })); }
+    catch { toast(t('Не удалось скопировать'), true); }
+  };
+  return (
+    <div className="row row-wrap gap-sm mt">
+      {sites.map((s) => <Button key={s} variant="secondary" size="sm" onClick={() => copy(s)}><Copy size={14} />{t('Скопировать письмо для {s}', { s })}</Button>)}
+    </div>
+  );
+}
+
+/** «Снять с паузы» / «Опубликовать снова» (unpublished): published again with a new post; «Снова в работу» for
+ * «Собственник сдал» (back to «Взят», call the owner); republish: a rented object published again right away (staff). */
+export function Resume({ p, republish }: { p: Property; republish?: boolean }) {
+  const { toast, set } = useProp(p.id);
+  const work = !republish && !['paused', 'unpublished'].includes(p.archive_reason || '');
+  const m = useMutation({ mutationFn: () => api.properties.resume(p.id, republish), onSuccess: (r) => { set(r); toast(work ? t('Объект снова в работе') : t('Объект снова опубликован')); }, onError: (e) => toast(errText(e), true) });
+  const label = republish || p.archive_reason === 'unpublished' ? t('Опубликовать снова') : p.archive_reason === 'paused' ? t('Снять с паузы')
+    : p.status === 'rented' ? t('Вернуть в работу') : t('Снова в работу');
+  return <Button size="sm" loading={m.isPending} onClick={() => m.mutate()}><RotateCcw size={14} />{label}</Button>;
 }
 
 
@@ -1449,7 +1571,7 @@ const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label
 export const metroLabel = (tag?: string | null) => (tag ? POST_ONE.metro[1][tag] || tag : '');
 export const POST_ONE: Record<string, [string, Record<string, string>]> = {
   prop_type: [t('Тип'), { Apartment: t('Квартира'), House: t('Дом'), Commercial: t('Коммерция'), Duplex: t('Дуплекс'), Townhouse: t('Таунхаус'), Land: t('Земля'), Retail: t('Ритейл'), Business: t('Бизнес'), Cafe: t('Кафе'), Restaurant: t('Ресторан'), BeautySalon: t('Салон красоты'), Warehouses: t('Склад'), Manufacture: t('Производство') }],
-  metro: [t('Метро'), { LibertySquare: t('Площадь Свободы'), Rustaveli: t('Руставели'), Marjanishvili: t('Марджанишвили'), StationSquare: t('Вокзальная площадь'), Tsereteli: t('Церетели'), Gotsiridze: t('Гоциридзе'), Nadzaladevi: t('Надзаладеви'), Didube: t('Дидубе'), Grmagele: t('Грмагеле'), Guramishvili: t('Гурамишвили'), Sarajishvili: t('Сараджишвили'), AhmeteliTheatre: t('Театр Ахметели'), STUniversity: t('Техуниверситет'), VazhaPshavela: t('Важа-Пшавела'), Delisi: t('Делиси'), TCUniversity: t('Госуниверситет'), MCUniversity: t('Медуниверситет'), AvlabariMetro: t('Авлабари'), IsaniMetro: t('Исани'), '300Aragveli': t('300 Арагвели'), SamgoriMetro: t('Самгори'), Varketili: t('Варкетили') }],
+  metro: [t('Метро'), { LibertySquare: t('Площадь Свободы'), Rustaveli: t('Руставели'), Marjanishvili: t('Марджанишвили'), StationSquare: t('Вокзальная площадь'), Tsereteli: t('Церетели'), Gotsiridze: t('Гоциридзе'), Nadzaladevi: t('Надзаладеви'), Didube: t('Дидубе'), Grmagele: t('Грмагеле'), Guramishvili: t('Гурамишвили'), Sarajishvili: t('Сараджишвили'), AhmeteliTheatre: t('Театр Ахметели'), STUniversity: t('Госуниверситет'), VazhaPshavela: t('Важа-Пшавела'), Delisi: t('Делиси'), TCUniversity: t('Техуниверситет'), MCUniversity: t('Медуниверситет'), AvlabariMetro: t('Авлабари'), IsaniMetro: t('Исани'), '300Aragveli': t('300 Арагвели'), SamgoriMetro: t('Самгори'), Varketili: t('Варкетили') }],
   building: [t('Дом'), { NewBuilding: t('Новостройка'), OldBuilding: t('Старый фонд'), HistoricalBuilding: t('Исторический'), Reconstruction: t('Реконструкция') }],
   design: [t('Дизайн'), { New: t('Новый'), White: t('Белый'), Grey: t('Серый'), Yellow: t('Жёлтый'), Mixed: t('Смешанный'), Old: t('Старый'), Retro: t('Ретро'), UnderRepair: t('В ремонте') }],
   condition: [t('Состояние (продажа)'), { BlackFrame: t('Чёрный каркас'), WhiteFrame: t('Белый каркас'), GreenFrame: t('Зелёный каркас'), FullyRenovated: t('С ремонтом') }],
@@ -1517,16 +1639,31 @@ function PostFieldsForm({ value: f, onChange, price }: { value: PostFields; onCh
   );
 }
 
-function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
+function EditModal({ p, open, onClose, repost }: { p: Property; open: boolean; onClose: () => void; repost?: boolean }) {
   const { toast, set } = useProp(p.id);
   type Form = Partial<Property> & { owner_name?: string; owner_phone?: string; owner_id?: number | null };
   const [f, setF] = useState<Form>({});
   const v: Form = { ...p, owner_name: p.owner?.name || '', owner_phone: p.owner?.phone || '', ...f };
   const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
   const [reason, setReason] = useState('');
+  // the point: as just moved here, else the object's own, else the origin ad's pin
+  const pt = f.lat !== undefined ? (f.lat != null && f.lng != null ? { lat: f.lat, lng: f.lng } : null)
+    : p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : p.listing?.lat != null && p.listing?.lng != null ? { lat: p.listing.lat, lng: p.listing.lng } : null;
   const save = useMutation({
     mutationFn: () => api.properties.update(p.id, { ...f, reason: reason || undefined }),
     onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : t('Сохранено')); onClose(); setF({}); setReason(''); },
+    onError: (e) => toast(errText(e), true),
+  });
+  // «Сохранить и обновить пост» (staff): the changes and a fresh post. An agent's changes go to the operator (David 11-24),
+  // the post follows his approval by itself (backend properties.split_post)
+  const toOperator = !!p.post_moderated;
+  const again = useMutation({
+    mutationFn: async () => {
+      if (toOperator) return api.properties.update(p.id, { ...f, reason: reason || undefined });
+      if (Object.keys(f).length) await api.properties.update(p.id, { ...f, reason: reason || undefined });
+      return api.properties.publish(p.id, { channel: 'tg', tg: true, site: !p.site_hidden });
+    },
+    onSuccess: (r) => { set(r); toast(toOperator ? (r.change_request ? t('Изменения ушли оператору · после подтверждения пост обновится сам') : t('Сохранено')) : t('Сохранено · пост перевыложен, старый удалён')); onClose(); setF({}); setReason(''); },
     onError: (e) => toast(errText(e), true),
   });
   // after the operator's verification these fields go to «Запросы» (backend properties.LOCKED_AFTER_VERIFY)
@@ -1536,11 +1673,17 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
   const where = useQuery({ queryKey: ['property-elsewhere', p.id], queryFn: () => api.properties.elsewhere(p.id), enabled: open && !!v.is_exclusive });
   const found = where.data?.items || [];
   return (
-    <Modal open={open} onClose={onClose} title={t('Поля объекта')}>
+    <Modal open={open} onClose={onClose} title={repost ? t('Редактировать пост') : t('Поля объекта')}>
+      {repost && <div className="alert alert-info" style={{ fontSize: 13, marginBottom: 12 }}>{toOperator ? t('Пост собирается из этих полей. Изменения уйдут оператору на проверку, после подтверждения пост в канале обновится сам.') : t('Пост собирается из этих полей. «Сохранить и обновить пост» сохранит изменения и выложит пост заново (старый удалится, сайт обновится).')}</div>}
       <div className="form-grid">
         {(p.missing || []).length > 0 && <div className="alert alert-warn span2" style={{ fontSize: 13, display: 'block' }}>{t('Для отправки оператору не хватает:')} <b>{(p.missing || []).join(', ')}</b></div>}
         <Field label={t('Район')}><DistrictSelect value={v.district} onChange={(x) => upd('district', x)} /></Field>
-        <Field label={t('Адрес')} hint={lockHint('address')}><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
+        {/* Irakli 11-24: the point is set again here (the post's «On the map» and the site's map follow it) */}
+        <div className="field span2"><span className="label">{t('Адрес и точка на карте')}</span>
+          <AddressField value={v.address || ''} onChange={(x) => upd('address', x)} point={pt}
+            onPoint={(x) => setF((s) => ({ ...s, lat: x?.lat ?? null, lng: x?.lng ?? null }))}
+            onFacts={(r) => setF((s) => ({ ...s, district: r.district || s.district || v.district, post_fields: { ...(s.post_fields || p.post_fields || {}), metro: r.metro || undefined } }))} />
+          {lockHint('address') && <span className="muted" style={{ fontSize: 12 }}>{lockHint('address')}</span>}</div>
         <Field label={t('Цена, $')} hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
         <Field label={t('Спальни')}><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
         <Field label={t('Площадь, м²')}><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>
@@ -1579,7 +1722,12 @@ function EditModal({ p, open, onClose }: { p: Property; open: boolean; onClose: 
           <Field label={t('Причина изменения')} hint={t('Оператор увидит её в запросе')}><Input value={reason} placeholder={t('Например: собственник сменил номер')} onChange={(e) => setReason(e.target.value)} /></Field>
         </div>
       )}
-      <div className="row mt-lg"><Button loading={save.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => save.mutate()}>{t('Сохранить')}</Button><Button variant="ghost" onClick={onClose}>{t('Отмена')}</Button></div>
+      <div className="modal-actions mt-lg">
+        {repost
+          ? <><Button block loading={again.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code) || (toOperator && !Object.keys(f).length)} onClick={() => again.mutate()}>{toOperator ? <><Send size={16} />{t('Отправить оператору')}</> : <><RotateCcw size={16} />{t('Сохранить и обновить пост')}</>}</Button>
+            <Button block variant="ghost" onClick={onClose}>{t('Отмена')}</Button></>
+          : <div className="row"><Button loading={save.isPending} disabled={!!cadastralError(v.cadastral_code, p.cadastral_code)} onClick={() => save.mutate()}>{t('Сохранить')}</Button><Button variant="ghost" onClick={onClose}>{t('Отмена')}</Button></div>}
+      </div>
     </Modal>
   );
 }
@@ -1594,6 +1742,7 @@ function OwnerEditModal({ p, open, onClose }: { p: Property; open: boolean; onCl
   const phone = phones[0]?.phone || '';
   const [link, setLink] = useState<'link' | 'separate'>('link');
   const [reason, setReason] = useState('');
+  const onTaken = useOwnerTaken(p);
   const digits = (s?: string | null) => (s || '').replace(/\D/g, '').replace(/^995/, '').replace(/^0/, '');
   const changed = digits(phone) !== digits(p.owner?.phone);
   const [q, setQ] = useState('');
@@ -1607,7 +1756,7 @@ function OwnerEditModal({ p, open, onClose }: { p: Property; open: boolean; onCl
       : { owner_name: name, owner_phone: cleanPhones(phones)[0]?.phone, owner_phones: samePhones(phones, phoneRows(p.owner)) ? undefined : cleanPhones(phones),
           owner_separate: !!other || undefined, reason: reason || undefined }),
     onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : t('Сохранено')); onClose(); },
-    onError: (e) => toast(errText(e), true),
+    onError: (e) => onTaken(e, cleanPhones(phones)[0]?.phone),
   });
   return (
     <Modal open={open} onClose={onClose} title={t('Контакт собственника')}>
@@ -1692,7 +1841,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id),
     refetchInterval: (q) => (q.state.data?.duplicate_scan?.pending ? 10_000 : false) });
   const hist = useQuery({ queryKey: ['property-history', id], queryFn: () => api.properties.history(id) });
-  const [edit, setEdit] = useState(false);
+  const [edit, setEdit] = useState<boolean | 'repost'>(false);
   const [ownerEdit, setOwnerEdit] = useState(false);
   const [archiving, setArchiving] = useState<string | false>(false);
   const step = useMemo(() => (p ? stepOf(p) : 0), [p]);
@@ -1725,10 +1874,15 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
       )}
       <div className="row row-wrap">
         {p.post_url && <a className="btn" href={p.post_url} target="_blank" rel="noreferrer"><ExternalLink size={16} />{t('Пост в канале')}</a>}
-        {isStaff && p.status === 'published' && <SiteButton p={p} />}
+        {canWork && p.status === 'published' && <SiteButton p={p} />}
       </div>
       {canWork && p.status === 'published' && <PublishedActions p={p} onArchive={setArchiving} />}
-      {isStaff && p.status === 'published' && <Republish p={p} />}
+      {canWork && p.status === 'published' && <Republish p={p} onEdit={() => setEdit('repost')} />}
+      {/* David 11-23: a rented flat is free again — back on the market from the card, not through the archive */}
+      {p.status === 'rented' && canWork && <div className="row row-wrap gap-sm">
+        {!!p.published_at && <Resume p={p} republish />}
+        <Resume p={p} />
+      </div>}
     </div>
   );
   // the media / review steps show the files with their own controls
@@ -1746,7 +1900,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
             <div className="row row-wrap gap-sm mt">
               <PropertyStatusBadge status={p.status} />
               {p.is_exclusive && <Badge tone="solid">{t('эксклюзив')}</Badge>}
-              {p.is_exclusive && !!p.duplicate_scan?.n && <Badge tone={p.duplicate_scan.strong?.length ? 'red' : 'warn'}>{t('Найдены возможные дубли: {n}', { n: p.duplicate_scan.n })}</Badge>}
+              {!!p.duplicate_scan?.n && <Badge tone={p.duplicate_scan.strong?.length ? 'red' : 'warn'}>{t('Найдены возможные дубли: {n}', { n: p.duplicate_scan.n })}</Badge>}
               <ExclusiveConflictBadge p={p} />
               <AiFlagBadges flags={p.ai_flags} />
             </div>
@@ -1771,6 +1925,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {p.status === 'review' && isStaff && (
             <Card label={t('Проверка на дубль')} title={t('Похожие объекты')}>
               <DupScan p={p} />
+              <ExclusiveHangs p={p} />
               <SimilarList subject={`p:${p.id}`} intro={t('Перед публикацией проверьте похожие: это может быть дубль объекта из базы или уже выложенного.')}
                 emptyText={t('Похожих объектов не найдено: ни в базе, ни на сайтах, ни у конкурентов.')} />
             </Card>
@@ -1789,8 +1944,9 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
                 {p.archive_reason === 'duplicate' && p.duplicate_of ? <> {t('объекта')} <Link to={objLink(p.duplicate_of)}>#{p.duplicate_of}</Link></> : null}
                 {p.archive_comment ? ` · ${p.archive_comment}` : ''}
               </span>
-              {(canWork && ['paused', 'rented_by_owner', 'not_actual', 'idle_return'].includes(p.archive_reason || '')
+              {(canWork && ['paused', 'unpublished', 'rented_by_owner', 'not_actual', 'idle_return'].includes(p.archive_reason || '')
                 || (p.owner?.agent?.id === user?.id && ['rented_by_owner', 'not_actual', 'idle_return'].includes(p.archive_reason || ''))) && <Resume p={p} />}
+              {canWork && ['rented_by_owner', 'rented_by_us'].includes(p.archive_reason || '') && !!p.published_at && <Resume p={p} republish />}
             </div>
           )}
           {p.status === 'archived' && p.archive_reason === 'rented_by_owner' && <OwnerLeaseNote p={p} canWork={canWork} />}
@@ -1799,12 +1955,13 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               {p.change_requests.map((r) => <RequestRow key={r.id} r={r} showObject={false} />)}
             </Card>
           )}
-          <ExclusiveConflict p={p} />
           {!(p.status === 'review' && isStaff) && (
             <Card label={t('Дубли')} title={t('Похожие объекты')} actions={<MyhomeCopies p={p} />}>
               <DupScan p={p} />
+              <ExclusiveHangs p={p} />
               <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{t('Те же фото, адрес, собственник или параметры — в нашей базе, на ss.ge / myhome.ge и у конкурентов. Отметьте: дубль или нет.')}</div>
               <SimilarList subject={`p:${p.id}`} emptyText={t('Похожих объектов не найдено: ни в базе, ни на сайтах, ни у конкурентов.')} />
+              <TakedownLetter p={p} />
               <CompareLink p={p} />
             </Card>
           )}
@@ -1855,7 +2012,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
           {compact && <Card label={t('История')} title={t('События')}><Timeline events={itemsOf(hist.data)} /></Card>}
         </div>
       </div>
-      <EditModal p={p} open={edit} onClose={() => setEdit(false)} />
+      <EditModal p={p} open={!!edit} repost={edit === 'repost'} onClose={() => setEdit(false)} />
       {ownerEdit && <OwnerEditModal p={p} open onClose={() => setOwnerEdit(false)} />}
       {archiving !== false && <ArchiveModal key={archiving} p={p} preset={archiving} open onClose={() => setArchiving(false)} />}
     </div>

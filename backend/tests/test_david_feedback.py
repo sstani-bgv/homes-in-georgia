@@ -208,20 +208,21 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     db.commit()
     h = properties.post_rich(db, p, ["tg://photo?id=m0", "tg://video?id=m1"])
     assert '<tg-slideshow><img src="tg://photo?id=m0"/><video src="tg://video?id=m1"/></tg-slideshow>' in h
-    assert "<h2>$1 500 · 3 bedrooms · Vake</h2><p>Discount · 140 m² · 4/9 floor · ID: " in h  # the @tbilisi_rent title lines
-    assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h and "WiFi · Smart TV" in h
-    assert "<details><summary>Parameters and amenities</summary>" in h  # collapsed, as in Irakli's video
-    assert "<summary>Tags</summary>" in h and "#Discount" in h and "+995 599 20 67 16 #David" in h  # contacts inside Tags
+    # Irakli 11-24 (his sample): title, the marks, 🏢 building · m² · floor; ✅ / 💰 lines; one collapsed block; ID at the end
+    assert "<h2>$1 500 · 3 bedrooms · Vake</h2><p><b>❗️ Discount</b></p><p>🏢 140 m² · floor 4/9</p>" in h
+    assert "✅ AC heating<br>💰 Deposit $1500 · from 1 month" in h and "<p>✅ WiFi · Smart TV</p>" in h  # the rest: in the block
+    assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h
+    assert "<details><summary>Parameters, amenities and tags</summary>" in h and "<summary>Tags</summary>" not in h
+    assert "#Discount" in h and "+995 599 20 67 16 #David" in h and f"<p>ID {p.id}</p>" in h
     assert "<tg-map" not in h  # «On the map» opens the map: no second map in the post
-    assert h.count("<tg-button ") == 3 and "RentInTbilisi_bot" not in h
+    assert h.count("<tg-button ") == 2 and "RentInTbilisi_bot" not in h and "I like it" not in h  # David 11-23
     # «Contact» is back (Stanislav 11-11): its own full-width row, a link to our bot -> /start p<id> (a lead)
     assert h.endswith(f'<tg-button-row><tg-button type="url" url="https://t.me/{env.BOT_USERNAME.lstrip("@")}?start=p{p.id}">'
                       '💬 Contact</tg-button></tg-button-row>')
-    # «On the map»: our site's map on this object (its site ID); «I like it»: a plain bot button (callback), no link arrow
+    # «On the map»: our site's map on this object (its site ID)
     assert f'<tg-button type="url" url="{env.SITE_URL}/map?q=o{p.id}">' in h
     p.site_hidden = True
     assert '/map?pin=41.700000%2C44.760000&amp;' in properties.post_rich(db, p, [])  # not on the site: our pin map
-    assert f'<tg-button type="callback_data" style="primary" data="plike:{p.id}">❤️ I like it</tg-button></tg-button-row>' in h
 
 
 def test_rich_post_keeps_only_the_description_prose_of_an_old_post():

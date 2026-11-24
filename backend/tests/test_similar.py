@@ -45,8 +45,11 @@ def test_dubl_links_the_ad_to_the_object(db, client):
     r = client.post("/api/similar/decide", json={"a": "l:mh7002", "b": f"p:{pid}", "same": True}, headers=auth(ana))
     assert r.json() == {"ok": True, "verdict": "same", "linked_to": pid, "revived": None, "owner_taken": None}
     assert db.query(PropertyListing).filter_by(listing_id="mh7002").one().property_id == pid
-    # the object's card lists it no more as a stray ad: it is the object's own now
-    assert all(x.get("listing_id") != "mh7002" for x in client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"])
+    # the object's card lists it no more as a stray ad: it is the object's own now, first, «привязано» (Stanislav 11-24)
+    items = client.get(f"/api/properties/{pid}/similar", headers=auth(vika)).json()["items"]
+    head = [x["listing_id"] for x in items if x.get("linked")]
+    assert "mh7002" in head and [x["listing_id"] for x in items[:len(head)]] == head
+    assert sum(x.get("listing_id") == "mh7002" for x in items) == 1
 
 
 def test_object_card_shows_ads_of_every_site_and_competitors_by_phone_and_house(db, client):
@@ -145,3 +148,15 @@ def test_object_photos_are_hashed_and_found(db, client, monkeypatch):
     make_listing(db, "ss8002", photo_hashes=json.dumps([h[0], 99]), address="other 2", district="Сабуртало")
     ana = make_user(db, "agent", "Аня")
     assert [x["property_id"] for x in similar.find(db, "l:ss8001", ana) if x["kind"] == "object"] == [p.id]  # one photo: «похож»
+
+
+def test_rejected_ads_are_candidates_of_an_object_not_of_an_ad(db, client):
+    """11-23: competitors' tg posts / agents' FB ads are «rejected» by the bot, and most often they are the agents'
+    copies of our object: an object's «Похожие» (its duplicate search) lists them, an ad's own does not."""
+    vika = make_user(db, "agent", "Вика")
+    pid = _object(db, client, vika)
+    make_listing(db, "tg:rival:77", source="tg:rival", status="rejected", status_reason="источник-конкурент",
+                 urls=json.dumps(["https://t.me/rival/77"]), address="Kazbegi 30", photo_hashes=json.dumps(H[:3]))
+    make_listing(db, "ss8001", urls=json.dumps(["https://ss.ge/8001"]), address="Kazbegi 31", photo_hashes=json.dumps(H[:3]))
+    assert "l:tg:rival:77" in {c["key"] for c in similar.find(db, f"p:{pid}", vika)}
+    assert "l:tg:rival:77" not in {c["key"] for c in similar.find(db, "l:ss8001", vika)}

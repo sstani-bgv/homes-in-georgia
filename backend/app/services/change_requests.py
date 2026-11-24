@@ -3,13 +3,14 @@ archiving or an owner transfer is not applied but queued here; the operator sees
 approves (the change goes through the usual service functions, logged as the operator) or rejects with a comment.
 payload: {field: {"old": …, "new": …}} plus plain ids the kind needs (owner_id for transfer_owner)."""
 import logging
+from html import escape
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ChangeRequest, Owner, Property, PropertyMedia, User, at_least, is_field
 from app.services import properties as P
-from app.services.common import get_or_404, log_event, now
+from app.services.common import get_or_404, log_event, notify_later, now
 from app.services.errors import DomainError, forbidden
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,42 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
         "owner_agent": {"old": old.name if old else P.PLATFORM, "new": to.name}}, actor, reason)
     db.commit()
     P._notify("change_request_new", cr)
+    P._notify("prop_event", p, f"✋ <b>{escape(actor.name or '')} просит передать вам собственника {escape(o.name or '—')}</b>",
+              actor.id, [to.id], False, "Решает оператор в «Запросах».")
     return cr
+
+
+def request_owner(db: Session, pid: int, phone: str, actor: User, reason: str | None = None) -> ChangeRequest:
+    """David 11-24 (voices 287409 / 287423, Luka and Zaza): the number the agent typed is an owner bound to another agent
+    («Собственник закреплён за #Tag») — the agent asks the operator to move the owner to him and link him to this
+    object; the owner's agent hears of it (he may say he is against it). Not when that agent has an exclusive with him."""
+    p = get_or_404(db, Property, int(pid), "property")
+    if p.agent_id != actor.id:
+        raise forbidden("only the object's agent")
+    o = P.find_owner(db, phone)
+    if o is None or o.is_agent or o.agent_id in (None, actor.id):
+        raise DomainError("bad_status", "Этот собственник ни за кем не закреплён — просто сохраните номер")
+    if db.scalar(select(Property.id).where(Property.owner_id == o.id, Property.agent_id == o.agent_id,
+                                           Property.is_exclusive.is_(True), Property.status.not_in(("archived", "rented"))).limit(1)):
+        raise DomainError("exclusive", f"У {users_svc_tag(db, o.agent_id)} эксклюзив с этим собственником — передать нельзя")
+    if db.scalar(select(ChangeRequest.id).where(ChangeRequest.kind == "transfer_owner", ChangeRequest.status == "pending",
+                                                ChangeRequest.entity_id == p.id).limit(1)):
+        raise DomainError("bad_status", "Запрос уже отправлен, ждёт оператора")
+    old = db.get(User, o.agent_id)
+    cr = create(db, "property", p.id, "transfer_owner", {
+        "owner_id": o.id, "agent_id": actor.id, "link": True,
+        "owner_agent": {"old": old.name if old else P.PLATFORM, "new": actor.name}}, actor, reason)
+    db.commit()
+    P._notify("change_request_new", cr)
+    P._notify("prop_event", p, f"✋ <b>{escape(actor.name or '')} просит передать ему вашего собственника "
+              f"{escape(o.name or '—')}</b>", actor.id, [o.agent_id], False,
+              "Если вы против — напишите оператору. Решает оператор в «Запросах».")
+    return cr
+
+
+def users_svc_tag(db: Session, uid: int | None) -> str:
+    from app.services import users as users_svc
+    return users_svc.tag_of(db.get(User, uid)) if uid else "—"
 
 
 def request_no_esign(db: Session, pid: int, reason: str | None, actor: User,
@@ -116,14 +152,14 @@ def _apply(db: Session, cr: ChangeRequest, p: Property, operator: User) -> None:
     """The approved change through the regular service functions (no commit)."""
     pl = cr.payload or {}
     if cr.kind == "edit":
-        data = {k: v["new"] for k, v in pl.items() if isinstance(v, dict) and k not in P.POST_LOCKED}
-        if any(k in pl for k in P.POST_LOCKED):
+        sub = {k: k[3:] if k.startswith("pf:") else k for k in pl if k in P.POST_LOCKED or k.startswith("pf:")}
+        data = {k: v["new"] for k, v in pl.items() if isinstance(v, dict) and k not in sub}
+        if sub:  # post_fields key by key (properties.split_post / split_locked)
             pf = dict(p.post_fields or {})
-            for k in P.POST_LOCKED:
-                if k in pl:
-                    pf[k] = pl[k]["new"]
-                    if pf[k] is None:
-                        del pf[k]
+            for k, name in sub.items():
+                pf[name] = pl[k]["new"]
+                if pf[name] is None:
+                    del pf[name]
             data["post_fields"] = pf
         P.apply_update(db, p, data, operator)
     elif cr.kind in ("archive", "delete"):
@@ -136,6 +172,9 @@ def _apply(db: Session, cr: ChangeRequest, p: Property, operator: User) -> None:
             P.set_owner_lease(db, p, new("rent_from"), new("rent_to"), operator)
     elif cr.kind == "transfer_owner":
         P.transfer_owner(db, pl["owner_id"], pl["agent_id"], operator, cr.reason, commit=False)
+        if pl.get("link") and p.owner_id != pl["owner_id"]:  # request_owner: the owner goes onto the asking agent's object
+            p.owner_id, p.updated_at = pl["owner_id"], now()
+            log_event(db, "property", p.id, "owner_linked", operator, owner_id=pl["owner_id"], request_id=cr.id)
     elif cr.kind == "no_esign":  # the step counts as done from now (properties.contract_done reads the request)
         log_event(db, "property", p.id, "exclusive_contract_waived", operator, request_id=cr.id, reason=cr.reason,
                   requested_by=cr.requested_by, media_id=pl.get("media_id"))
