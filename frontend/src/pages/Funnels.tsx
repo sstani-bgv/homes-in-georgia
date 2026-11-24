@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Briefcase, Database, Inbox, Plus } from 'lucide-react';
 import { BackLink } from '../layout/back';
 import { api } from '../api';
-import { itemsOf } from '../api/client';
+import { ApiError, itemsOf } from '../api/client';
+import { useConfirm } from '../components/ActionDialog';
 import { useAuth } from '../auth/AuthContext';
 import { AddressField, type Point, type PointFacts } from '../components/AddressField';
 import { errText, useToast } from '../components/toast';
@@ -30,10 +31,24 @@ export function ManualProperty({ open, onClose, base = '', deal = 'rent' }: { op
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const body = () => ({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, post_fields: { ...(f.facts?.metro ? { metro: f.facts.metro } : {}), ...(deal === 'sale' ? { deal: 'Sale', prop_type: 'Apartment' } : {}) }, source_type: 'direct' });
+  const done = (p: { id: number }) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`${base}/objects/${p.id}`); };
   const m = useMutation({
-    mutationFn: () => api.properties.create({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, post_fields: { ...(f.facts?.metro ? { metro: f.facts.metro } : {}), ...(deal === 'sale' ? { deal: 'Sale', prop_type: 'Apartment' } : {}) }, source_type: 'direct', owner_name: f.owner_name, owner_phone: cleanPhones(f.phones)[0]?.phone, owner_phones: cleanPhones(f.phones) }),
-    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`${base}/objects/${p.id}`); },
-    onError: (e) => toast(errText(e), true),
+    mutationFn: () => api.properties.create({ ...body(), owner_name: f.owner_name, owner_phone: cleanPhones(f.phones)[0]?.phone, owner_phones: cleanPhones(f.phones) }),
+    onSuccess: done,
+    // Irakli 11-24: «Собственник закреплён за #David» here too — the object is made without the owner and the operator
+    // gets the same request as in the card (move the owner to this agent and link him; his agent is told)
+    onError: async (e) => {
+      const phone = cleanPhones(f.phones)[0]?.phone;
+      if (!(e instanceof ApiError && e.code === 'owner_taken' && phone)) return toast(errText(e), true);
+      if (!(await confirm(`${e.message}. ${t('Создать объект и отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`))) return;
+      try {
+        const p = await api.properties.create(body());
+        try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
+        done(p);
+      } catch (x) { toast(errText(x), true); }
+    },
   });
   return (
     <Modal open={open} onClose={onClose} title={deal === 'sale' ? t('Объект на продажу') : t('Объект вручную')}>
