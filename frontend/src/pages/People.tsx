@@ -201,7 +201,7 @@ export function OwnersPage() {
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'base' | 'unlinked' | 'agents'>('base');
   const [open, setOpen] = useState<Owner | 'new' | null>(null);
-  const { data, isLoading, error } = useQuery({ queryKey: ['owners', q, scope], queryFn: () => api.owners.list(q, scope) });
+  const { data, isLoading, error } = useQuery({ queryKey: ['owners', q, q.trim() ? 'all' : scope], queryFn: () => api.owners.list(q, q.trim() ? 'all' : scope) });  // a search looks in every tab (David / Irakli 11-24: an «unlinked» owner wasn't found from «В базе»)
   const items = itemsOf(data);
   const cur = open && open !== 'new' ? open : null;
   return (
@@ -215,6 +215,7 @@ export function OwnersPage() {
           : 'Номера, по которым ответил агент, а не собственник.'}
       </div>
       <SearchBox value={q} onChange={setQ} placeholder="Имя, телефон, адрес" />
+      {q.trim() && <div className="muted" style={{ fontSize: 12 }}>Поиск идёт по всем вкладкам</div>}
       {isLoading ? <Loading /> : error ? <ErrorBox error={error} /> : items.length === 0 ? <Empty text="Собственников не найдено" /> : (
         <div className="card table-wrap">
           <table className="table">
