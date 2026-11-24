@@ -210,7 +210,7 @@ def test_rich_post_has_slideshow_params_tags_map_and_buttons(db):
     assert '<tg-slideshow><img src="tg://photo?id=m0"/><video src="tg://video?id=m1"/></tg-slideshow>' in h
     # Irakli 11-24 (his sample): title, the marks, 🏢 building · m² · floor; ✅ / 💰 lines; one collapsed block; ID at the end
     assert "<h2>$1 500 · 3 bedrooms · Vake</h2><p><b>❗️ Discount</b></p><p>🏢 140 m² · floor 4/9</p>" in h
-    assert "✅ AC heating · WiFi · Smart TV<br>💰 Deposit $1500 · from 1 month" in h
+    assert "✅ AC heating<br>💰 Deposit $1500 · from 1 month" in h and "<p>✅ WiFi · Smart TV</p>" in h  # the rest: in the block
     assert "<td>AC heating</td>" in h and "<td>1 month, 12 months</td>" in h
     assert "<details><summary>Parameters, amenities and tags</summary>" in h and "<summary>Tags</summary>" not in h
     assert "#Discount" in h and "+995 599 20 67 16 #David" in h and f"<p>ID {p.id}</p>" in h

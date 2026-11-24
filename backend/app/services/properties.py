@@ -2271,8 +2271,10 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     if any(where):
         out.append("<p>" + "<br>".join(x for x in where if x) + "</p>")
     am = f.get("amenities") or []
-    feats = [_human(a) for a in am if a in ("Conditioner", "Balcony")] + ([_human(f["heating"])] if f.get("heating") else []) \
-        + [_human(a) for a in am if a not in ("Conditioner", "Balcony")]
+    # the main ones in sight, as Irakli's sample («✅ Conditioner · Central heating · Balcony»); the rest in the block
+    key = ("Conditioner", "Balcony", "Terrace")
+    feats = [_human(a) for a in key if a in am] + ([_human(f["heating"])] if f.get("heating") else [])
+    rest = [_human(a) for a in am if a not in key]
     months = sorted(int(x[:-5]) for x in f.get("periods") or [] if x.endswith("Month") and x[:-5].isdigit())
     dep = f.get("deposit", price)
     money_line = " · ".join(x for x in ((not sale and price and (f"Deposit ${dep}" if dep else "No deposit")),
@@ -2292,7 +2294,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     agent = db.get(User, p.agent_id) if p.agent_id else None
     tags = " ".join(hashtags(post_text(db, p)))
     out.append(f"<details><summary>Parameters, amenities and tags</summary><table striped compact>{table}</table>"
-               f"<p>{h(tags)}</p>"
+               + (f"<p>✅ {h(' · '.join(rest))}</p>" if rest else "") + f"<p>{h(tags)}</p>"
                f"<p>📲 {h(phone_line(agent))}<br>"
                '<a href="https://t.me/rent_tbilisi_ge/9859">🌟 All listings</a> · <a href="https://t.me/reviews_rent_tbilisi">Reviews</a> · '
                '<a href="https://www.instagram.com/rent_in_tbilisi/profilecard/?igsh=N3kxbTd4bTdkN2Vk">Instagram</a> · '
