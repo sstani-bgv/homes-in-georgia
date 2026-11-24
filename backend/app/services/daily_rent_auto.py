@@ -86,9 +86,12 @@ def auto_stays(db: Session) -> dict:
         b.extra = {"auto": AUTO, "block_uid": k.external_uid, "code": k.reason}
         stays.append(b)
         res["created"] += 1
+    fed = {k.apartment_id for k in blocks}  # apartments whose Airbnb calendar came back with reservations
     for uid, b in by_uid.items():
         if uid in live_uids or b.check_out < since:
             continue
+        if b.apartment_id not in fed:  # an empty calendar is a failed / reset feed far more often than every stay
+            continue                   # cancelled at once: nothing is removed for it (Stanislav's review 11-24)
         if no_money(b) and not b.paid_out:  # cancelled on Airbnb before any money: nothing to keep
             b.deleted_at = now()
             log_event(db, "dr_booking", b.id, "delete", None, label=LABEL, reason="бронь отменена на Airbnb", before=R.out(b))

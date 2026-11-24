@@ -61,9 +61,12 @@ def test_airbnb_reservation_becomes_a_stay_and_follows_the_platform(client, db, 
     # the guest changed the dates on Airbnb → the stay (still without money) follows
     C.sync_channel(db, ch["id"], fetcher=lambda u: feed(("r1", d(3), d(8), "Reserved", "HMABC12345")))
     assert A.auto_stays(db)["moved"] == 1 and (live(db)[0].check_in, live(db)[0].check_out) == (d(3), d(8))
-    # cancelled on Airbnb before any money → removed
+    # an empty calendar (a failed / reset feed) removes nothing (Stanislav's review 11-24)
     C.sync_channel(db, ch["id"], fetcher=lambda u: feed())
-    assert A.auto_stays(db)["removed"] == 1 and live(db) == []
+    assert A.auto_stays(db)["removed"] == 0 and len(live(db)) == 1
+    # cancelled on Airbnb before any money (the calendar still has other reservations) → removed
+    C.sync_channel(db, ch["id"], fetcher=lambda u: feed(("r2", d(20), d(22), "Reserved", "HMOTHER123")))
+    assert A.auto_stays(db)["removed"] == 1 and [b.check_in for b in live(db)] == [d(20)]
 
 
 def test_cancelled_reservation_with_money_is_kept_and_flagged(client, db, boss):
@@ -72,8 +75,8 @@ def test_cancelled_reservation_with_money_is_kept_and_flagged(client, db, boss):
     A.auto_stays(db)
     [b] = live(db)
     api(client, boss, "PATCH", f"/bookings/{b.id}", {"gross": 300})
-    C.sync_channel(db, ch["id"], fetcher=lambda u: feed())
-    assert A.auto_stays(db)["flagged"] == 1 and len(live(db)) == 1
+    C.sync_channel(db, ch["id"], fetcher=lambda u: feed(("r2", d(20), d(22), "Reserved", "HMOTHER123")))
+    assert A.auto_stays(db)["flagged"] == 1 and len(live(db)) == 2
     assert any(x["kind"] == "cancelled_with_money" for x in A.today(db)["alerts"])
 
 
