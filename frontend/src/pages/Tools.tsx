@@ -14,7 +14,8 @@ import type { PhoneRow } from '../api/types';
 
 type DupRow = { source?: string; owner?: string | null; phone?: string | null; phones?: PhoneRow[] | null; address?: string | null; link?: string | null; status?: string; rent_to?: string | null;
   phone_match?: boolean; addr_match?: boolean; url_match?: boolean; cadastral_match?: boolean; property_id?: number; deal_id?: number; is_agent?: boolean;
-  /** owners: who he is bound to (tag «#David») */ agent_id?: number | null; agent?: string | null };
+  /** owners: who he is bound to (tag «#David») */ agent_id?: number | null; agent?: string | null;
+  /** owners: his objects; open — the user may open the card */ objects?: { id: number; address?: string | null; status: string; open: boolean }[] };
 
 const LEVEL: Record<string, { tone: 'ok' | 'warn' | 'red'; title: string; sub: string }> = {
   none: { tone: 'ok', title: 'Не найдено в базе', sub: 'Совпадений по собственнику или объекту нет, можно продолжать' },
@@ -70,6 +71,12 @@ export function PropertyCheck() {
                 {r.owner && <b>{r.owner}</b>}
                 <div className="muted" style={{ fontSize: 13 }}>{[phonesLine(r.phones, r.phone), r.address].filter(Boolean).join(' · ') || '—'}</div>
                 {r.source === 'owners' && r.agent && <div style={{ fontSize: 13 }}>{t('Закреплён за {agent}', { agent: r.agent })}</div>}
+                {!!r.objects?.length && (
+                  <div className="col" style={{ fontSize: 13 }}>
+                    {r.objects.map((o) => o.open
+                      ? <a key={o.id} href={`/objects/${o.id}`}>{t('Объект #{id}', { id: o.id })}{o.address ? ` · ${o.address}` : ''}</a>
+                      : <span key={o.id} className="muted">{t('Объект #{id}', { id: o.id })}{o.address ? ` · ${o.address}` : ''}</span>)}
+                  </div>)}
                 {r.source === 'owners' && r.phone_match && !isStaff && !r.is_agent && r.agent_id && r.agent_id !== me?.id && f.phone.trim() && (
                   <div><Button variant="ghost" onClick={askAgent}>{t('Запросить смену агента')}</Button></div>)}
                 {r.rent_to && <div className="muted" style={{ fontSize: 12 }}>Сдан до {fmtDate(r.rent_to)}</div>}

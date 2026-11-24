@@ -49,7 +49,8 @@ def test_owner_bound_to_agent_blocks_others_staff_override_and_transfer(db, clie
 
     # another agent's call reaches the same owner → blocked, nothing re-assigned
     r = _owner_confirmed(db, client, levan, "ss2", phone="599 203 040")
-    assert r.status_code == 409 and r.json() == {"detail": "Собственник закреплён за #Zaza", "code": "owner_taken"}
+    assert r.status_code == 409 and r.json()["detail"] == "Собственник закреплён за #Zaza" and r.json()["code"] == "owner_taken"
+    assert [x["open"] for x in r.json()["data"]["items"]] == [False]  # his objects, no link for another agent
     db.expire_all()
     p2 = db.query(Property).filter_by(listing_id="ss2").one()
     assert p2.owner_id is None and db.get(Owner, owner.id).agent_id == zaza.id

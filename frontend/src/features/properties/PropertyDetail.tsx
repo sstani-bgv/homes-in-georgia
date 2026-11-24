@@ -120,12 +120,18 @@ function IdleTimer({ at }: { at: string }) {
 
 /** David 11-24: «Собственник закреплён за #Tag» — offer the agent a request to the operator to move that owner to him
  * (backend change_requests.request_owner); any other error: the toast as before. */
+/** owner_taken: the owner's objects (backend properties.owner_objects) as « Объекты собственника: #12 Addr; …» */
+export function takenObjects(e: ApiError): string {
+  const items = (e.data?.items as { id: number; address?: string | null }[] | undefined) || [];
+  return items.length ? ` ${t('Объекты собственника')}: ${items.map((x) => `#${x.id}${x.address ? ` ${x.address}` : ''}`).join('; ')}.` : '';
+}
+
 function useOwnerTaken(p: Property) {
   const { toast } = useProp(p.id);
   const confirm = useConfirm();
   return async (e: unknown, phone?: string) => {
     if (e instanceof ApiError && e.code === 'owner_taken' && phone) {
-      if (await confirm(`${e.message}. ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`)) {
+      if (await confirm(`${e.message}.${takenObjects(e)} ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`)) {
         try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
       }
       return;

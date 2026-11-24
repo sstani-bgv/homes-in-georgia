@@ -61,3 +61,19 @@ def test_owner_level_request_refused_on_an_exclusive(db, client, sent):
     db.commit()
     r = client.post("/api/owners/request", json={"phone": "577939339"}, headers=auth(luka))
     assert r.status_code >= 400 and r.json()["code"] == "exclusive"
+
+
+def test_phone_check_and_owner_taken_show_the_owners_objects(db, client, sent):
+    """David 11-24 17:06: «показал совпадение и объект» — the owner's objects; an agent gets no link to a card he can't open."""
+    zaza, luka, nino, o, pid = _two(db, client)
+    x = Property(agent_id=zaza.id, owner_id=o.id, status="published", address="Пекина 12")
+    db.add(x)
+    db.commit()
+    row = next(r for r in client.post("/api/properties/check-duplicate", json={"phone": "577939339"}, headers=auth(luka))
+               .json()["results"] if r["source"] == "owners")
+    assert row["objects"] == [{"id": x.id, "address": "Пекина 12", "status": "published", "open": False}]
+    row = next(r for r in client.post("/api/properties/check-duplicate", json={"phone": "577939339"}, headers=auth(nino))
+               .json()["results"] if r["source"] == "owners")
+    assert row["objects"][0]["open"] is True
+    r = client.patch(f"/api/properties/{pid}", json={"owner_name": "Нана", "owner_phone": "577939339"}, headers=auth(luka))
+    assert r.status_code == 409 and r.json()["data"]["items"][0]["id"] == x.id

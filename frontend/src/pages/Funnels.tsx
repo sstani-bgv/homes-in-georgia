@@ -14,7 +14,7 @@ import type { ReactNode } from 'react';
 import { ArchivedLeads, LeadStages } from '../features/leads/LeadBoard';
 import { LeadDetail } from '../features/leads/LeadDetail';
 import { CompetitorListings, DealContext, MyProperties, NewListings, PropertyList, WorkProperties, type Deal } from '../features/properties/lists';
-import { metroLabel, PropertyDetail } from '../features/properties/PropertyDetail';
+import { metroLabel, PropertyDetail, takenObjects } from '../features/properties/PropertyDetail';
 import { ChangeRequestQueue } from '../features/properties/requests';
 import { distLabel } from '../lib/format';
 import { cleanPhones, PhonesField, phoneRows } from '../components/PhonesField';
@@ -42,7 +42,7 @@ export function ManualProperty({ open, onClose, base = '', deal = 'rent' }: { op
     onError: async (e) => {
       const phone = cleanPhones(f.phones)[0]?.phone;
       if (!(e instanceof ApiError && e.code === 'owner_taken' && phone)) return toast(errText(e), true);
-      if (!(await confirm(`${e.message}. ${t('Создать объект и отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`))) return;
+      if (!(await confirm(`${e.message}.${takenObjects(e)} ${t('Создать объект и отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`))) return;
       try {
         const p = await api.properties.create(body());
         try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }

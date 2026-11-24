@@ -1236,6 +1236,14 @@ def owner_or_agent(db: Session, pid: int, agent: User, is_owner: bool, owner_nam
     return p
 
 
+def owner_objects(db: Session, owner_id: int, user: User | None = None, exclude: int | None = None) -> list[dict]:
+    """The owner's objects (David 11-24: «показал совпадение и объект»); open: the user may open the card (can_open),
+    else the client shows id + address without a link. user None: open for all (staff context)."""
+    q = select(Property).where(Property.owner_id == owner_id).order_by(Property.id.desc()).limit(10)
+    return [{"id": x.id, "address": x.address, "status": x.status, "open": user is None or can_open(db, x, user)}
+            for x in db.scalars(q) if x.id != exclude]
+
+
 def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
     """Stage 6.5: an owner belongs to the agent who brought him, and so do all his objects. A free owner is bound to the
     object's agent. An owner bound to another agent is never re-assigned silently: an agent is stopped («Собственник
@@ -1247,7 +1255,8 @@ def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
         o.agent_id = p.agent_id
         log_event(db, "owner", o.id, "agent_bound", actor, agent_id=p.agent_id, property_id=p.id)
     elif not at_least(actor, "operator"):
-        raise DomainError("owner_taken", f"Собственник закреплён за {users_svc.tag_of(db.get(User, o.agent_id))}", 409)
+        raise DomainError("owner_taken", f"Собственник закреплён за {users_svc.tag_of(db.get(User, o.agent_id))}", 409,
+                          data={"items": owner_objects(db, o.id, actor, p.id)})
     else:
         log_event(db, "property", p.id, "owner_agent_override", actor, owner_id=o.id, owner_agent_id=o.agent_id)
 
@@ -2891,7 +2900,7 @@ def _phones_match(a: list[dict], b: list[dict]) -> bool:
 
 
 def check_duplicate(db: Session, phone=None, address: str | None = None, url: str | None = None,
-                    cadastral: str | None = None, exclude_property: int | None = None) -> dict:
+                    cadastral: str | None = None, exclude_property: int | None = None, user: User | None = None) -> dict:
     """Port of apps-script checkProperty (Owner_Base phone/address) + link and cadastral matches. phone: one number or
     a list; any of them against any of an owner's numbers.
     level: none | warn (one signal) | danger (phone and address, or same link/cadastral)."""
@@ -2905,6 +2914,7 @@ def check_duplicate(db: Session, phone=None, address: str | None = None, url: st
                 results.append({"source": "owners", "owner_id": o.id, "owner": o.name, "phone": o.phone, "phones": owner_phones(o),
                                 "address": o.address, "link": o.link, "is_agent": o.is_agent,
                                 "agent_id": o.agent_id, "agent": users_svc.tag_of(db.get(User, o.agent_id)) if o.agent_id else None,
+                                "objects": owner_objects(db, o.id, user, exclude_property),
                                 "phone_match": pm, "addr_match": am})
     if url:
         q = select(Property).where(Property.source_url == url.strip())

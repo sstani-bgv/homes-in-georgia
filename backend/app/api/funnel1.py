@@ -241,7 +241,7 @@ def properties_deal_search(q: str | None = None, pid: int | None = None, deal_ty
 
 @router.post("/properties/check-duplicate")
 def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
-    res = P.check_duplicate(db, body.phone, body.address, body.url, body.cadastral)
+    res = P.check_duplicate(db, body.phone, body.address, body.url, body.cadastral, user=user)
     if not at_least(user, "operator"):
         mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
         for r in res.get("results", []):
