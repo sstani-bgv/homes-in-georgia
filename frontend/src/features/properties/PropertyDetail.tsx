@@ -1646,6 +1646,9 @@ function EditModal({ p, open, onClose, repost }: { p: Property; open: boolean; o
   const v: Form = { ...p, owner_name: p.owner?.name || '', owner_phone: p.owner?.phone || '', ...f };
   const upd = <K extends keyof Form>(k: K, val: Form[K]) => setF((x) => ({ ...x, [k]: val }));
   const [reason, setReason] = useState('');
+  // the point: as just moved here, else the object's own, else the origin ad's pin
+  const pt = f.lat !== undefined ? (f.lat != null && f.lng != null ? { lat: f.lat, lng: f.lng } : null)
+    : p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : p.listing?.lat != null && p.listing?.lng != null ? { lat: p.listing.lat, lng: p.listing.lng } : null;
   const save = useMutation({
     mutationFn: () => api.properties.update(p.id, { ...f, reason: reason || undefined }),
     onSuccess: (r) => { set(r); toast(r.change_request ? REQUEST_SENT : t('Сохранено')); onClose(); setF({}); setReason(''); },
@@ -1675,7 +1678,12 @@ function EditModal({ p, open, onClose, repost }: { p: Property; open: boolean; o
       <div className="form-grid">
         {(p.missing || []).length > 0 && <div className="alert alert-warn span2" style={{ fontSize: 13, display: 'block' }}>{t('Для отправки оператору не хватает:')} <b>{(p.missing || []).join(', ')}</b></div>}
         <Field label={t('Район')}><DistrictSelect value={v.district} onChange={(x) => upd('district', x)} /></Field>
-        <Field label={t('Адрес')} hint={lockHint('address')}><Input value={v.address || ''} onChange={(e) => upd('address', e.target.value)} /></Field>
+        {/* Irakli 11-24: the point is set again here (the post's «On the map» and the site's map follow it) */}
+        <div className="field span2"><span className="label">{t('Адрес и точка на карте')}</span>
+          <AddressField value={v.address || ''} onChange={(x) => upd('address', x)} point={pt}
+            onPoint={(x) => setF((s) => ({ ...s, lat: x?.lat ?? null, lng: x?.lng ?? null }))}
+            onFacts={(r) => setF((s) => ({ ...s, district: r.district || s.district || v.district, post_fields: { ...(s.post_fields || p.post_fields || {}), metro: r.metro || undefined } }))} />
+          {lockHint('address') && <span className="muted" style={{ fontSize: 12 }}>{lockHint('address')}</span>}</div>
         <Field label={t('Цена, $')} hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
         <Field label={t('Спальни')}><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
         <Field label={t('Площадь, м²')}><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>

@@ -611,4 +611,5 @@ export const D: Record<string, [ka: string, en: string]> = {
   "Письмо скопировано — приложите паспорт собственника{c}": ["წერილი დაკოპირდა — დაურთეთ მესაკუთრის პასპორტი{c}", "Letter copied — attach the owner's passport{c}"],
   " и эксклюзивный договор": [" და ექსკლუზიური ხელშეკრულება", " and the exclusive contract"],
   "Скопировать письмо для {s}": ["წერილის კოპირება: {s}", "Copy the letter for {s}"],
+  "Адрес и точка на карте": ["მისამართი და წერტილი რუკაზე", "Address and the map point"],
 };
