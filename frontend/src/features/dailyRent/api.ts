@@ -6,6 +6,9 @@ export type Platform = 'Airbnb' | 'Booking' | 'Другое';
 export type PayStatus = 'received' | 'pending' | 'partial';
 export type AptStatus = 'free' | 'busy' | 'clean' | 'tech';
 export type Mix = Partial<Record<Cur, number>>;
+export type Lang = 'ru' | 'en' | 'ka';
+export type Reports = Record<Lang, string>;
+export const LANGS: { value: Lang; label: string }[] = [{ value: 'ru', label: 'Русский' }, { value: 'en', label: 'English' }, { value: 'ka', label: 'ქართული' }];
 
 export interface DrChannel {
   id: number; apartment_id: number; channel: 'airbnb' | 'booking' | 'other'; import_url: string | null; export_url: string;
@@ -15,7 +18,7 @@ export interface DrApartment {
   id: number; legacy_id: string | null; name: string; address: string | null; owner_name: string | null; owner_contact: string | null;
   owner_account: string | null; platform_pct: number; owner_pct: number; platforms: Platform[]; status: AptStatus; active: boolean;
   rooms: number | null; notes: string | null; util_rates: Record<string, string | number>; photos: string[]; price_night: number | null;
-  currency: string; description: string | null; district: string | null; channels: DrChannel[];
+  currency: string; description: string | null; district: string | null; report_lang: Lang; channels: DrChannel[];
 }
 export interface DrExpense {
   id: number; booking_id: number | null; category: string; amount: number | null; currency: Cur; payer: 'platform' | 'owner';
@@ -31,7 +34,7 @@ export interface DrBooking {
   id: number; apartment_id: number; platform: Platform; guest_name: string | null; check_in: string | null; check_out: string | null;
   gross: number | null; currency: Cur; tax_pct: number; booking_fee: number | null; platform_pct: number; payment_status: PayStatus;
   paid_out: boolean; paid_out_at: string | null; assigned_staff: string | null; comment: string | null; nights: number; calc: Calc;
-  expenses: DrExpense[]; report?: string;
+  expenses: DrExpense[]; report?: string; reports?: Reports; report_lang?: Lang;
 }
 export interface Econ {
   stays: number; nights: number; gross_usd: number; net_usd: number; platform_usd: number; owner_usd: number; to_pay_usd: number;
@@ -51,12 +54,24 @@ export interface Interval {
 export interface Conflict { key: string; apartment_id: number; start: string; end: string; a: Interval; b: Interval }
 export interface CalendarData { items: Interval[]; conflicts: Conflict[]; unaccounted: Interval[] }
 export interface JournalRow { id: number; entity: string; entity_id: string; action: string; actor: string | null; data: Record<string, unknown>; at: string }
-export type AptFull = DrApartment & { bookings: DrBooking[]; econ: Econ; period_report: string };
+export type AptFull = DrApartment & { bookings: DrBooking[]; econ: Econ; period_report: string; period_reports: Reports };
 export interface Period { month_from?: string; month_to?: string }
+/** «Сегодня» (api/daily_rent.py /today, services/daily_rent_auto.today) */
+export interface TodayStay {
+  id: number; apartment_id: number; apartment: string; guest: string; platform: Platform; check_in: string; check_out: string;
+  nights: number; no_money: boolean; auto: boolean; code: string | null; cancelled_on_platform: boolean;
+}
+export interface TodayData {
+  date: string; living: TodayStay[]; arrivals: TodayStay[]; departures: TodayStay[]; upcoming: TodayStay[]; no_money: TodayStay[];
+  cleanings: { id: number; apartment_id: number; apartment: string; cleaner: string; notes: string; done: boolean }[];
+  payouts_ready: Mix; load: { apartment_id: number; apartment: string; busy: number; occupancy: number }[];
+  alerts: { kind: 'gap' | 'hidden_booked' | 'cancelled_with_money'; apartment_id: number; text: string }[];
+}
 
 const P = '/daily-rent';
 export const dr = {
   data: () => http.get<{ apartments: DrApartment[]; staff: DrStaff[]; rate: number }>(`${P}/data`),
+  today: () => http.get<TodayData>(`${P}/today`),
   summary: (p: Period) => http.get<Summary>(`${P}/summary`, { ...p }),
   journal: (offset = 0) => http.get<{ items: JournalRow[]; total: number }>(`${P}/journal`, { limit: 100, offset }),
   apartment: (id: number, p: Period & { label?: string }) => http.get<AptFull>(`${P}/apartments/${id}`, { ...p }),
@@ -97,12 +112,12 @@ export const dr = {
 // ---------------------------------------------------------------- words and money, as ApartFlow shows them
 
 export const EXP_LABEL: Record<string, string> = {
-  cleaning: 'Уборка', supplies: 'Расходники', repair: 'Ремонт', other: 'Прочее', telmico: '💧 Telmico', gwp: '🔥 GWP',
-  energy: '⚡ Tbilisi Energy', internet: '🌐 Internet', tbilisi_clean: '🗑 Tbilisi Clean',
+  cleaning: 'Уборка', supplies: 'Расходники', repair: 'Ремонт', other: 'Прочее', telmico: '⚡ Telmico', gwp: '💧 GWP',
+  energy: '🔥 Tbilisi Energy', internet: '🌐 Internet', tbilisi_clean: '🗑 Tbilisi Clean',
 };
 export const PAY_LABEL: Record<PayStatus, string> = { received: '✓ Получено', pending: '⏳ Ожидается', partial: '◑ Частично' };
 export const STATUS_LABEL: Record<AptStatus, string> = { free: 'Свободно', busy: 'Занято', clean: 'Уборка', tech: 'Тех.' };
-export const UTIL = [['telmico', '💧 Telmico'], ['gwp', '🔥 GWP'], ['energy', '⚡ Tbilisi Energy'], ['tbilisi_clean', '🗑 Tbilisi Clean'], ['internet', '🌐 Internet']] as const;
+export const UTIL = [['gwp', '💧 GWP'], ['energy', '🔥 Tbilisi Energy'], ['telmico', '⚡ Telmico'], ['tbilisi_clean', '🗑 Tbilisi Clean'], ['internet', '🌐 Internet']] as const;
 export const HOUR_RATE = 16.7;
 
 /** ApartFlow's fN with the currency sign in front: $1 234,5 / ₾57,89 */

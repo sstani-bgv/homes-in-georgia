@@ -16,7 +16,7 @@ const apts: DrApartment[] = [
 ].map(([name, address, owner, acc, status], i) => ({
   id: i + 1, legacy_id: String(i + 1), name, address, owner_name: owner, owner_contact: '+995 599 50 13 34', owner_account: acc || null,
   platform_pct: 20, owner_pct: 80, platforms: ['Airbnb', 'Booking'], status: status as DrApartment['status'], active: i < 3, rooms: 1 + (i % 2),
-  notes: null, util_rates: {}, photos: [], price_night: [55, 70, 48, 60][i], currency: 'USD', description: null, district: null, channels: [],
+  notes: null, util_rates: {}, photos: [], price_night: [55, 70, 48, 60][i], currency: 'USD', description: null, district: null, report_lang: 'ru' as const, channels: [],
 }));
 const guests = ['Алена Терещенко', 'Balaian Taron', 'Di', 'Mark Weber', 'Ольга', 'Sara Kim', 'Giorgi', 'Lena Novak', 'Tom', 'Анна'];
 const bookings: Omit<DrBooking, 'calc' | 'nights' | 'expenses'>[] = [];
@@ -110,9 +110,10 @@ export function registerDailyRent(on: (method: string, path: string, h: Handler)
   on('GET', `${P}/apartments/:id`, (m, _b, q) => {
     const a = apt(Number(m[1])), rows = live().filter((b) => b.apartment_id === a.id), per = rows.filter((b) => inPer(b, q));
     const e = econ(per, days(q));
-    return { ...a, bookings: rows, econ: e, period_report: [`🏠 ${a.name}`, `📅 Период: ${q.get('label') || 'За всё время'}`, '',
+    const pr = [`🏠 ${a.name}`, `📅 Период: ${q.get('label') || 'За всё время'}`, '',
       ...per.map((b) => `• ${b.check_in} — ${b.check_out}, ${b.guest_name}, ${b.platform}\n   пришло ${b.calc.gross} · владельцу ${b.calc.owner}${b.paid_out ? ' ✓ выплачено' : ''}`),
-      '', `Проживаний: ${e.stays} · ночей: ${e.nights}`, a.owner_account ? `\n🏦 Счёт: ${a.owner_account}` : ''].join('\n') };
+      '', `Проживаний: ${e.stays} · ночей: ${e.nights}`, a.owner_account ? `\n🏦 Счёт: ${a.owner_account}` : ''].join('\n');
+    return { ...a, bookings: rows, econ: e, period_report: pr, period_reports: { ru: pr, en: pr, ka: pr } };
   });
   on('POST', `${P}/apartments`, (_m, b) => { const a = { ...apts[0], ...b, id: ++seq, photos: [], channels: [] } as DrApartment; apts.push(a); log('dr_apartment', a.id, 'create'); return apt(a.id); });
   on('PATCH', `${P}/apartments/:id`, (m, b) => { Object.assign(apts.find((x) => x.id === Number(m[1]))!, b); log('dr_apartment', Number(m[1]), 'update', { changes: Object.fromEntries(Object.keys(b).map((k) => [k, ['…', b[k]]])) }); return apt(Number(m[1])); });
@@ -121,18 +122,19 @@ export function registerDailyRent(on: (method: string, path: string, h: Handler)
   on('DELETE', `${P}/apartments/:id/photos`, (m, _b, q) => { const a = apts.find((x) => x.id === Number(m[1]))!; a.photos = a.photos.filter((k) => k !== q.get('key')); return apt(a.id); });
   on('GET', `${P}/bookings`, (_m, _b, q) => ({ items: live().filter((b) => inPer(b, q) && (!q.get('apartment_id') || b.apartment_id === Number(q.get('apartment_id')))) }));
   on('GET', `${P}/bookings/defaults`, (_m, _b, q) => { const p = q.get('platform') || 'Airbnb'; return { platform: p, currency: p === 'Airbnb' ? 'USD' : 'GEL', tax_pct: p === 'Airbnb' ? 1 : 0, platform_pct: 20, payment_status: 'received' }; });
-  on('GET', `${P}/bookings/:id`, (m) => { const b = full(getB(Number(m[1]))); return { ...b, report: report(b) }; });
-  on('POST', `${P}/bookings`, (_m, b) => { const x = { platform_pct: 20, paid_out: false, paid_out_at: null, ...b, id: ++seq } as DrBooking; bookings.push(x); log('dr_booking', x.id, 'create', { after: { guest_name: x.guest_name } }); const f = full(x); return { ...f, report: report(f) }; });
-  on('PATCH', `${P}/bookings/:id`, (m, b) => { Object.assign(getB(Number(m[1])), b); log('dr_booking', Number(m[1]), 'update', { changes: Object.fromEntries(Object.keys(b).map((k) => [k, ['…', b[k]]])) }); const f = full(getB(Number(m[1]))); return { ...f, report: report(f) }; });
+  const reps = (f: DrBooking) => { const t = report(f); return { report: t, report_lang: 'ru' as const, reports: { ru: t, en: t, ka: t } }; };  // the mock does not translate
+  on('GET', `${P}/bookings/:id`, (m) => { const b = full(getB(Number(m[1]))); return { ...b, ...reps(b) }; });
+  on('POST', `${P}/bookings`, (_m, b) => { const x = { platform_pct: 20, paid_out: false, paid_out_at: null, ...b, id: ++seq } as DrBooking; bookings.push(x); log('dr_booking', x.id, 'create', { after: { guest_name: x.guest_name } }); const f = full(x); return { ...f, ...reps(f) }; });
+  on('PATCH', `${P}/bookings/:id`, (m, b) => { Object.assign(getB(Number(m[1])), b); log('dr_booking', Number(m[1]), 'update', { changes: Object.fromEntries(Object.keys(b).map((k) => [k, ['…', b[k]]])) }); const f = full(getB(Number(m[1]))); return { ...f, ...reps(f) }; });
   on('DELETE', `${P}/bookings/:id`, (m) => { bookings.splice(bookings.indexOf(getB(Number(m[1]))), 1); log('dr_booking', Number(m[1]), 'delete'); return { deleted: Number(m[1]) }; });
   on('POST', `${P}/payouts`, (_m, b) => {
     const ids = (b.booking_ids as number[]) || live().filter((x) => x.apartment_id === b.apartment_id && ready(x)).map((x) => x.id);
     ids.forEach((id) => { const x = getB(id); x.paid_out = b.paid !== false; x.paid_out_at = x.paid_out ? day(0) : null; log('dr_booking', id, 'update', { changes: { paid_out: [!x.paid_out, x.paid_out] } }); });
     return { changed: ids.length };
   });
-  on('POST', `${P}/expenses`, (_m, b) => { expenses.push({ id: ++seq, payer: 'platform', currency: 'GEL', category: 'other', comment: null, date: day(0), created_by: 'Давид', ...b } as DrExpense); const f = full(getB(Number(b.booking_id))); return { ...f, report: report(f) }; });
-  on('PATCH', `${P}/expenses/:id`, (m, b) => { const e = expenses.find((x) => x.id === Number(m[1]))!; Object.assign(e, b); const f = full(getB(e.booking_id!)); return { ...f, report: report(f) }; });
-  on('DELETE', `${P}/expenses/:id`, (m) => { const e = expenses.find((x) => x.id === Number(m[1]))!; expenses.splice(expenses.indexOf(e), 1); const f = full(getB(e.booking_id!)); return { ...f, report: report(f) }; });
+  on('POST', `${P}/expenses`, (_m, b) => { expenses.push({ id: ++seq, payer: 'platform', currency: 'GEL', category: 'other', comment: null, date: day(0), created_by: 'Давид', ...b } as DrExpense); const f = full(getB(Number(b.booking_id))); return { ...f, ...reps(f) }; });
+  on('PATCH', `${P}/expenses/:id`, (m, b) => { const e = expenses.find((x) => x.id === Number(m[1]))!; Object.assign(e, b); const f = full(getB(e.booking_id!)); return { ...f, ...reps(f) }; });
+  on('DELETE', `${P}/expenses/:id`, (m) => { const e = expenses.find((x) => x.id === Number(m[1]))!; expenses.splice(expenses.indexOf(e), 1); const f = full(getB(e.booking_id!)); return { ...f, ...reps(f) }; });
   on('GET', `${P}/cleanings`, () => ({ items: cleanings }));
   on('POST', `${P}/cleanings`, (_m, b) => { const c = { ...b, id: ++seq } as DrCleaning; cleanings.unshift(c); return c; });
   on('DELETE', `${P}/cleanings/:id`, (m) => { cleanings.splice(cleanings.findIndex((x) => x.id === Number(m[1])), 1); return {}; });

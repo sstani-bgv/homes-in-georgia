@@ -61,6 +61,7 @@ class AptIn(BaseModel):
     currency: Literal["USD", "GEL", "EUR"] | None = None
     description: str | None = None
     district: str | None = None
+    report_lang: Literal["ru", "en", "ka"] | None = None
 
 
 class BookingIn(BaseModel):
@@ -166,6 +167,13 @@ def dr_summary(month_from: str | None = Month, month_to: str | None = Month, db:
     return R.summary(db, month_from, month_to)
 
 
+@router.get("/today")
+def dr_today(db: Session = Db, user: User = Me):
+    """«Сегодня»: who lives now, arrivals / departures, stays without money, cleanings, occupancy, alerts (daily_rent_auto)."""
+    from app.services import daily_rent_auto
+    return daily_rent_auto.today(db)
+
+
 @router.get("/journal")
 def dr_journal(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0), db: Session = Db, user: User = Me):
     return R.journal(db, limit, offset)
@@ -189,7 +197,8 @@ def apt_get(aid: int, month_from: str | None = Month, month_to: str | None = Mon
     per = [b for b in rows if b["check_in"] and (not month_from or b["check_in"][:7] >= month_from)
            and (not month_to or b["check_in"][:7] <= month_to)]
     return {**_apt_out(db, a), "bookings": rows, "econ": R.econ(per, R.month_days(month_from, month_to)),
-            "period_report": R.period_report(a, per, label or "За всё время")}
+            "period_report": R.period_report(a, per, R.period_label(month_from, month_to), a.report_lang),
+            "period_reports": {lg: R.period_report(a, per, R.period_label(month_from, month_to, lg), lg) for lg in R.REPORT_LANGS}}
 
 
 @router.patch("/apartments/{aid}")
@@ -269,7 +278,10 @@ def bk_defaults(apartment_id: int, platform: Literal[DR_PLATFORMS] | None = None
 def _bk_full(db: Session, bid: int) -> dict:
     b = get_or_404(db, DrBooking, bid, "booking")
     row = R.booking_out(b, R._expenses_by_booking(db, [b.id]).get(b.id, []), R.usd_gel())
-    return {**row, "report": R.booking_report(db.get(DrApartment, b.apartment_id), row)}
+    a = db.get(DrApartment, b.apartment_id)
+    lang = a.report_lang if a else "ru"
+    return {**row, "report": R.booking_report(a, row, lang), "report_lang": lang,
+            "reports": R.reports_all(R.booking_report, a, row)}
 
 
 @router.post("/bookings")

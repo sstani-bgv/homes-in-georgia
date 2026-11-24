@@ -9,8 +9,8 @@ import { mediaUrl, thumbUrl } from '../../api/client';
 import { Badge, Button, Card, Checkbox, DistrictSelect, Empty, ErrorBox, Field, Input, Lightbox, Loading, PageHead, Seg, Select, Stat, Switch, Textarea } from '../../components/ui';
 import { errText, useToast } from '../../components/toast';
 import { pool, shrinkPhoto } from '../../lib/upload';
-import { BookingModal, copy, useDrInvalidate } from './Booking';
-import { cm, dm, dr, mix, nightsLabel, PAY_LABEL, STATUS_LABEL, usd, UTIL, type DrApartment, type DrBooking, type Platform } from './api';
+import { BookingModal, copy, ReportView, useDrInvalidate } from './Booking';
+import { cm, dm, dr, LANGS, mix, nightsLabel, PAY_LABEL, STATUS_LABEL, usd, UTIL, type DrApartment, type DrBooking, type Platform } from './api';
 import { PeriodBar, usePeriod } from './DailyRent';
 
 export function ApartmentPage() {
@@ -46,8 +46,8 @@ export function ApartmentPage() {
           <Card title={`Проживания · ${per.label}`} actions={E.to_pay_usd > 0 ? <Badge tone="warn">к выплате {mix(E.to_pay)}</Badge> : undefined}>
             {rows.length === 0 ? <Empty text="Нет проживаний" /> : <StayTable rows={rows} onOpen={setOpen} />}
           </Card>
-          <Card title="Отчёт собственнику за период" actions={<Button size="sm" variant="secondary" onClick={() => copy(a.period_report, toast)}><Copy size={14} />Копировать</Button>}>
-            <pre className="dr-report">{a.period_report}</pre>
+          <Card title="Отчёт собственнику за период">
+            <ReportView key={a.report_lang} reports={a.period_reports} lang={a.report_lang} toast={toast} />
           </Card>
         </>
       )}
@@ -89,7 +89,7 @@ export function AptForm({ a, onDone }: { a?: DrApartment; onDone?: (x: DrApartme
     mutationFn: () => {
       const b = { name: d.name, address: d.address || null, owner_name: d.owner_name || null, owner_contact: d.owner_contact || null,
         owner_account: d.owner_account || null, platform_pct: Number(d.platform_pct ?? 20), platforms: d.platforms, status: d.status,
-        active: d.active, rooms: d.rooms === null || d.rooms === undefined || String(d.rooms) === '' ? null : Number(d.rooms), notes: d.notes || null, util_rates: d.util_rates };
+        active: d.active, report_lang: d.report_lang || 'ru', rooms: d.rooms === null || d.rooms === undefined || String(d.rooms) === '' ? null : Number(d.rooms), notes: d.notes || null, util_rates: d.util_rates };
       return a ? dr.updateApt(a.id, b) : dr.createApt(b);
     },
     onSuccess: (x) => { refresh(); toast('Сохранено'); onDone?.(x); },
@@ -111,6 +111,9 @@ export function AptForm({ a, onDone }: { a?: DrApartment; onDone?: (x: DrApartme
         <div className="span2"><Switch checked={d.active !== false} onChange={(v) => set('active', v)} label="Активна (видна в списках и форме)" /></div>
         <Field label="Собственник"><Input value={d.owner_name || ''} onChange={(e) => set('owner_name', e.target.value)} /></Field>
         <Field label="Контакт"><Input value={d.owner_contact || ''} onChange={(e) => set('owner_contact', e.target.value)} placeholder="+995 599 00 00 00" /></Field>
+        <Field label="Язык отчётов" hint="На нём открывается отчёт и уходит ежемесячный отчёт 1-го числа">
+          <Select value={d.report_lang || 'ru'} onChange={(e) => set('report_lang', e.target.value)} options={LANGS} />
+        </Field>
         <Field label="Счёт для выплат"><Input value={d.owner_account || ''} onChange={(e) => set('owner_account', e.target.value)} placeholder="GE29NB0000000101904917" style={{ fontFamily: 'monospace' }} /></Field>
         <Field label="Доля платформы, %" hint={`Собственнику ${100 - Number(d.platform_pct ?? 20)}%. Новые проживания берут эту долю; прошлые не меняются.`}>
           <Input type="number" min={0} max={100} step="1" value={d.platform_pct ?? 20} onChange={(e) => set('platform_pct', e.target.value)} />

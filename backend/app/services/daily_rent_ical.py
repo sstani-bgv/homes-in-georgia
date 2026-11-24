@@ -246,9 +246,17 @@ def parse(text: str) -> list[dict]:
             cur["end"] = _to_day(value)
         elif name == "SUMMARY":
             cur["summary"] = _unescape(value)
+        elif name == "DESCRIPTION":
+            cur["description"] = _unescape(value)[:500]
     for e in events:
         e.setdefault("uid", f"{e['start']}_{e['end']}_{e.get('summary', '')}")
     return events
+
+
+def reservation_code(description: str | None) -> str | None:
+    """Airbnb puts «Reservation URL: https://www.airbnb.com/hosting/reservations/details/HMABC12345» in DESCRIPTION."""
+    m = re.search(r"/reservations/details/([A-Z0-9]{6,14})", description or "")
+    return m[1] if m else None
 
 
 def _esc(s: str) -> str:
@@ -327,6 +335,8 @@ def sync_channel(db: Session, channel_id: int, fetcher=fetch) -> dict:
         reserved = not re.search(r"not available", ev.get("summary") or "", re.I) if ch.channel == "airbnb" else True
         vals = {"start": date.fromisoformat(ev["start"]), "end": date.fromisoformat(ev["end"]), "summary": ev.get("summary") or "",
                 "reserved": reserved, "status": "active", "cancelled_at": None}
+        if code := reservation_code(ev.get("description")):
+            vals["reason"] = code  # Airbnb's confirmation code (HM…): the auto stay shows it (services/daily_rent_auto.py)
         b = existing.get(uid)
         if b is None:
             b = DrBlock(apartment_id=ch.apartment_id, channel_id=ch.id, source=ch.channel, external_uid=uid, **vals)

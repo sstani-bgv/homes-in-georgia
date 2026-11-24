@@ -1581,6 +1581,26 @@ def daily_rent_conflicts(conflicts, names):
             tg.send(t, text, kb([[app_btn("📅 Открыть шахматку", url, True)]]) if url else None)
 
 
+@safe
+def daily_rent_digest(text):
+    """«Посуточная аренда»: the morning «Сегодня» (services/daily_rent_auto.digest_text, already HTML) → the Daily Rent
+    managers in private, with the button to the screen."""
+    url = links.miniapp("daily-rent/today")
+    for t in store.staff_tg_ids(("daily_rent_manager",)):
+        tg.send(t, text, kb([[app_btn("☀️ Открыть «Сегодня»", url, True)]]) if url else None)
+
+
+@safe
+def daily_rent_owner_reports(reports, month):
+    """On the 1st: every apartment's report for the past month (services/daily_rent_auto.owner_reports) → the Daily Rent
+    managers, one message per apartment, ready to forward to the owner."""
+    for t in store.staff_tg_ids(("daily_rent_manager",)):
+        tg.send(t, f"📊 <b>Отчёты собственникам за {e(month)}</b>\nПерешлите каждый собственнику ({len(reports)}).")
+        for r in reports:
+            head = f"Для собственника: {e(r['owner_contact'])}\n\n" if r.get("owner_contact") else ""
+            tg.send(t, head + e(r["text"]))
+
+
 def lead_btn(lid):
     return lambda private: kb([[app_btn("📋 Открыть заявку", links.lead_app(lid), private)]])
 

@@ -406,10 +406,32 @@ def daily_rent_ical_tick():
         with SessionLocal() as db:
             if r := daily_rent_ical.sync_all(db):
                 log.info("daily rent ical: %s", r)
+            from app.services import daily_rent_auto
+            if (st := daily_rent_auto.auto_stays(db)) and any(st.values()):
+                log.info("daily rent auto stays: %s", st)
             if fresh := daily_rent_ical.new_conflicts(db):
                 notify.daily_rent_conflicts(fresh, {a.id: a.name for a in db.query(DrApartment)})
     except Exception:  # noqa: BLE001
         log.exception("daily rent ical sync failed")
+
+
+def daily_rent_morning_tick():
+    """«Посуточная аренда», once a day from 09:00 Tbilisi: cleanings for today's check-outs, then the «Сегодня» digest to the
+    managers; on the 1st (or the first day after) the past month's owner reports (services/daily_rent_auto.py)."""
+    from app.services import daily_rent_auto as A
+    try:
+        with SessionLocal() as db:
+            if A.digest_due(db):
+                if n := A.auto_cleanings(db):
+                    log.info("daily rent: %s cleanings for today's check-outs", n)
+                notify.daily_rent_digest(A.digest_text(A.today(db)))
+                A.mark_digest(db)
+            if month := A.reports_due(db):
+                if reps := A.owner_reports(db, month):
+                    notify.daily_rent_owner_reports(reps, month)
+                A.mark_reports(db, month)
+    except Exception:  # noqa: BLE001
+        log.exception("daily rent morning failed")
 
 
 _child = {"proc": None, "after": 0.0, "npz": None}
@@ -520,6 +542,7 @@ def main():
         if env.DAILY_RENT_ICAL_MINUTES > 0 and time.time() - last_ical >= env.DAILY_RENT_ICAL_MINUTES * 60:
             last_ical = time.time()
             daily_rent_ical_tick()
+        daily_rent_morning_tick()
         if time.time() - last_avatars >= 24 * 3600:  # team members still without a stored photo (telegram/avatars.py)
             last_avatars = time.time()
             try:
