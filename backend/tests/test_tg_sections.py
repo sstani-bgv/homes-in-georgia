@@ -108,9 +108,15 @@ def test_originals_post_photos_then_text_then_video(bot, monkeypatch, tmp_path):
     monkeypatch.setattr(notify, "storage", SimpleNamespace(fetch=lambda key, tmp: paths.get(key, f"/tmp/{key}.jpg")))
     texts = []
     monkeypatch.setattr(tg, "send", lambda chat, text, *a, **kw: texts.append(text) or bot.sent.append(("sendMessage", chat)) or {"message_id": 1})
-    assert notify.originals_post(5, "-4001", "🏠 x") == 13
+    from app.telegram import userbot
+    via = []
+    monkeypatch.setattr(userbot, "send_media", lambda chat, key, caption=None: via.append((chat, key)) or 77)
+    assert notify.originals_post(5, "-4001", "🏠 x") == 14  # the big video: through the operator account (11-24)
     assert bot.sent == [("sendMediaGroup", "-4001"), ("sendMediaGroup", "-4001"), ("sendMessage", "-4001"), ("sendDocument", "-4001")]
-    assert texts[0].startswith("🏠 x") and "больше 50 МБ" in texts[0]
+    assert texts == ["🏠 x"] and via == [("-4001", "big")]
+    monkeypatch.setattr(userbot, "send_media", lambda chat, key, caption=None: None)  # the account couldn't: a note
+    texts.clear()
+    assert notify.originals_post(5, "-4001", "🏠 x") == 13 and "больше 50 МБ" in texts[-1]
 
 
 def test_originals_once_per_photo_set(db, client, monkeypatch):
