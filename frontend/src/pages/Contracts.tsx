@@ -82,11 +82,12 @@ function blocks(bs: DraftBlock[]): string {
  *  margins, font size, the round watermark's size (pt; 0 = none). Pets / commercial follow the rent draft of the language. */
 // m: page margins [top, right, bottom, left] in pt — the body's box; the header line sits at 39–57 pt from the top and the
 // initials footer starts at 786 pt (both inside the margins), as in the originals. ka: the line height of the Georgian
-// text — Google lays FreeSerif lines out taller than Chrome's «normal»; these values give the originals' page breaks
+// text — Google lays FreeSerif lines out taller than Chrome's «normal»; these values give the originals' page breaks.
+// RU / EN 1.45 → 1.25 (David 11-24): the Georgian column ran a page longer than the Russian, the payment table fell onto p. 6
 const PAGE: Record<string, { m: [number, number, number, number]; pt: number; wm: number; ka: number }> = {
   GEO: { m: [72, 72, 85, 72], pt: 9.5, wm: 407, ka: 1.36 },
-  RU: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.45 },
-  EN: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.45 },
+  RU: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.25 },
+  EN: { m: [62, 36, 60, 36], pt: 9, wm: 471, ka: 1.25 },
   sale_GEO: { m: [62, 42.5, 60, 85], pt: 12, wm: 0, ka: 1.36 },
 };
 const pageOf = (doc: ContractDoc) => PAGE[doc.key] || PAGE[doc.key.split('_')[1]] || PAGE.RU;
