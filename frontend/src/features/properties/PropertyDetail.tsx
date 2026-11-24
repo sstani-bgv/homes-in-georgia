@@ -1497,6 +1497,34 @@ function PlacesModal({ p, off, only, onClose }: { p: Property; off: boolean; onl
   );
 }
 
+/** «Скопировать письмо» (David 11-24, the simple version; sending it by itself is in the backlog): the copies' links on
+ * one site, the address, the cadastral code, the owner — a ready text for the site's support mail; the passport (and the
+ * exclusive contract) are attached by hand. Reads the «Похожие» list already loaded (same query). */
+function TakedownLetter({ p }: { p: Property }) {
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['similar', `p:${p.id}`], queryFn: () => api.properties.similar(p.id) });
+  const ads = (data?.items || []).filter((x) => x.site && x.url && !x.linked && !x.removed && x.decided !== 'different');
+  const sites = [...new Set(ads.map((x) => x.where))];
+  if (!sites.length) return null;
+  const letter = (site: string) => {
+    const links = ads.filter((x) => x.where === site).map((x, i) => `${i + 1}. ${x.url}`);
+    return [`Hello!`, '',
+      `We are Homes in Georgia, the agency representing the owner of this apartment${p.is_exclusive ? ' under an exclusive contract (attached)' : ''}. `
+      + `The following ads on ${site} were posted without the owner's consent. Please remove them:`, '', ...links, '',
+      `Property: ${p.address || '—'}${p.cadastral_code ? `, cadastral code ${p.cadastral_code}` : ''}`,
+      `Owner: ${p.owner?.name || '—'} — ID / passport attached.`, '', 'Thank you!', 'Homes in Georgia · +995 599 20 67 16'].join('\n');
+  };
+  const copy = async (site: string) => {
+    try { await navigator.clipboard.writeText(letter(site)); toast(t('Письмо скопировано — приложите паспорт собственника{c}', { c: p.is_exclusive ? t(' и эксклюзивный договор') : '' })); }
+    catch { toast(t('Не удалось скопировать'), true); }
+  };
+  return (
+    <div className="row row-wrap gap-sm mt">
+      {sites.map((s) => <Button key={s} variant="secondary" size="sm" onClick={() => copy(s)}><Copy size={14} />{t('Скопировать письмо для {s}', { s })}</Button>)}
+    </div>
+  );
+}
+
 /** «Снять с паузы» / «Опубликовать снова» (unpublished): published again with a new post; «Снова в работу» for
  * «Собственник сдал» (back to «Взят», call the owner); republish: a rented object published again right away (staff). */
 export function Resume({ p, republish }: { p: Property; republish?: boolean }) {
@@ -1925,6 +1953,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
               <ExclusiveHangs p={p} />
               <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{t('Те же фото, адрес, собственник или параметры — в нашей базе, на ss.ge / myhome.ge и у конкурентов. Отметьте: дубль или нет.')}</div>
               <SimilarList subject={`p:${p.id}`} emptyText={t('Похожих объектов не найдено: ни в базе, ни на сайтах, ни у конкурентов.')} />
+              <TakedownLetter p={p} />
               <CompareLink p={p} />
             </Card>
           )}
