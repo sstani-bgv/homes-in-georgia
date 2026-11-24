@@ -408,6 +408,9 @@ def operator_intro(lead, always=False):
             return None
     # the client picked it in the bot: name it as the bot's card does, no links (Stanislav 11-16; the street is agent-only)
     what = headline(i, lang) + (f" ({MORE[lang].format(n=len(ids) - 1)})" if len(ids) > 1 else "")
+    # «💬 Contact» under a channel post: the link to that post (Irakli 11-24 «надо чтобы была ссылка на пост»)
+    if always and (link := channel_post_of(g(lead, "listing_id"))) and "t.me/c/" not in link:
+        what += f"\n{link}"
     from app.telegram import userbot
     if userbot.send_to_client(cl, INTRO[lang].format(what=what)):
         return "userbot"

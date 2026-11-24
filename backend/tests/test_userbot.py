@@ -262,6 +262,7 @@ def test_contact_greets_a_known_client_too_once_per_tap_burst(db, monkeypatch):
     monkeypatch.setattr(userbot, "send_to_client", lambda c, text, **kw: sent.append(text) or {"ok": True, "message_id": 1})
     assert notify.operator_intro(lead) is None  # the ❤️ path: not the first lead
     assert notify.operator_intro(lead, True) == "userbot" and notify.headline(notify.store.listing(a.id)) in sent[0]
+    assert "https://t.me/rent_tbilisi_ge/31" in sent[0]  # Irakli 11-24: the post's link
     assert "ещё" not in sent[0]
     assert notify.operator_intro(lead, True) is None and len(sent) == 1
 
