@@ -2178,6 +2178,31 @@ _ADDR_DROP = re.compile(r"^(\d{4}|tbilisi|georgia|тбилиси|грузия|�
 _ADDR_ABBR = ((r"\bStreet\b", "St"), (r"\bAvenue\b", "Ave"), (r"\bLane\b", "Ln"), (r"\bHighway\b", "Hwy"))
 
 
+_KA = dict(zip("აბგდევზთიკლმნოპჟრსტუფქღყშჩცძწჭხჯჰ", "a b g d e v z t i k l m n o p zh r s t u p k gh q sh ch ts dz ts ch kh j h".split()))
+_RU = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя", "a b v g d e e zh z i y k l m n o p r s t u f kh ts ch sh shch - y - e yu ya".split()))
+_KIND = ((r"ქ\.|ქუჩა|ул\.|улица", "St"), (r"გამზ\.|გამზირი|пр-т|просп\.|проспект", "Ave"),
+         (r"შეს\.|შესახვევი|пер\.|переулок", "Ln"), (r"ჩიხი|тупик", "Dead End"), (r"მოედ\.|მოედანი|пл\.|площадь", "Sq"))
+
+
+def _latin(part: str) -> str:
+    """A Georgian / Russian address part in Latin letters, the street kind as the English word after the name (David
+    11-24: «либо всё на английском, либо всё на грузинском — у нас шаблон английский»): «ცაგარელის ქ. 21» → «Tsagareli
+    St 21», «ул. Чавчавадзе 33» → «Chavchavadze St 33»."""
+    if not re.search(r"[а-яА-ЯёЁა-ჰ]", part):
+        return part
+    kind = None
+    for pat, word in _KIND:
+        if re.search(pat, part, re.I):
+            kind, part = word, re.sub(pat, " ", part, flags=re.I)
+    nums = re.findall(r"\d+[a-zA-Zა-ჰ]?", part)
+    words = [w for w in re.sub(r"\d+[a-zA-Zა-ჰ]?", " ", part).replace(",", " ").split() if w.strip(".")]
+    if kind and words and words[-1].endswith("ის"):  # Georgian genitive: ცაგარელის ქ. = Tsagareli St, ჭავჭავაძის = Chavchavadze
+        words[-1] = words[-1][:-3] + "ძე" if words[-1].endswith("ძის") else words[-1][:-1]
+    lat = " ".join("".join(_KA.get(c, _RU.get(c.lower(), c)).replace("-", "") for c in w) for w in words)
+    lat = " ".join(w[:1].upper() + w[1:] for w in lat.split())
+    return " ".join(x for x in (lat, kind, " ".join(nums)) if x)
+
+
 def short_address(address: str | None, district: str | None = None) -> str | None:
     """The post's address without the geocoder's tail (Irakli 11-24 «адрес короче, без индекса»): «Biota Park, 20, Anna
     Politkovskaya Street, Saburtalo, Vazha-Pshavela Blocks, Vake District, Tbilisi, 0168» → «Biota Park · Anna
@@ -2185,13 +2210,12 @@ def short_address(address: str | None, district: str | None = None) -> str | Non
     if not address:
         return None
     parts = [x.strip() for x in address.split(",") if x.strip()]
-    if len(parts) <= 2:
-        return address.strip()
     names = {d[i].lower() for d in districts.DISTRICTS for i in (1, 2, 3)} | {(district or "").lower()}
     out, num = [], None
     for x in parts:
-        if _ADDR_DROP.search(x) or x.lower() in names:
+        if _ADDR_DROP.search(x) or all(w in names for w in re.split(r"[-\s]+", x.lower()) if w):  # «Vake-Saburtalo» too
             continue
+        x = _latin(x)
         if re.fullmatch(r"\d+[a-zA-Zა-ჰ]?", x):
             num = x
             continue

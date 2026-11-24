@@ -6,7 +6,10 @@ def test_short_address_drops_the_geocoder_tail():
     full = "Biota Park, 20, Anna Politkovskaya Street, Saburtalo, Vazha-Pshavela Blocks, Vake District, Tbilisi, 0168"
     assert P.short_address(full, "Сабуртало") == "Biota Park · Anna Politkovskaya St 20"
     assert P.short_address("27 Tashkenti St") == "27 Tashkenti St"
-    assert P.short_address("ул. Чавчавадзе 33, Ваке") == "ул. Чавчавадзе 33, Ваке"
+    # David 11-24: all English — #15577 went out as «Vake-Saburtalo · ცაგარელის ქ. 21»
+    assert P.short_address("Vake-Saburtalo, Saburtalo, ცაგარელის ქ. 21", "Сабуртало") == "Tsagareli St 21"
+    assert P.short_address("ул. Чавчавадзе 33, Ваке") == "Chavchavadze St 33"
+    assert P.short_address("ჭავჭავაძის გამზ. 5, Vake") == "Chavchavadze Ave 5"
 
 
 def test_state_university_is_st_and_technical_is_tc():
