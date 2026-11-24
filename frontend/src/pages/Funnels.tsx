@@ -32,7 +32,7 @@ export function ManualProperty({ open, onClose, base = '', deal = 'rent' }: { op
   const toast = useToast();
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const body = () => ({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, post_fields: { ...(f.facts?.metro ? { metro: f.facts.metro } : {}), ...(deal === 'sale' ? { deal: 'Sale', prop_type: 'Apartment' } : {}) }, source_type: 'direct' });
+  const body = (): Parameters<typeof api.properties.create>[0] => ({ address: f.address || null, district: f.district || null, lat: f.point?.lat ?? null, lng: f.point?.lng ?? null, post_fields: { ...(f.facts?.metro ? { metro: f.facts.metro } : {}), ...(deal === 'sale' ? { deal: 'Sale', prop_type: 'Apartment' } : {}) }, source_type: 'direct' });
   const done = (p: { id: number }) => { qc.invalidateQueries({ queryKey: ['properties'] }); onClose(); setF(empty); navigate(`${base}/objects/${p.id}`); };
   const m = useMutation({
     mutationFn: () => api.properties.create({ ...body(), owner_name: f.owner_name, owner_phone: cleanPhones(f.phones)[0]?.phone, owner_phones: cleanPhones(f.phones) }),
