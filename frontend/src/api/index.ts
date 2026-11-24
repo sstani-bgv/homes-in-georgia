@@ -199,6 +199,8 @@ export const api = {
   owners: {
     list: (q?: string, scope?: 'base' | 'unlinked' | 'agents' | 'all') => http.get<L<Owner>>('/owners', { q, scope }),
     create: (b: Partial<Owner>) => http.post<Owner>('/owners', b),
+    /** «Запросить смену агента» from «Проверка по телефону»: an owner-level change request (no object) */
+    request: (phone: string, reason?: string) => http.post<{ change_request: ChangeRequest }>('/owners/request', { phone, reason }),
     update: (id: number, b: Partial<Owner>) => http.patch<Owner>(`/owners/${id}`, b),
     /** «Передать собственника агенту…» (staff): the owner and his live objects move to the agent */
     transfer: (id: number, agent_id: number, reason?: string) => http.post<Owner>(`/owners/${id}/transfer`, { agent_id, reason }),

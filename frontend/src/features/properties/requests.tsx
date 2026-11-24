@@ -84,6 +84,7 @@ export function RequestRow({ r, link = (id: number) => `/objects/${id}`, showObj
         <div className="row row-wrap gap-sm" style={{ fontWeight: 700 }}>
           <Badge tone="warn">{CR_KIND[r.kind] || r.kind}</Badge>
           {showObject && r.property && <Link to={link(r.property.id)}>{t('Объект #{id}', { id: r.property.id })}{r.property.address ? ` · ${r.property.address}` : ''}</Link>}
+          {r.owner && <span>{t('Собственник')} {r.owner.name || `#${r.owner.id}`}</span>}
         </div>
         <span className="muted" style={{ fontSize: 12 }} title={fmtDateTime(r.created_at)}>{r.requested_by?.name || '—'} · {ago(r.created_at)}</span>
       </div>

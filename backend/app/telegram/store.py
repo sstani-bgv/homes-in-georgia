@@ -67,6 +67,10 @@ def user(uid):
     return q("SELECT * FROM users WHERE id = %s", (uid,), one=True) if uid else None
 
 
+def owner(oid):
+    return q("SELECT * FROM owners WHERE id = %s", (oid,), one=True) if oid else None
+
+
 def lead(lead_id):
     return q("SELECT * FROM leads WHERE id = %s", (lead_id,), one=True) if lead_id else None
 

@@ -1082,6 +1082,14 @@ def phones_text(rows, sep=", "):
     return sep.join(r["phone"] + (f" ({r['note']})" if r.get("note") else "") for r in rows or [] if r.get("phone"))
 
 
+def cr_subject(cr):
+    """«объект #N», or for an owner-level request «собственник Имя» (the owner's name from the store)."""
+    if g(cr, "entity") != "owner":
+        return f"объект #{g(cr, 'entity_id')}"
+    o = store.owner(g(cr, "entity_id"))
+    return f"собственник {e((o or {}).get('name') or '#' + str(g(cr, 'entity_id')))}"
+
+
 def cr_changes(cr):
     fmt = lambda v: "—" if v in (None, "", []) else ("да" if v is True else "нет" if v is False else  # noqa: E731
                                                     phones_text(v) if isinstance(v, list) else v)
@@ -1094,10 +1102,11 @@ def change_request_new(cr):
     """To the operators: a new request in «Запросы»."""
     pid, who = g(cr, "entity_id"), store.user(g(cr, "requested_by")) or {}
     reason = g(cr, "reason")
+    prop = g(cr, "entity") != "owner"  # an owner-level request (no object): no object button
     to_operators("change_request", g(cr, "id"),
-                 f"✋ <b>Запрос оператору · объект #{pid}</b>\n{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))} · {e(staff_name(who))}\n"
+                 f"✋ <b>Запрос оператору · {cr_subject(cr)}</b>\n{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))} · {e(staff_name(who))}\n"
                  f"{cr_changes(cr)}" + (f"\n\nПричина: {e(reason)}" if reason else ""),
-                 lambda private: kb([[app_btn("🏠 Открыть объект", links.property_app(pid), private)]]))
+                 lambda private: kb([[app_btn("🏠 Открыть объект", links.property_app(pid), private)]]) if prop else None)
 
 
 @safe
@@ -1108,9 +1117,10 @@ def change_request_decided(cr):
         return
     ok = g(cr, "status") == "approved"
     comment = g(cr, "decision_comment")
-    tg.send(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос по объекту #{g(cr, 'entity_id')} {'одобрен' if ok else 'отклонён'}</b>\n"
+    prop = g(cr, "entity") != "owner"
+    tg.send(u["tg_id"], f"{'✅' if ok else '❌'} <b>Запрос · {cr_subject(cr)} · {'одобрен' if ok else 'отклонён'}</b>\n"
             f"{e(CR_KIND.get(g(cr, 'kind'), g(cr, 'kind')))}\n{cr_changes(cr)}" + (f"\n\nКомментарий оператора: {e(comment)}" if comment else ""),
-            kb([[app_btn("🏠 Открыть объект", links.property_app(g(cr, "entity_id")))]]))
+            kb([[app_btn("🏠 Открыть объект", links.property_app(g(cr, "entity_id")))]]) if prop else None)
 
 
 def agency_chat():
@@ -1650,17 +1660,18 @@ def staff_event(text, kind, ref, agents=(), actor=None, ops=True):
     """To the agents (user ids), the one who pressed it (actor: a confirmation, David 11-24 «уведомление не пришло что
     снято») and, ops, the operators (operators_targets: the connected operator account), nobody twice. The button
     opens the object / lead / deal / contract."""
-    label, url = OPEN[kind]
+    label, url = OPEN[kind] if kind else (None, None)  # kind None: no button (an owner with no object)
+    markup = lambda private=True: kb([[app_btn(label, url(ref), private)]]) if kind else None  # noqa: E731
     skip: set[str] = set()
     for aid in dict.fromkeys(a for a in (*agents, actor) if a):
         u = store.user(aid) or {}
         if u.get("tg_id") and u.get("is_active", True) and str(u["tg_id"]) not in skip:
             skip.add(str(u["tg_id"]))
-            tg.send(u["tg_id"], text, kb([[app_btn(label, url(ref))]]))
+            tg.send(u["tg_id"], text, markup())
     if ops:
         for chat, topic in operators_targets():
             if str(chat) not in skip:
-                tg.send(chat, text, kb([[app_btn(label, url(ref), is_private(chat))]]), thread_id=topic)
+                tg.send(chat, text, markup(is_private(chat)), thread_id=topic)
 
 
 def _note(note):

@@ -306,6 +306,8 @@ export interface ChangeRequest {
   requested_by: { id: number | null; name: string | null }; decided_by?: { id: number; name: string | null } | null;
   decided_at?: string | null; decision_comment?: string | null; created_at: string;
   property?: { id: number; address?: string | null; status: PropertyStatus } | null;
+  /** entity owner: a request from «Проверка по телефону», no object */
+  owner?: { id: number; name?: string | null } | null;
 }
 
 /** GET /properties/:id/post: the channel caption built from the object (services.properties.post_text). */

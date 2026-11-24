@@ -5,12 +5,16 @@ import { Search } from 'lucide-react';
 import { api } from '../api';
 import { cadastralInput } from '../lib/cadastral';
 import { errText, useToast } from '../components/toast';
+import { useConfirm } from '../components/ActionDialog';
+import { useAuth } from '../auth/AuthContext';
+import { t } from '../lib/i18n';
 import { Badge, Button, Card, Field, Input } from '../components/ui';
 import { fmtDate, phoneInput, phonesLine } from '../lib/format';
 import type { PhoneRow } from '../api/types';
 
 type DupRow = { source?: string; owner?: string | null; phone?: string | null; phones?: PhoneRow[] | null; address?: string | null; link?: string | null; status?: string; rent_to?: string | null;
-  phone_match?: boolean; addr_match?: boolean; url_match?: boolean; cadastral_match?: boolean; property_id?: number; deal_id?: number; is_agent?: boolean };
+  phone_match?: boolean; addr_match?: boolean; url_match?: boolean; cadastral_match?: boolean; property_id?: number; deal_id?: number; is_agent?: boolean;
+  /** owners: who he is bound to (tag «#David») */ agent_id?: number | null; agent?: string | null };
 
 const LEVEL: Record<string, { tone: 'ok' | 'warn' | 'red'; title: string; sub: string }> = {
   none: { tone: 'ok', title: 'Не найдено в базе', sub: 'Совпадений по собственнику или объекту нет, можно продолжать' },
@@ -20,6 +24,13 @@ const LEVEL: Record<string, { tone: 'ok' | 'warn' | 'red'; title: string; sub: s
 
 export function PropertyCheck() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { user: me, isStaff } = useAuth();
+  // David 11-24: the owner is another agent's → ask the operator to move him over (his agent is told)
+  const askAgent = async () => {
+    if (!(await confirm(t('Отправить оператору запрос закрепить этого собственника за вами? Агента собственника тоже уведомим.')))) return;
+    try { await api.owners.request(f.phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
+  };
   const [f, setF] = useState({ phone: '', address: '', url: '', cadastral: '' });
   const [res, setRes] = useState<{ level: string; results: DupRow[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,6 +69,9 @@ export function PropertyCheck() {
                 </div>
                 {r.owner && <b>{r.owner}</b>}
                 <div className="muted" style={{ fontSize: 13 }}>{[phonesLine(r.phones, r.phone), r.address].filter(Boolean).join(' · ') || '—'}</div>
+                {r.source === 'owners' && r.agent && <div style={{ fontSize: 13 }}>{t('Закреплён за {agent}', { agent: r.agent })}</div>}
+                {r.source === 'owners' && r.phone_match && !isStaff && !r.is_agent && r.agent_id && r.agent_id !== me?.id && f.phone.trim() && (
+                  <div><Button variant="ghost" onClick={askAgent}>{t('Запросить смену агента')}</Button></div>)}
                 {r.rent_to && <div className="muted" style={{ fontSize: 12 }}>Сдан до {fmtDate(r.rent_to)}</div>}
                 <div className="row gap-sm">
                   {r.property_id && <a href={`/objects/${r.property_id}`}>Объект #{r.property_id}</a>}

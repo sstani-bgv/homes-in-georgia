@@ -613,4 +613,7 @@ export const D: Record<string, [ka: string, en: string]> = {
   " и эксклюзивный договор": [" და ექსკლუზიური ხელშეკრულება", " and the exclusive contract"],
   "Скопировать письмо для {s}": ["წერილის კოპირება: {s}", "Copy the letter for {s}"],
   "Адрес и точка на карте": ["მისამართი და წერტილი რუკაზე", "Address and the map point"],
+  "Закреплён за {agent}": ["მიმაგრებულია: {agent}", "Bound to {agent}"],
+  "Запросить смену агента": ["აგენტის შეცვლის მოთხოვნა", "Request an agent change"],
+  "Отправить оператору запрос закрепить этого собственника за вами? Агента собственника тоже уведомим.": ["გავუგზავნოთ ოპერატორს მოთხოვნა, რომ ეს მესაკუთრე თქვენზე მიმაგრდეს? მესაკუთრის აგენტსაც შევატყობინებთ.", "Send the operator a request to bind this owner to you? The owner's agent will be notified too."],
 };

@@ -66,12 +66,13 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     return cr
 
 
-def request_owner(db: Session, pid: int, phone: str, actor: User, reason: str | None = None) -> ChangeRequest:
+def request_owner(db: Session, pid: int | None, phone: str, actor: User, reason: str | None = None) -> ChangeRequest:
     """David 11-24 (voices 287409 / 287423, Luka and Zaza): the number the agent typed is an owner bound to another agent
     («Собственник закреплён за #Tag») — the agent asks the operator to move the owner to him and link him to this
-    object; the owner's agent hears of it (he may say he is against it). Not when that agent has an exclusive with him."""
-    p = get_or_404(db, Property, int(pid), "property")
-    if p.agent_id != actor.id:
+    object; the owner's agent hears of it (he may say he is against it). Not when that agent has an exclusive with him.
+    pid None: from «Проверка по телефону» (David 11-24 17:05) — an owner-level request (entity owner), no object to link."""
+    p = get_or_404(db, Property, int(pid), "property") if pid is not None else None
+    if p is not None and p.agent_id != actor.id:
         raise forbidden("only the object's agent")
     o = P.find_owner(db, phone)
     if o is None or o.is_agent or o.agent_id in (None, actor.id):
@@ -79,18 +80,25 @@ def request_owner(db: Session, pid: int, phone: str, actor: User, reason: str | 
     if db.scalar(select(Property.id).where(Property.owner_id == o.id, Property.agent_id == o.agent_id,
                                            Property.is_exclusive.is_(True), Property.status.not_in(("archived", "rented"))).limit(1)):
         raise DomainError("exclusive", f"У {users_svc_tag(db, o.agent_id)} эксклюзив с этим собственником — передать нельзя")
-    if db.scalar(select(ChangeRequest.id).where(ChangeRequest.kind == "transfer_owner", ChangeRequest.status == "pending",
-                                                ChangeRequest.entity_id == p.id).limit(1)):
+    pending = db.scalars(select(ChangeRequest).where(ChangeRequest.kind == "transfer_owner", ChangeRequest.status == "pending"))
+    if any((r.payload or {}).get("owner_id") == o.id or (p is not None and r.entity == "property" and r.entity_id == p.id)
+           for r in pending):
         raise DomainError("bad_status", "Запрос уже отправлен, ждёт оператора")
     old = db.get(User, o.agent_id)
-    cr = create(db, "property", p.id, "transfer_owner", {
-        "owner_id": o.id, "agent_id": actor.id, "link": True,
-        "owner_agent": {"old": old.name if old else P.PLATFORM, "new": actor.name}}, actor, reason)
+    payload = {"owner_id": o.id, "agent_id": actor.id,
+               "owner_agent": {"old": old.name if old else P.PLATFORM, "new": actor.name}}
+    if p is not None:
+        payload["link"] = True
+    cr = create(db, "property" if p is not None else "owner", p.id if p is not None else o.id, "transfer_owner",
+                payload, actor, reason)
     db.commit()
     P._notify("change_request_new", cr)
-    P._notify("prop_event", p, f"✋ <b>{escape(actor.name or '')} просит передать ему вашего собственника "
-              f"{escape(o.name or '—')}</b>", actor.id, [o.agent_id], False,
-              "Если вы против — напишите оператору. Решает оператор в «Запросах».")
+    head = f"✋ <b>{escape(actor.name or '')} просит передать ему вашего собственника {escape(o.name or '—')}</b>"
+    note = "Если вы против — напишите оператору. Решает оператор в «Запросах»."
+    if p is not None:
+        P._notify("prop_event", p, head, actor.id, [o.agent_id], False, note)
+    else:
+        P._notify("staff_event", f"{head}\n\n{escape(note)}", None, None, [o.agent_id], actor.id, False)
     return cr
 
 
@@ -137,7 +145,7 @@ def decide(db: Session, rid: int, operator: User, approve: bool, comment: str | 
     comment = (comment or "").strip() or None
     if not approve and not comment:
         raise DomainError("comment_required", "Напишите агенту, почему отказ")
-    p = get_or_404(db, Property, cr.entity_id, "property", lock=True)
+    p = get_or_404(db, Property, cr.entity_id, "property", lock=True) if cr.entity == "property" else None
     if approve:
         _apply(db, cr, p, operator)
     cr.status, cr.decided_by, cr.decided_at, cr.decision_comment = "approved" if approve else "rejected", operator.id, now(), comment
@@ -148,7 +156,7 @@ def decide(db: Session, rid: int, operator: User, approve: bool, comment: str | 
     return cr
 
 
-def _apply(db: Session, cr: ChangeRequest, p: Property, operator: User) -> None:
+def _apply(db: Session, cr: ChangeRequest, p: Property | None, operator: User) -> None:
     """The approved change through the regular service functions (no commit)."""
     pl = cr.payload or {}
     if cr.kind == "edit":
@@ -172,7 +180,7 @@ def _apply(db: Session, cr: ChangeRequest, p: Property, operator: User) -> None:
             P.set_owner_lease(db, p, new("rent_from"), new("rent_to"), operator)
     elif cr.kind == "transfer_owner":
         P.transfer_owner(db, pl["owner_id"], pl["agent_id"], operator, cr.reason, commit=False)
-        if pl.get("link") and p.owner_id != pl["owner_id"]:  # request_owner: the owner goes onto the asking agent's object
+        if pl.get("link") and p is not None and p.owner_id != pl["owner_id"]:  # request_owner: the owner goes onto the asking agent's object
             p.owner_id, p.updated_at = pl["owner_id"], now()
             log_event(db, "property", p.id, "owner_linked", operator, owner_id=pl["owner_id"], request_id=cr.id)
     elif cr.kind == "no_esign":  # the step counts as done from now (properties.contract_done reads the request)
@@ -189,7 +197,10 @@ def pending_for(db: Session, p: Property) -> list[ChangeRequest]:
 def outs(db: Session, rows: list[ChangeRequest]) -> list[dict]:
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(
         {i for r in rows for i in (r.requested_by, r.decided_by) if i})))} if rows else {}
-    props = {x.id: x for x in db.scalars(select(Property).where(Property.id.in_({r.entity_id for r in rows})))} if rows else {}
+    props = {x.id: x for x in db.scalars(select(Property).where(Property.id.in_(
+        {r.entity_id for r in rows if r.entity == "property"})))} if rows else {}
+    owners = {x.id: x for x in db.scalars(select(Owner).where(Owner.id.in_(
+        {r.entity_id for r in rows if r.entity == "owner"})))} if rows else {}
     iso = lambda v: v.isoformat() if v else None  # noqa: E731
     name = lambda i: users[i].name if i in users else None  # noqa: E731
     scans = {m.id: m for m in db.scalars(select(PropertyMedia).where(PropertyMedia.id.in_(
@@ -203,7 +214,9 @@ def outs(db: Session, rows: list[ChangeRequest]) -> list[dict]:
              "decided_by": {"id": r.decided_by, "name": name(r.decided_by)} if r.decided_by else None,
              "decided_at": iso(r.decided_at), "decision_comment": r.decision_comment, "created_at": iso(r.created_at),
              "property": {"id": r.entity_id, "address": props[r.entity_id].address,
-                          "status": props[r.entity_id].status} if r.entity_id in props else None} for r in rows]
+                          "status": props[r.entity_id].status} if r.entity == "property" and r.entity_id in props else None,
+             "owner": {"id": r.entity_id, "name": owners[r.entity_id].name}
+             if r.entity == "owner" and r.entity_id in owners else None} for r in rows]
 
 
 def query(db: Session, user: User, status: str | None = "pending"):

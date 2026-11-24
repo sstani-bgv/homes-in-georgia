@@ -245,8 +245,8 @@ def check_duplicate(body: DupIn, db: Session = Depends(get_db, scope="function")
     if not at_least(user, "operator"):
         mine = set(db.scalars(select(Property.owner_id).where(Property.agent_id == user.id, Property.owner_id.isnot(None))))
         for r in res.get("results", []):
-            if r.get("source") == "owners" and r.get("owner_id") not in mine:
-                r["phone"] = r["phones"] = r["owner"] = None
+            if r.get("source") == "owners" and r.get("owner_id") not in mine and r.get("agent_id") != user.id:
+                r["phone"] = r["phones"] = r["owner"] = None  # the agent tag stays: «Закреплён за #Tag»
             if r.get("property_id") and not P.can_open(db, P._prop(db, r["property_id"]), user):
                 r["property_id"] = None  # no link to a card he can't open; the match itself still shows
     return res
@@ -852,6 +852,12 @@ def properties_owner_request(pid: int, body: OwnerRequestIn, db: Session = Depen
                              user: User = Depends(current_user)):
     """«Запросить собственника» (David 11-24): the typed owner is another agent's — the operator moves him over."""
     return {"change_request": CR.outs(db, [CR.request_owner(db, pid, body.phone, user, body.reason)])[0]}
+
+
+@router.post("/owners/request")
+def owners_request(body: OwnerRequestIn, db: Session = Depends(get_db, scope="function"), user: User = Depends(current_user)):
+    """«Запросить смену агента» from «Проверка по телефону» (David 11-24): an owner-level request, no object."""
+    return {"change_request": CR.outs(db, [CR.request_owner(db, None, body.phone, user, body.reason)])[0]}
 
 
 @router.post("/properties/{pid}/listings/{listing_id}/takedown")

@@ -2901,9 +2901,10 @@ def check_duplicate(db: Session, phone=None, address: str | None = None, url: st
         for o in db.scalars(select(Owner)):
             pm = bool(mine) and _phones_match(mine, owner_phones(o))
             am = bool(address) and address_match(address, o.address)
-            if pm or am:
+            if pm or am:  # agent / agent_id: who the owner is bound to (David 11-24 — «Запросить смену агента»)
                 results.append({"source": "owners", "owner_id": o.id, "owner": o.name, "phone": o.phone, "phones": owner_phones(o),
                                 "address": o.address, "link": o.link, "is_agent": o.is_agent,
+                                "agent_id": o.agent_id, "agent": users_svc.tag_of(db.get(User, o.agent_id)) if o.agent_id else None,
                                 "phone_match": pm, "addr_match": am})
     if url:
         q = select(Property).where(Property.source_url == url.strip())
