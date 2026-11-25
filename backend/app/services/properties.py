@@ -2585,7 +2585,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
             jobs.cancel(db, "tg_repost", p.id)
         if ref and first:  # the same flat already in the channel? the operator decides (services/channel_dups.py, David 11-20);
             jobs.schedule(db, "channel_dups", p.id, now())  # a repost of a published one (a price, a fix) was checked then
-        if ref:  # the originals chat, once per photo set (send_originals)
+        if ref and first:  # the originals chat at the first publication only (Irakli 11-25: an updated post sent them again)
             jobs.schedule(db, "tg_originals", p.id, now(), {"text": p.post_text})
     _status(db, p, "published", actor, post_url=p.post_url if ref else None, channel=channel if tg else None,
             site=not p.site_hidden, **({"dry_run": True} if dry_run else {}))

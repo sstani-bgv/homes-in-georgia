@@ -119,7 +119,8 @@ def test_originals_post_photos_then_text_then_video(bot, monkeypatch, tmp_path):
     assert notify.originals_post(5, "-4001", "🏠 x") == 13 and "больше 50 МБ" in texts[-1]
 
 
-def test_originals_once_per_photo_set(db, client, monkeypatch):
+def test_originals_only_at_the_first_publication(db, client, monkeypatch):
+    """Irakli 11-25: an updated post sent the originals again — they go once, when the object is first published."""
     from app import worker
     from app.models import PropertyMedia
     from app.services import settings
@@ -128,20 +129,14 @@ def test_originals_once_per_photo_set(db, client, monkeypatch):
     monkeypatch.setattr(notify, "publish_post", lambda prop: (7, "https://t.me/rent_tbilisi_ge/7", MAIN, [7]))
     monkeypatch.setattr(notify, "originals_post", lambda pid, chat, text: sent.append((pid, chat, text)) or 2)
     monkeypatch.setattr(notify, "post_html", REAL_NOTIFY["post_html"])
-    _, nino, pid, _ = _submitted(db, client)
-    properties.publish(db, pid, nino)
-    worker.tick()
-    assert sent == []  # no chat set yet
     settings.set(db, "originals_chat_id", "-4001")
+    _, nino, pid, _ = _submitted(db, client)
     properties.publish(db, pid, nino)
     worker.tick()
     assert len(sent) == 1 and sent[0][1] == "-4001" and f"CRM #{pid}" in sent[0][2] and "t.me/rent_tbilisi_ge/7" in sent[0][2]
     assert sent[0][2].startswith(notify.post_html(properties.post_text(db, db.get(Property, pid)), pid)[:40])
-    properties.publish(db, pid, nino)  # a repost, the same photos: nothing
-    worker.tick()
-    assert len(sent) == 1
     db.add(PropertyMedia(property_id=pid, kind="photo", path="new.jpg", position=99))
     db.commit()
-    properties.publish(db, pid, nino)  # a photo added: again
+    properties.publish(db, pid, nino)  # an update / repost, even with a new photo: nothing
     worker.tick()
-    assert len(sent) == 2
+    assert len(sent) == 1
