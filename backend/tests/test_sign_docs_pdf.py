@@ -120,12 +120,12 @@ def test_parties_two_outside_signers(db, client, fakes, monkeypatch):
     assert any(a[1] == 333 and a[4] == out for a in sent)  # the signed PDF → the author's Telegram
 
 
-def test_parties_signer_needs_contact(db, client):
+def test_parties_signer_needs_a_name_not_a_contact(db, client):
+    """Irakli 11-25: the contact is optional; the name is not."""
     op = make_user(db, "operator")
     body = _parties(pdf=_url(_pdf(1)))
     body["signers"][1] = {"role": "Клиент", "full_name": "No Contact"}
-    r = client.post("/api/sign-docs", json=body, headers=auth(op))
-    assert r.status_code == 400 and "Telegram или телефон" in r.text
+    assert client.post("/api/sign-docs", json=body, headers=auth(op)).status_code == 200
     body["signers"][1] = {"role": "Клиент", "telegram": "@client"}
     assert client.post("/api/sign-docs", json=body, headers=auth(op)).status_code == 400  # no name
 
@@ -142,3 +142,12 @@ def test_agent_only_own_parties_docs(db, client):
     assert client.get(f"/api/sign-docs/{r.json()['id']}", headers=auth(other)).status_code == 404
     assert client.post(f"/api/sign-docs/{r.json()['id']}/send", headers=auth(ag)).json()["status"] == "sent"
     assert client.get("/api/sign-docs", headers=auth(make_user(db, "recruit"))).status_code == 403
+
+
+def test_parties_signer_contacts_are_optional_and_a_phone_in_telegram_is_a_phone():
+    """Irakli 11-25: «убери обязательный пункт номер телефона и тг»; he typed +995… into «Telegram»."""
+    from app.services import sign_docs
+    f = sign_docs._outside({"role": "Клиент", "full_name": "Миша", "telegram": "+995593531305"})
+    assert (f["telegram"], f["phone"]) == (None, "+995593531305")
+    assert sign_docs._outside({"full_name": "Нино"})["phone"] is None
+    assert sign_docs._outside({"full_name": "Лука", "telegram": "@luka_tb"})["telegram"] == "luka_tb"

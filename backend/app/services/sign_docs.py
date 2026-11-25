@@ -176,9 +176,14 @@ def path(token: str) -> str:
     return f"/doc/{token}"
 
 
+def _username(v: str | None) -> bool:
+    """A Telegram @username (5–32, starts with a letter) — not a phone typed into the field."""
+    return bool(v and re.fullmatch(r"[A-Za-z]\w{4,31}", v))
+
+
 def _need_tg(db: Session, s: SignDocSigner) -> bool:
     """Telegram confirmation: team members (their own account) and a named @username."""
-    return bool(s.telegram or (s.user_id and (u := db.get(User, s.user_id)) and u.tg_id))
+    return bool(_username(s.telegram) or (s.user_id and (u := db.get(User, s.user_id)) and u.tg_id))
 
 
 def _signer_out(db: Session, d: SignDoc, s: SignDocSigner) -> dict:
@@ -275,8 +280,9 @@ def _outside(p: dict) -> dict:
     who = f["role"] or f["full_name"] or "подписант"
     if not f["full_name"]:
         raise DomainError("missing_fields", f"Укажите имя: {who}")
-    if not f["phone"] and not f["telegram"]:
-        raise DomainError("missing_fields", f"Укажите Telegram или телефон WhatsApp: {who}")
+    # contacts optional (Irakli 11-25: the links go out by hand); a phone typed into «Telegram» is a phone
+    if f["telegram"] and not _username(f["telegram"]):
+        f["phone"], f["telegram"] = f["phone"] or f["telegram"], ""
     return {"user_id": None, **{k: (v or None) for k, v in f.items()}}
 
 

@@ -102,14 +102,14 @@ function DocForm({ doc, onDone, onClose, start }: { doc: Doc | null; onDone: (d:
   const setRow = (i: number, k: keyof Row) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF({ ...f, rows: f.rows.map((r, j) => (j === i ? { ...r, [k]: k === 'phone' ? phoneInput(e) : e.target.value } : r)) });
   const ok = f.mode === 'parties'
-    ? lns.every((l) => f.title[l].trim()) && hasPdf && f.rows.length > 0 && f.rows.every((r) => r.full_name.trim() && (r.phone.trim() || r.telegram.trim()))
+    ? lns.every((l) => f.title[l].trim()) && hasPdf && f.rows.length > 0 && f.rows.every((r) => r.full_name.trim())
     : lns.every((l) => f.title[l].trim() && (f.mode === 'pdf' ? hasPdf : f.body[l].trim())) && f.party.full_name.trim()
       && (f.who === 'team' ? !!f.party.user_id : !!f.party.phone.trim() && !!f.party.personal_id.trim());
   // Irakli 11-25: «Серая кнопка „Создать“, все поля ввёл» — say what is missing
   const missing = [
     !lns.every((l) => f.title[l].trim()) && t('название'),
     f.mode !== 'text' && !hasPdf && t('файл PDF'),
-    f.mode === 'parties' && !f.rows.every((r) => r.full_name.trim() && (r.phone.trim() || r.telegram.trim())) && t('ФИО и Telegram или телефон у каждого подписанта'),
+    f.mode === 'parties' && !f.rows.every((r) => r.full_name.trim()) && t('ФИО у каждого подписанта'),
     f.mode === 'text' && !lns.every((l) => f.body[l].trim()) && t('текст'),
   ].filter(Boolean) as string[];
   return (
@@ -143,7 +143,7 @@ function DocForm({ doc, onDone, onClose, start }: { doc: Doc | null; onDone: (d:
               <div key={r.id ?? `n${i}`} className="form-grid card card-pad" style={{ padding: 10 }}>
                 <Field label={t('Кто')}><Input value={r.role} onChange={setRow(i, 'role')} placeholder={t('Собственник')} /></Field>
                 <Field label={t('ФИО *')}><Input value={r.full_name} onChange={setRow(i, 'full_name')} placeholder="Nino Beridze" /></Field>
-                <Field label="Telegram" hint={t('@username или телефон — одно обязательно')}><Input value={r.telegram} onChange={setRow(i, 'telegram')} placeholder="@username" /></Field>
+                <Field label="Telegram" hint={t('Необязательно. Только @username: тогда подписант подтвердит себя через Telegram')}><Input value={r.telegram} onChange={setRow(i, 'telegram')} placeholder="@username" /></Field>
                 <Field label={t('Телефон WhatsApp')}><Input type="tel" value={r.phone} onChange={setRow(i, 'phone')} /></Field>
                 <Field label={t('Личный номер / паспорт')}><Input value={r.personal_id} onChange={setRow(i, 'personal_id')} /></Field>
                 {f.rows.length > 1 && <div style={{ alignSelf: 'end' }}><Button size="sm" variant="ghost" onClick={() => setF({ ...f, rows: f.rows.filter((_, j) => j !== i) })}><Trash2 size={14} />{t('Убрать')}</Button></div>}
