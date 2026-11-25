@@ -81,6 +81,7 @@ def test_archive_rented_by_owner_unposts(db, client, monkeypatch):
     properties.archive(db, pid, nino, "rented_by_owner", rent_from="2026-11-01", rent_to="2027-11-01")
     worker.tick()
     assert deleted and deleted[0][1] == [109, 110, 111]
+    assert not [d for d in deleted if d[0] == "rented"]  # David 11-25: the owner rented it himself — no #FlatRented
 
 
 def test_channel_rented_tag_rents_our_object(db, client, monkeypatch):

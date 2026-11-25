@@ -250,7 +250,8 @@ def tg_unpost(db: Session, job: Job):
         return "noop"  # back on the market before the worker came to it
     r = properties.unpost(db, p, None)
     res = "ok" if not r["failed"] else f"not deleted: {', '.join(r['failed'])}"[:500]
-    if rented and (sent := properties.rented_post(db, p)) not in ("ok", "never posted"):
+    by_us = p.status == "rented" or p.archive_reason == "rented_by_us"  # David 11-25: «Сдал сам» gets no #FlatRented
+    if by_us and (sent := properties.rented_post(db, p)) not in ("ok", "never posted"):
         res = f"{res}; rented post: {sent}"
     return res
 
