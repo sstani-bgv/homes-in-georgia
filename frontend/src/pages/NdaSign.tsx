@@ -36,21 +36,21 @@ const UI: Record<L, Record<string, string>> = {
     step1: '2. დაადასტურეთ თქვენი ვინაობა Telegram-ით', tgBtn: 'Telegram Login', tgBot: 'დადასტურება Telegram-ბოტში', tgBotHint: 'გაიხსნება ბოტი — დააჭირეთ „Start“ და დაბრუნდით აქ.', tgHint: 'Telegram გთხოვთ დადასტურებას აპლიკაციაში.',
     tgOnly: 'მხოლოდ ანგარიში', tgOk: 'დადასტურებულია', step2: '3. მოაწერეთ ხელი თითით', clear: 'წაშლა',
     agree: 'წავიკითხე შეთანხმება და ვეთანხმები მის პირობებს', send: 'ხელმოწერა', signing: 'ხელმოწერა…', signingHint: 'ვამზადებთ ხელმოწერილ PDF-ს — რამდენიმე წამი, ნუ დახურავთ გვერდს.', done: 'შეთანხმება ხელმოწერილია. გმადლობთ!',
-    pdf: 'PDF-ის ჩამოტვირთვა', pdfWait: 'PDF მზადდება, განაახლეთ გვერდი ერთ წუთში.', sent: 'ხელმოწერილი PDF გამოგეგზავნათ Telegram-ში.',
+    open: 'დოკუმენტის გახსნა (გვერდები)', pdf: 'PDF-ის ჩამოტვირთვა', pdfWait: 'PDF მზადდება, განაახლეთ გვერდი ერთ წუთში.', sent: 'ხელმოწერილი PDF გამოგეგზავნათ Telegram-ში.',
     you: 'მონაწილე', test: 'დადასტურება (სატესტო რეჟიმი)', noTg: 'Telegram-ის ჩატვირთვა ვერ მოხერხდა. განაახლეთ გვერდი.', net: 'სერვერთან კავშირი ვერ დამყარდა. შეამოწმეთ ინტერნეტი და კიდევ ერთხელ დააჭირეთ „ხელმოწერა“.' },
   ru: { title: 'Соглашение о подключении к платформе', read: 'Пожалуйста, внимательно прочитайте соглашение', toSign: 'К подписи ↓',
     step0: '1. Ваши реквизиты', iban: 'Укажите хотя бы один счёт — на него будут приходить выплаты.', ie: 'Номер ИП (ი/მ), необязательно', ieHint: 'Можно добавить позже в профиле', saveD: 'Внести в соглашение', savedD: 'Сохранено — текст соглашения обновлён', needIban: 'Укажите IBAN (шаг 1)', saveFirst: 'Исправьте реквизиты (шаг 1)', saving: 'Сохраняем…', badIban: 'IBAN: GE + 20 символов, например GE29TB0000000000000000', badIe: '9 или 11 цифр', needTg: 'Подтвердите себя через Telegram (шаг 2)',
     step1: '2. Подтвердите себя через Telegram', tgBtn: 'Telegram Login', tgBot: 'Подтвердить в Telegram-боте', tgBotHint: 'Откроется бот — нажмите «Start» и вернитесь сюда.', tgHint: 'Telegram попросит подтвердить вход в приложении.',
     tgOnly: 'Только аккаунт', tgOk: 'Подтверждено', step2: '3. Распишитесь пальцем', clear: 'Стереть',
     agree: 'Я прочитал(а) соглашение и согласен(на) с его условиями', send: 'Подписать', signing: 'Подписываем…', signingHint: 'Готовим подписанный PDF — несколько секунд, не закрывайте страницу.', done: 'Соглашение подписано. Спасибо!',
-    pdf: 'Скачать PDF', pdfWait: 'PDF готовится, обновите страницу через минуту.', sent: 'Подписанный PDF отправлен вам в Telegram.',
+    open: 'Открыть документ (страниц)', pdf: 'Скачать PDF', pdfWait: 'PDF готовится, обновите страницу через минуту.', sent: 'Подписанный PDF отправлен вам в Telegram.',
     you: 'Участник', test: 'Подтвердить (тестовый режим)', noTg: 'Не удалось загрузить Telegram. Обновите страницу.', net: 'Нет связи с сервером. Проверьте интернет и нажмите «Подписать» ещё раз.' },
   en: { title: 'Platform Agreement', read: 'Please read the agreement carefully', toSign: 'Go to signing ↓',
     step0: '1. Your details', iban: 'Enter at least one account — your payouts go there.', ie: 'IE number (ი/მ), optional', ieHint: 'You can add it later in your profile', saveD: 'Put into the agreement', savedD: 'Saved — the agreement text is updated', needIban: 'Enter an IBAN (step 1)', saveFirst: 'Fix the details (step 1)', saving: 'Saving…', badIban: 'IBAN: GE + 20 characters, e.g. GE29TB0000000000000000', badIe: '9 or 11 digits', needTg: 'Confirm yourself with Telegram (step 2)',
     step1: '2. Confirm yourself with Telegram', tgBtn: 'Telegram Login', tgBot: 'Confirm in the Telegram bot', tgBotHint: 'The bot opens — press «Start» and come back here.', tgHint: 'Telegram will ask you to confirm in the app.',
     tgOnly: 'Only the account', tgOk: 'Confirmed', step2: '3. Sign with your finger', clear: 'Clear',
     agree: 'I have read the agreement and agree to its terms', send: 'Sign', signing: 'Signing…', signingHint: 'Preparing the signed PDF — a few seconds, keep the page open.', done: 'Agreement signed. Thank you!',
-    pdf: 'Download PDF', pdfWait: 'The PDF is being prepared, refresh in a minute.', sent: 'The signed PDF was sent to you in Telegram.',
+    open: 'Open the document (pages)', pdf: 'Download PDF', pdfWait: 'The PDF is being prepared, refresh in a minute.', sent: 'The signed PDF was sent to you in Telegram.',
     you: 'Participant', test: 'Confirm (test mode)', noTg: 'Could not load Telegram. Refresh the page.', net: 'No connection to the server. Check your internet and press «Sign» again.' },
 };
 
@@ -98,6 +98,7 @@ export function NdaSignPage({ kind = 'nda' }: { kind?: Kind }) {
   const pad = useRef<HTMLCanvasElement>(null);
   const qc = useQueryClient();
   const v = q.data;
+  const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   const [d, setD] = useState({ iban_gel: '', iban_usd: '', ie: '' });
   const [savedOk, setSavedOk] = useState(false);
   useEffect(() => { if (v?.details) setD(v.details); }, [v?.details?.iban_gel, v?.details?.iban_usd, v?.details?.ie]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -183,8 +184,10 @@ export function NdaSignPage({ kind = 'nda' }: { kind?: Kind }) {
       </div>
       {v.html && <ContractFrame html={v.html} col={l === 'ka' ? 1 : 2} />}
       {v.pdf && <>  {/* an uploaded PDF (sign_docs): the file itself, unchanged */}
-        <iframe title={v.pdf.name} src={`/api${base}/pdf`} style={{ width: '100%', height: '75vh', border: '1px solid var(--border, #ddd)', borderRadius: 8 }} />
-        <a className="btn btn-secondary" href={`/api${base}/pdf`} target="_blank" rel="noreferrer"><Download size={16} />{v.pdf.name} · {v.pdf.pages}</a>
+        {/* a phone's browser shows an embedded PDF as one page that doesn't scroll (Irakli 11-25 «только до 2 пункта»):
+            there the document opens in the phone's own viewer, every page */}
+        {!touch && <iframe title={v.pdf.name} src={`/api${base}/pdf`} style={{ width: '100%', height: '75vh', border: '1px solid var(--border, #ddd)', borderRadius: 8 }} />}
+        <a className={touch ? 'btn btn-primary btn-lg' : 'btn btn-secondary'} href={`/api${base}/pdf`} target="_blank" rel="noreferrer"><Download size={16} />{touch ? `${t.open} · ${v.pdf.pages}` : `${v.pdf.name} · ${v.pdf.pages}`}</a>
       </>}
     </div>
     {!doc && <div className="col gap-sm" id="nda-form">
