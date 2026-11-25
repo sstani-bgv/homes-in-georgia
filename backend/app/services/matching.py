@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import REPO_ROOT
 from app import storage
-from app.models import Listing, ListingMatch, Owner, Property, PropertyListing, PropertyMedia, User, at_least
+from app.models import Listing, ListingMatch, Owner, Property, PropertyListing, PropertyMedia, PropertyPublication, User, at_least
 from app.services import properties as P
 from app.services.common import get_or_404, jdump, jload, log_event, now
 from app.services.dedup import address_match, extract_phones, owner_phones, phone_match
@@ -112,7 +112,11 @@ def _objects(db: Session, pids: list[int] | None = None) -> dict[int, dict]:
     objs = {p.id: {"p": p, "phones": [r["phone"] for r in owner_phones(owners_.get(p.owner_id))],
                    "agent": getattr(owners_.get(p.owner_id), "is_agent", False)
                    or (getattr(owners_.get(p.owner_id), "phone_norm", None) or "")[-9:] in many,
-                   "urls": {p.source_url} - {None}, "hashes": []} for p in props}
+                   "urls": {p.source_url, p.post_url} - {None, ""}, "hashes": []} for p in props}
+    # our own channel posts too (Irakli 11-25: a deal typed with the link of our post made a second object)
+    for pid, url in db.execute(select(PropertyPublication.property_id, PropertyPublication.url)
+                               .where(PropertyPublication.property_id.in_(objs), PropertyPublication.url.isnot(None))):
+        objs[pid]["urls"].add(url)
     for pid, url, urls, hashes in db.execute(
             select(PropertyListing.property_id, PropertyListing.url, Listing.urls, Listing.photo_hashes)
             .join(Listing, Listing.id == PropertyListing.listing_id).where(PropertyListing.property_id.in_(objs))):

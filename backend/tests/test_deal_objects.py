@@ -105,7 +105,10 @@ def test_new_object_known_to_matcher_must_be_picked(db, client):
     zaza = make_user(db, "agent", "Zaza Beridze", agent_tag="Zaza")
     pid = _object(db, client, zaza)
     n = db.query(Property).count()
+    db.get(Property, pid).post_url = "https://t.me/rent_tbilisi_ge/556045"  # Irakli 11-25: the link of our own post
+    db.commit()
     for extra in ({"cadastral": "01 14 05 003 017"}, {"ad_link": "https://ss.ge/ss1"},
+                  {"ad_link": "https://t.me/rent_tbilisi_ge/556045"},
                   {"owner_phone": "599203040", "address": "Палиашвили 10"}):
         body = {"new_object": True, "price": 850, "address": "где-то", "rent_from": "2030-01-01", **extra}
         r = client.post("/api/deals", headers=auth(zaza), json=body)
