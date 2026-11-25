@@ -45,7 +45,8 @@ const TABS = [{ value: 'all', label: 'Все' }, { value: 'draft', label: 'Че�
 const TONE = { draft: 'warn', sent: 'blue', signed: 'ok', cancelled: 'grey' } as const;
 const blankPerson: Person = { user_id: null, full_name: '', personal_id: '', phone: '', telegram: '' };
 const row = (role: string): Row => ({ role, full_name: '', personal_id: '', phone: '', telegram: '' });
-const blank: Form = { lang: 'KA-RU', title: { ka: '', ru: '' }, body: { ka: '', ru: '' }, who: 'team', party: blankPerson, cosigner: null, mode: 'text', file: null,
+// titles filled in (Irakli 11-25: the grey placeholder read as filled)
+const blank: Form = { lang: 'KA-RU', title: { ka: 'ხელშეკრულება', ru: 'Договор' }, body: { ka: '', ru: '' }, who: 'team', party: blankPerson, cosigner: null, mode: 'text', file: null,
   rows: [row('Собственник'), row('Клиент')] };
 const MAX_PDF = 15 * 1024 * 1024;  // backend sign_docs.MAX_PDF
 const absolute = (p: string) => `${window.location.origin}${p}`;
@@ -104,6 +105,13 @@ function DocForm({ doc, onDone, onClose, start }: { doc: Doc | null; onDone: (d:
     ? lns.every((l) => f.title[l].trim()) && hasPdf && f.rows.length > 0 && f.rows.every((r) => r.full_name.trim() && (r.phone.trim() || r.telegram.trim()))
     : lns.every((l) => f.title[l].trim() && (f.mode === 'pdf' ? hasPdf : f.body[l].trim())) && f.party.full_name.trim()
       && (f.who === 'team' ? !!f.party.user_id : !!f.party.phone.trim() && !!f.party.personal_id.trim());
+  // Irakli 11-25: «Серая кнопка „Создать“, все поля ввёл» — say what is missing
+  const missing = [
+    !lns.every((l) => f.title[l].trim()) && t('название'),
+    f.mode !== 'text' && !hasPdf && t('файл PDF'),
+    f.mode === 'parties' && !f.rows.every((r) => r.full_name.trim() && (r.phone.trim() || r.telegram.trim())) && t('ФИО и Telegram или телефон у каждого подписанта'),
+    f.mode === 'text' && !lns.every((l) => f.body[l].trim()) && t('текст'),
+  ].filter(Boolean) as string[];
   return (
     <Card label={doc ? `№ ${doc.number} · ${t(doc.status_label)}` : t('Новый документ')} title={doc ? titleOf(doc) : t('Документ на подпись')}
       actions={<Button size="sm" variant="ghost" onClick={onClose}>{t('Закрыть')}</Button>}>
@@ -167,6 +175,7 @@ function DocForm({ doc, onDone, onClose, start }: { doc: Doc | null; onDone: (d:
           </div>
         </div></>}
         <div><Button disabled={!ok} loading={save.isPending} onClick={() => save.mutate()}><FilePen size={16} />{doc ? t('Сохранить') : t('Создать черновик')}</Button></div>
+        {!ok && missing.length > 0 && <p className="muted" style={{ margin: 0 }}>{t('Не заполнено')}: {missing.join(', ')}</p>}
       </div>
     </Card>
   );
