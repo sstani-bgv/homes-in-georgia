@@ -330,7 +330,7 @@ export function DealForm({ leadId, propertyId, onDone }: { leadId?: number; prop
           <div className="form-grid">
             <Field label="Адрес" className="span2"><Input value={f.address} onChange={(e) => upd('address', e.target.value)} disabled={!manual && (!pid || ro('address'))} /></Field>
             <Field label="Кадастровый код" hint={cadastralHint(f.cadastral, obj?.fields?.cadastral)}><Input value={f.cadastral} placeholder="01.14.12.003.045" onChange={(e) => upd('cadastral', cadastralInput(e))} onBlur={() => f.cadastral && f.cadastral !== obj?.fields?.cadastral && upd('cadastral', cadastralNorm(f.cadastral))} disabled={!manual && (!pid || ro('cadastral'))} /></Field>
-            <Field label="Ссылка на объявление"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} disabled={!manual && (!pid || ro('ad_link'))} /></Field>
+            <Field label="Ссылка на объявление" hint="Пост в нашем Telegram-канале (у объекта из базы подставляется сама)"><Input value={f.ad_link} onChange={(e) => upd('ad_link', e.target.value)} disabled={!manual && (!pid || ro('ad_link'))} /></Field>
             {ro('metro') && <Field label="Метро" className="span2"><Input value={f.metro} disabled /></Field>}
             {f.deal_type === 'rent' && <>
               <Field label="Аренда с"><Input type="date" value={f.rent_from} onChange={(e) => upd('rent_from', e.target.value)} /></Field>
