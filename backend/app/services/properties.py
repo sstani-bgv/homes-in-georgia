@@ -2294,9 +2294,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
                    + "</tg-slideshow>")
     out.append(f"<h2>{h(head)}</h2>" + (f"<p><b>{h(' · '.join(marks))}</b></p>" if marks else "")
                + (f"<p>🏢 {h(sub)}</p>" if sub else ""))
-    text = "\n".join(x for x in (f.get("headline") and f"⭐️ {f['headline']}", post_description(db, p)) if x)
-    if text:
-        out.append("<p>" + h(text).replace("\n", "<br>") + "</p>")
+    if f.get("headline"):  # David 11-25: no long description in the post — only the short line typed at the object
+        out.append(f"<p>⭐️ {h(f['headline'])}</p>")
     url = maps_url(db, p) if p.address else None
     short = short_address(p.address, p.district)
     where = [f'📍 <a href="{h(url)}">{h(short)}</a>' if url and short else (short and f"📍 {h(short)}"),
