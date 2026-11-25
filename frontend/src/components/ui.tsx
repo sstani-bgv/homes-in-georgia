@@ -313,9 +313,10 @@ function useLockScroll(open: boolean) {
     if (!open) return;
     // on <html>, not <body>: with html { overflow-x: clip } a hidden body shrinks the page to the screen and the
     // feed jumped to the top on every opened ad (11-13)
-    const root = document.documentElement, prev = root.style.overflow;
+    // iOS Safari still lost the spot (Irakli 11-25: closing an ad threw the feed to the top): put it back on close
+    const root = document.documentElement, prev = root.style.overflow, y = window.scrollY;
     root.style.overflow = 'hidden';
-    return () => { root.style.overflow = prev; };
+    return () => { root.style.overflow = prev; if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y); };
   }, [open]);
 }
 
