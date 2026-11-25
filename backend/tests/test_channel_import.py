@@ -113,3 +113,56 @@ def test_the_same_photos_under_another_address_spelling_relink(db, monkeypatch):
     _fake(monkeypatch, [again])
     assert CI.run(db)["relinked"] == 1
     assert db.query(Property).count() == 1 and db.query(Property).one().post_url.endswith("/710")
+
+
+SALE = """SALE IN TBILISI
+
+#Lisi 🚇 #Delisi 📍VIII Lane Tstatshvebi, 11
+
+🏢 #1bed #Apartment for #Sale
+✨ #NewBuilding | #BlackFrame
+🏠 125 Sq.m | 3/4 Floor |
+
+✅ #Elevator
+✅ #ParkingPlace 12,000$
+✅ #Balcony
+
+💰 212.500$  |
+ 0% commission
+#Price210000to240000
+
+📲 @David_Tibelashvili |
++995 599 20 67 16 #Shafi
+
+📍APARTMENTS ON MAP📍"""
+
+
+def test_a_sale_channel_post_becomes_a_sale_object_and_never_relinks_a_rent_one(db, monkeypatch):
+    shafi = make_user(db, "agent", "Шафи")
+    shafi.agent_tag = "Shafi"
+    db.commit()
+    rent = SALE.replace("for #Sale", "for #Rent").replace("212.500$", "900$")
+    _fake(monkeypatch, [_post(700, rent)])
+    CI.run(db)  # the same flat for rent in the rent channel
+    _fake(monkeypatch, [_post(77499, SALE)])
+    assert CI.run(db, CI.SALE_CHANNEL) == {"created": 1, "located": 0}
+    p = db.query(Property).filter(Property.post_url == "https://t.me/sale_in_tbilisi/77499").one()
+    assert (p.post_fields["deal"], p.post_fields["sale_price"], float(p.price), p.currency) == ("Sale", 212500, 212500, "USD")
+    assert (p.address, p.district, p.bedrooms, float(p.area), p.floor, p.agent_id) == \
+        ("VIII Lane Tstatshvebi, 11", "Лиси", 1, 125.0, 3, shafi.id)
+    from app.services import site_feed
+    it = site_feed.item(p, 3, None, {})
+    assert (it["deal"], it["kind"], it["price"], it["ppsqm_usd"]) == ("sale", "apartment", 212500, 1700)
+    _fake(monkeypatch, [_post(77520, SALE.replace("212.500$", "199.000$"))])  # a repost, cheaper
+    assert CI.run(db, CI.SALE_CHANNEL) == {"relinked": 1, "located": 0}
+    db.expire_all()
+    assert p.post_url.endswith("/77520") and p.post_fields["sale_price"] == 199000
+    assert db.query(Property).count() == 2
+
+
+def test_sale_fields_read_land_and_odd_prices():
+    land = "#DidiDighomi 🚇 #Sarajishvili\n📍Mirian Mepe Street\n\n🏢 #Land for #Sale\n🏠 475 Sq.m |\n💰87.000$\n#Mari"
+    f = CI.sale_fields(land)
+    assert (f["address"], f["district"], f["price"], f["area"], f["bedrooms"]) == ("Mirian Mepe Street", "DidiDighomi", 87000, 475.0, None)
+    f = CI.sale_fields("#Shekvetili\n📍Village Vakijvari\n#Land for #Sale\n📐 160 000 Sq.m\n💰 12$ per Sq.m")
+    assert (f["price"], f["area"]) == (None, 160000.0)

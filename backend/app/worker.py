@@ -504,8 +504,9 @@ def slow_lane(interval: int = 10):
 def channel_import_pass():
     try:
         from app.services import channel_import
-        with SessionLocal() as db:
-            channel_import.run(db)
+        for channel in channel_import.CHANNELS:
+            with SessionLocal() as db:
+                channel_import.run(db, channel)
     except Exception:  # noqa: BLE001
         log.exception("channel import failed")
 

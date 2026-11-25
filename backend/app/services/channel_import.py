@@ -4,7 +4,9 @@ through the CRM), so hge.ge showed 81 rentals against 250 in the channel. Every 
 Telegram account (the reader, else the operator's userbot: rich posts and photos the web preview hides) and each new
 flat post becomes a published object on the site: the card fields and generator tags from the text (the old base's
 parsers), the agent by the post's hashtag (#Roman2), the photos, a map point. A post of a flat the CRM already has (a
-repost: the same address and bedrooms) moves that object's link to the new post instead. Deleted posts: post_sync.py."""
+repost: the same address and bedrooms) moves that object's link to the new post instead. Deleted posts: post_sync.py.
+The sale channel too (Irakli 11-24: «в квартирах на продажу половины объявлений из канала sale_in_tbilisi нет»): its posts
+become sale objects (post_fields.deal = Sale, sale_price), a repost relinks only a sale object, a rent one never."""
 import base64
 import logging
 import re
@@ -20,8 +22,10 @@ from app.models import Event, Property, PropertyMedia, PropertyPublication, User
 from app.services.common import log_event, now
 
 log = logging.getLogger(__name__)
-CHANNEL = "rent_tbilisi_ge"  # ponytail: the rent channel only (David's 81 vs 250); sale_in_tbilisi etc. when asked
-BACKFILL_DAYS = 14
+CHANNEL = "rent_tbilisi_ge"
+SALE_CHANNEL = "sale_in_tbilisi"
+CHANNELS = (CHANNEL, SALE_CHANNEL)  # ponytail: @homesingeorgia (commercial) when asked
+BACKFILL_DAYS = 16  # a channel's first pass: the sale one from 11-09 (deployed 11-25)
 PAGE = 150                   # messages per request: ~15 albums with their photos inside the reader's 240 s
 LIVE = ("published", "taken", "owner_confirmed", "shoot_scheduled", "media_uploaded", "review", "returned")
 
@@ -70,11 +74,34 @@ def known(db: Session, channel: str, msg: int) -> bool:
     if db.scalar(select(Property.id).where(Property.post_url == url).limit(1)):
         return True
     return bool(db.scalar(select(PropertyPublication.id).where(
-        (PropertyPublication.url == url) | PropertyPublication.messages["ids"].contains([msg])).limit(1)))
+        (PropertyPublication.url == url) | (PropertyPublication.url.like(f"https://t.me/{channel}/%")
+                                            & PropertyPublication.messages["ids"].contains([msg]))).limit(1)))
 
 
-def same_flat(db: Session, address: str | None, bedrooms: int | None) -> Property | None:
-    """A CRM object of this flat: the same street + house, the same bedrooms (a channel repost of an object)."""
+def is_sale(p: Property) -> bool:
+    return (p.post_fields or {}).get("deal") == "Sale"
+
+
+SALE_PRICE = re.compile(r"💰\s*\$?\s*(\d{1,3}(?:[., ]\d{3})+|\d{4,9})\s*\$")
+
+
+def sale_fields(text: str) -> dict:
+    """A sale post's card fields: «💰 212.500$» (a dot / comma / space groups thousands; «12$ per Sq.m» is no price),
+    «160 000 Sq.m», the 📍 line as the address even without a number (land: «Mirian Mepe Street»), no «SALE IN TBILISI»
+    header for a district."""
+    t = re.sub(r"^\W*SALE IN TBILISI\W*", "", text, flags=re.I)
+    f = {k: parse(t) for k, parse in L.CARD_PARSERS.items()}
+    f["address"] = _place(t) or f["address"]
+    price = int(re.sub(r"\D", "", m[1])) if (m := SALE_PRICE.search(t)) else 0
+    f["price"] = price if price >= 5000 else None
+    if m := re.search(r"(\d{1,3}(?: \d{3})+)\s*sq", t, re.I):
+        f["area"] = float(m[1].replace(" ", ""))
+    return f
+
+
+def same_flat(db: Session, address: str | None, bedrooms: int | None, sale: bool = False) -> Property | None:
+    """A CRM object of this flat: the same street + house, the same bedrooms, the same deal (a channel repost of an
+    object; a flat for rent and the same flat for sale are two objects)."""
     key = L.addr_key(address)
     if not key:
         return None
@@ -82,7 +109,7 @@ def same_flat(db: Session, address: str | None, bedrooms: int | None) -> Propert
     gone_post = (Property.status == "archived") & (Property.source_type == "channel") & (Property.archive_reason == "not_actual")
     rows = db.scalars(select(Property).where(Property.status.in_(LIVE) | gone_post, Property.bedrooms == bedrooms,
                                              Property.address.ilike(f"%{street}%")).order_by(Property.id.desc()))
-    return next((p for p in rows if L.addr_key(p.address) == key), None)
+    return next((p for p in rows if L.addr_key(p.address) == key and is_sale(p) == sale), None)
 
 
 def _agent(db: Session, text: str) -> int | None:
@@ -125,7 +152,8 @@ def _point(p: Property) -> bool:
             p.lat, p.lng = at
             return True
     place = p.address or _place(p.description)
-    city = "" if place and CITY.search(place) else ", Tbilisi"
+    head = " ".join(re.findall(r"#(\w+)", (p.description or "").strip().split("\n", 1)[0]))  # «#Saguramo 🏔️ #Tbilisi»
+    city = "" if place and CITY.search(f"{place} {head}") else ", Tbilisi"
     for q, approx in _queries(place) if place else ():
         try:
             hit = (geo.search(f"{q}{city}").get("items") or [None])[0]
@@ -174,7 +202,7 @@ def _same_by_photos(db: Session, p: Property) -> Property | None:
     from app.services import similar
     for i in similar.find(db, f"p:{p.id}", None, limit=10, include_ads=False):
         o = db.get(Property, i["property_id"]) if i.get("level") == "same" and i.get("property_id") else None
-        if o and o.id != p.id and (o.status == "published" or (o.status == "archived" and o.source_type == "channel"
+        if o and o.id != p.id and is_sale(o) == is_sale(p) and (o.status == "published" or (o.status == "archived" and o.source_type == "channel"
                                                                and o.archive_reason == "not_actual")):
             return o
     return None
@@ -198,6 +226,8 @@ def _relink(db: Session, p: Property, url: str, msg: int, price, text: str) -> N
     p.post_url, p.post_message_id, p.published_at = url, str(msg), now()
     if price and p.status == "published":  # a repost with a new price (600$ → 800$)
         p.price = price
+        if is_sale(p):
+            p.post_fields = {**p.post_fields, "sale_price": price}
     if p.status == "archived":  # same_flat: only a channel object archived by post_sync
         p.status, p.archive_reason, p.archive_comment, p.archived_at = "published", None, None, None
     if p.status == "published":
@@ -216,8 +246,12 @@ def import_post(db: Session, channel: str, post: dict) -> str:
         return "known"
     if not L.is_object_text(text) or not post.get("photos"):
         return "not_object"
-    fields = {f: parse(text) for f, parse in L.CARD_PARSERS.items()}
-    if p := same_flat(db, fields["address"], fields["bedrooms"]):
+    sale = channel == SALE_CHANNEL
+    fields = sale_fields(text) if sale else {f: parse(text) for f, parse in L.CARD_PARSERS.items()}
+    pf = L.post_fields_of(text) or {}
+    if sale:
+        pf = {**pf, "deal": "Sale", **({"sale_price": fields["price"]} if fields["price"] else {})}
+    if p := same_flat(db, fields["address"], fields["bedrooms"], sale):
         if p.status not in ("published", "archived"):
             return "skipped"  # the agent is working on it in the CRM: his card, his post
         _relink(db, p, url, msg, fields["price"], text)
@@ -226,7 +260,7 @@ def import_post(db: Session, channel: str, post: dict) -> str:
     t = now()
     p = Property(source_type="channel", source_url=url, source_external_id=f"tg:{channel}/{msg}", status="published",
                  post_url=url, post_message_id=str(msg), published_at=t, verified_at=t, site_hidden=False,
-                 description=text, post_fields=L.post_fields_of(text) or None, agent_id=_agent(db, text),
+                 description=text, post_fields=pf or None, agent_id=_agent(db, text),
                  currency="USD", **{k: v for k, v in fields.items() if v not in (None, "")})
     if fields.get("district"):
         from app import districts
