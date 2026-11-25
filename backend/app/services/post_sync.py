@@ -67,11 +67,14 @@ def run(db: Session, pause: float = 0.5, out=log.info) -> int:
                     gone_ = gone(c, channel, msg)
                     time.sleep(pause)
                 if gone_:
-                    dead.append(p)
+                    dead.append((p, p.post_url))
     if len(dead) > 10 and len(dead) > MAX_SHARE * len(posts):
         out(f"post sync: {len(dead)} of {len(posts)} posts look deleted, hiding nothing (t.me answers oddly?)")
         return 0
-    for p in dead:
+    for p, url in dead:
+        db.refresh(p)  # the channel import (its own thread) may have moved the object to a newer post meanwhile
+        if p.status != "published" or p.post_url != url:
+            continue
         if p.source_type == "channel":
             p.archive_reason, p.archive_comment, p.archived_at = "not_actual", "пост удалён в канале", now()
             P._status(db, p, "archived", None, "archived", label="сверка с каналом", reason="not_actual",
@@ -92,5 +95,5 @@ def run(db: Session, pause: float = 0.5, out=log.info) -> int:
         site_feed.clear_cache()
         catalog.sync_all(db)
         db.commit()
-    out(f"post sync: {len(posts)} posts checked, {len(dead)} deleted: {[p.id for p in dead]}")
+    out(f"post sync: {len(posts)} posts checked, {len(dead)} deleted: {[p.id for p, _ in dead]}")
     return len(dead)

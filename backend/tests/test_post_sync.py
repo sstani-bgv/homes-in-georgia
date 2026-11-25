@@ -68,3 +68,21 @@ def test_both_channels_are_checked(db, client, monkeypatch):
     assert sorted(asked) == ["homesingeorgia", "rent_tbilisi_ge"]
     db.expire_all()
     assert [db.get(Property, x).status for x in (rent, homes)] == ["published", "archived"]
+
+
+def test_a_repost_during_the_check_keeps_the_object(db, client, monkeypatch):
+    """Irakli 11-25: the channel import (its own thread) moved the object to a newer post while the check looked at the
+    old one, deleted by the repost — the object, live under its new post, stays published."""
+    pid, = _pubs(db, client, (401,))
+
+    def alive(channel, msgs):  # the import relinks meanwhile, in another session
+        from app.db import SessionLocal
+        with SessionLocal() as other:
+            other.get(Property, pid).post_url = "https://t.me/rent_tbilisi_ge/402"
+            other.commit()
+        return set()
+    monkeypatch.setattr(post_sync, "alive", alive)
+    post_sync.run(db, pause=0)
+    db.expire_all()
+    p = db.get(Property, pid)
+    assert (p.status, p.post_url) == ("published", "https://t.me/rent_tbilisi_ge/402")
