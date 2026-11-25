@@ -1,6 +1,6 @@
 // Funnel 1 lists: new listings (C1), kanban (by status), my objects. Shared by desktop and /m.
 import { useConfirm } from '../../components/ActionDialog';
-import { createContext, useContext, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ArrowRightLeft, DollarSign, ExternalLink, List, Map as MapIcon, Search, Users } from 'lucide-react';
@@ -91,6 +91,7 @@ function FeedFilters({ f, patch, view, onView, seg, facets, sourceLabel, metroLa
 }
 
 const PAGE = 50;
+const FEED_PAGE = 15;  // David 11-25: the feed in pages of 10–15 — easier to find your place than one long scroll
 const MAP_LIMIT = 500;  // ponytail: the map loads the first 500 filtered ads; a bbox query when the feed grows past it
 
 /** «Объекты» → Аренда / Продажа (Stanislav 11-15): every list, board and count of the page shows one deal. Outside
@@ -116,12 +117,12 @@ function RentListings({ base = '', competitor = false }: { base?: string; compet
   const confirm = useConfirm();
   const pk = competitor ? 'rival' : 'feed';
   const [f, setF0] = usePageState<ListingFilter>(`${pk}-filter`, { q: '', flag: '' });
-  const [limit, setLimit] = usePageState(`${pk}-limit`, PAGE);
+  const [page, setPage] = usePageState(`${pk}-page`, 0);
   const [view, setView] = usePageState<'list' | 'map'>(`${pk}-view`, 'list');
   // the map's pin opens the full ad window (?ad=<id>, as a card does), not a small preview (11-13)
   const [params, setParams] = useSearchParams();
   const openAd = (id: string) => setParams((p) => { const n = new URLSearchParams(p); n.set('ad', id); return n; }, { replace: true });
-  const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setLimit(PAGE); };
+  const setF = (v: ListingFilter | ((o: ListingFilter) => ListingFilter)) => { setF0(v); setPage(0); };
   const set = (k: keyof ListingFilter) => (v: string) => setF((o) => ({ ...o, [k]: v }));
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -129,7 +130,9 @@ function RentListings({ base = '', competitor = false }: { base?: string; compet
   const navigate = useNavigate();
   const [peek, setPeek] = useState<{ id: number; listing: Listing; reasons?: string[] } | null>(null);
   const q = competitor ? { ...f, flag: f.flag === 'ours' || f.flag === 'not_ours' ? f.flag : '', known: '', competitor: '1' } : f;
-  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', q, view === 'map' ? MAP_LIMIT : limit], queryFn: () => api.listings.new(q, view === 'map' ? MAP_LIMIT : limit), placeholderData: (p) => p });
+  const { data, isLoading, isFetching, error } = useQuery({ queryKey: ['listings', 'new', q, view === 'map' ? -1 : page], queryFn: () => (view === 'map' ? api.listings.new(q, MAP_LIMIT) : api.listings.new(q, FEED_PAGE, page * FEED_PAGE)), placeholderData: (p) => p });
+  // ads taken / marked from the last page can empty it: step back to the last one that has cards
+  useEffect(() => { const last = Math.max(0, Math.ceil((data?.total ?? 0) / FEED_PAGE) - 1); if (data && view === 'list' && page > last) setPage(last); }, [data?.total]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: facets } = useQuery({ queryKey: ['listings', 'facets', competitor], queryFn: () => api.listings.facets(competitor), staleTime: 60_000 });
   const filtered = Object.entries(f).some(([k, v]) => (Array.isArray(v) ? v.length : v) && k !== 'q' && k !== 'known');
   // possible_duplicate (Stanislav 11-17): the ad may already be our object — the agent looks first (TakeCheck)
@@ -253,10 +256,8 @@ function RentListings({ base = '', competitor = false }: { base?: string; compet
           {items.map(card)}
         </div>
       )}
-      {view === 'list' && (data?.total ?? 0) > items.length && (
-        <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
-          <Button variant="secondary" loading={isFetching} onClick={() => setLimit((n) => n + PAGE)}>{t('Показать ещё ({n})', { n: (data?.total ?? 0) - items.length })}</Button>
-        </div>
+      {view === 'list' && (data?.total ?? 0) > FEED_PAGE && (
+        <Pager page={page} pages={Math.ceil((data?.total ?? 0) / FEED_PAGE)} busy={isFetching} go={(n) => { setPage(n); pageScroller().scrollTo(0, 0); }} />
       )}
     </>
   );
@@ -654,5 +655,18 @@ export function PropertyList({ mine, archived, status: only, agentId, base = '' 
         </div>
       )}
     </>
+  );
+}
+
+/** Page numbers 1 2 3 … under a feed (David 11-25): the current one, two around it, the first and the last. */
+function Pager({ page, pages, busy, go }: { page: number; pages: number; busy?: boolean; go: (n: number) => void }) {
+  const nums = [...new Set([0, page - 2, page - 1, page, page + 1, page + 2, pages - 1])].filter((n) => n >= 0 && n < pages).sort((a, b) => a - b);
+  return (
+    <div className="row row-wrap gap-sm" style={{ justifyContent: 'center', marginTop: 16 }}>
+      <Button variant="secondary" disabled={page === 0} onClick={() => go(page - 1)}>‹</Button>
+      {nums.map((n, i) => <span key={n} className="row gap-sm">{i > 0 && n - nums[i - 1] > 1 && <span className="muted">…</span>}
+        <Button variant={n === page ? 'primary' : 'secondary'} loading={busy && n === page} onClick={() => go(n)}>{n + 1}</Button></span>)}
+      <Button variant="secondary" disabled={page + 1 >= pages} onClick={() => go(page + 1)}>›</Button>
+    </div>
   );
 }

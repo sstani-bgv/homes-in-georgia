@@ -63,7 +63,7 @@ export const api = {
   cabinet: (userId?: number) => then(http.get<Cabinet>('/me/cabinet', { user_id: userId }), normCabinet),
 
   listings: {
-    new: (q?: ListingFilter, limit = 50) => then(http.get<L<Listing> & { known_total?: number }>('/listings/new', { ...q, limit }),
+    new: (q?: ListingFilter, limit = 50, offset = 0) => then(http.get<L<Listing> & { known_total?: number }>('/listings/new', { ...q, limit, offset }),
       (d) => ({ ...normPage(d, normListing), known_total: Array.isArray(d) ? 0 : d.known_total ?? 0 })),
     /** «Тот же объект» (same) / «Другой» on a «Похож на объект #N» card */
     decideMatch: (id: string, pid: number, same: boolean) => http.post<{ ok: boolean; status: string }>(`/listings/${id}/matches/${pid}`, { same }),
