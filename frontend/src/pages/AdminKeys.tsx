@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
-import type { IntegrationKey, KeyCheck, LlmSum } from '../api/types';
+import type { ApifyAccount, IntegrationKey, KeyCheck, LlmSum } from '../api/types';
 import { errText, useToast } from '../components/toast';
 import { Badge, Button, Card, ErrorBox, Field, Input, Loading, Modal, Progress, Select } from '../components/ui';
 import { fmtDateTime, num } from '../lib/format';
@@ -57,6 +57,50 @@ function KeyRow({ k, onEdit, onDelete, deleting }: { k: IntegrationKey; onEdit: 
         <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={14} />{k.source === 'crm' ? t('Заменить') : t('Задать')}</Button>
         {k.source === 'crm' && <Button size="sm" variant="ghost" aria-label={t('Удалить')} loading={deleting} onClick={onDelete}><Trash2 size={14} /></Button>}
       </div>
+    </div>
+  );
+}
+
+const dm = (d?: string | null) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '—');
+
+function ApifyRow({ a }: { a: ApifyAccount }) {
+  if (a.error) return <div className="list-row"><div className="grow" style={mono}>{a.masked || `…${a.tail}`}</div>
+    <Badge tone="warn">{a.error === 'invalid_key' ? t('ключ не работает') : t('Apify не отвечает')}</Badge></div>;
+  const days = a.days || [];
+  const max = Math.max(...days.map((d) => d.usd), 0.01);
+  // every day of the cycle up to today, zero days included: the gap after the limit shows
+  const all: { date: string; usd: number }[] = [];
+  if (a.cycle_start) {
+    const byDate = Object.fromEntries(days.map((d) => [d.date, d.usd]));
+    const end = new Date().toISOString().slice(0, 10);
+    for (let d = new Date(`${a.cycle_start}T00:00:00Z`); d.toISOString().slice(0, 10) <= end && (!a.cycle_end || d.toISOString().slice(0, 10) <= a.cycle_end); d.setUTCDate(d.getUTCDate() + 1)) {
+      const k = d.toISOString().slice(0, 10);
+      all.push({ date: k, usd: byDate[k] || 0 });
+    }
+  }
+  return (
+    <div className="list-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div className="grow" style={{ minWidth: 0, flexBasis: 260 }}>
+        <div style={mono}>{a.masked || `…${a.tail}`}{a.plan ? ` · ${t('тариф')} ${a.plan}` : ''}</div>
+        <div className="faint" style={{ fontSize: 12 }}>
+          {t('цикл {from} – {to}, сброс лимита после {to}', { from: dm(a.cycle_start), to: dm(a.cycle_end) })}
+          {a.created_at ? ` · ${t('аккаунт с {date}', { date: dm(a.created_at) })}` : ''}
+        </div>
+        {a.exhausted && <div style={{ marginTop: 6 }}><Badge tone="red">
+          {t('лимит исчерпан с {date} — парсер Facebook стоит', { date: dm(a.exhausted_since) })}</Badge></div>}
+        {all.length > 0 && <div title={t('Расход по дням')} style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 56, marginTop: 10 }}>
+          {all.map((d) => <div key={d.date} title={`${dm(d.date)}: ${usd(d.usd)}`} style={{ flex: 1, minWidth: 3,
+            height: `${Math.max(2, (d.usd / max) * 100)}%`, borderRadius: 2, background: d.usd ? 'var(--brand)' : 'var(--line)' }} />)}
+        </div>}
+        {all.length > 0 && <div className="faint" style={{ fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
+          <span>{dm(all[0].date)}</span><span>{dm(all[all.length - 1].date)}</span></div>}
+        {days.some((d) => d.usd >= 0.01) && <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>
+          {days.filter((d) => d.usd >= 0.01).map((d) => `${dm(d.date)} ${usd(d.usd)}`).join(' · ')}</div>}
+        {!!a.by_source?.length && <div style={{ fontSize: 13, marginTop: 6 }}>
+          {t('За цикл по парсерам')}: {a.by_source.map((x) => `${x.source} ${usd(x.usd)} (${x.runs} ${t('запусков')})`).join(' · ')}</div>}
+      </div>
+      <div style={{ minWidth: 140 }}><b>{usd(a.used_usd)}{a.limit_usd != null ? ` ${t('из')} ${usd(a.limit_usd)}` : ''}</b>
+        {a.limit_usd ? <Progress value={Math.min(a.used_usd || 0, a.limit_usd)} max={a.limit_usd} /> : null}</div>
     </div>
   );
 }
@@ -137,19 +181,10 @@ export function KeysPage() {
         {sp.error ? <ErrorBox error={sp.error} /> : sp.isLoading ? <Loading /> : s && <>
           <div style={tiles}>
             <Tile label={t('Сегодня')} value={usd(s.apify.today_usd)} />
-            <Tile label={t('7 дней')} value={usd(s.apify.week_usd)} sub={Object.entries(s.apify.by_source_week).map(([k, v]) => `${k} ${usd(v)}`).join(' · ') || undefined} />
+            <Tile label={t('7 дней')} value={usd(s.apify.week_usd)} sub={Object.entries(s.apify.runs_week).length
+              ? `${t('попытки запусков')}: ${Object.entries(s.apify.runs_week).map(([k, v]) => `${k} ${v}`).join(' · ')}` : undefined} />
           </div>
-          {s.apify.accounts.map((a) => (
-            <div key={a.masked || a.tail} className="list-row" style={{ flexWrap: 'wrap' }}>
-              <div className="grow" style={{ minWidth: 0, flexBasis: 200 }}>
-                <div style={mono}>{a.masked || `…${a.tail}`}</div>
-                {a.cycle_end && <div className="faint" style={{ fontSize: 12 }}>{t('месяц до {date}', { date: a.cycle_end })}</div>}
-              </div>
-              {a.error ? <Badge tone="warn">{a.error === 'invalid_key' ? t('ключ не работает') : t('Apify не отвечает')}</Badge>
-                : <div style={{ minWidth: 140 }}><b>{usd(a.used_usd)}{a.limit_usd != null ? ` ${t('из')} ${usd(a.limit_usd)}` : ''}</b>
-                  {a.limit_usd ? <Progress value={a.used_usd || 0} max={a.limit_usd} /> : null}</div>}
-            </div>
-          ))}
+          {s.apify.accounts.map((a) => <ApifyRow key={a.masked || a.tail} a={a} />)}
         </>}
         <div className="mt">{rows(by(APIFY_KEYS))}</div>
       </Card>

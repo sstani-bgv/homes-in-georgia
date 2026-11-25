@@ -349,25 +349,69 @@ def _purposes(days: dict) -> dict:
     return {"rows": rows, "searches": picks, "per_search_usd": round(search / picks, 5) if picks else None}
 
 
-def _apify_accounts() -> list[dict]:
-    """Each Apify key's monthly usage from the Apify API (masked, never the key)."""
+APIFY_SOURCES = {"dami_studio/facebook-groups-scraper": "facebook", "dacoder/threads-search-post-scraper": "threads",
+                 "apify/cheerio-scraper": "ss", "apify/instagram-post-scraper": "instagram"}
+
+
+def _apify_account(tok: str) -> dict:
+    """One key, read-only from the Apify API: plan, usage cycle, $ per day of the cycle, limit, $ per actor (= source)."""
     import httpx
+    a = {"tail": tok[-4:], "masked": keys.mask(tok), "plan": None, "created_at": None, "cycle_start": None, "cycle_end": None,
+         "used_usd": None, "limit_usd": None, "days": [], "by_source": [], "exhausted": False, "exhausted_since": None, "error": None}
+    api = "https://api.apify.com/v2"
+    try:
+        with httpx.Client(headers={"Authorization": f"Bearer {tok}"}, timeout=15) as c:
+            r = c.get(f"{api}/users/me")
+            if r.status_code != 200:
+                a["error"] = "invalid_key" if r.status_code in (401, 403) else f"http_{r.status_code}"
+                return a
+            me = r.json()["data"]
+            a |= {"plan": (me.get("plan") or {}).get("id"), "created_at": (me.get("createdAt") or "")[:10] or None}
+            u = c.get(f"{api}/users/me/usage/monthly").raise_for_status().json()["data"]
+            cyc = u.get("usageCycle") or {}
+            a |= {"cycle_start": (cyc.get("startAt") or "")[:10] or None, "cycle_end": (cyc.get("endAt") or "")[:10] or None,
+                  "days": [{"date": d["date"][:10], "usd": round(d.get("totalUsageCreditsUsd") or 0, 4)} for d in u.get("dailyServiceUsages") or []]}
+            lim = c.get(f"{api}/users/me/limits").raise_for_status().json()["data"]
+            a |= {"used_usd": round((lim.get("current") or {}).get("monthlyUsageUsd") or 0, 3),
+                  "limit_usd": (lim.get("limits") or {}).get("maxMonthlyUsageUsd")}
+            # runs of this cycle, newest first (ponytail: one page of 1000 runs; enough at our ~100 runs a month)
+            runs = c.get(f"{api}/actor-runs", params={"desc": 1, "limit": 1000}).raise_for_status().json()["data"]["items"]
+            by_act: dict[str, list] = {}
+            for x in runs:
+                if (x.get("startedAt") or "")[:10] >= (a["cycle_start"] or ""):
+                    s = by_act.setdefault(x.get("actId") or "?", [0, 0.0])
+                    s[0] += 1
+                    s[1] += x.get("usageTotalUsd") or 0
+            for act, (n, usd) in by_act.items():
+                d = c.get(f"{api}/acts/{act}")
+                name = f"{d.json()['data']['username']}/{d.json()['data']['name']}" if d.status_code == 200 else act
+                a["by_source"].append({"source": APIFY_SOURCES.get(name, name), "runs": n, "usd": round(usd, 4)})
+            a["by_source"].sort(key=lambda x: -x["usd"])
+    except Exception:  # noqa: BLE001 - never the exception text: it may carry the request (and so the key)
+        a["error"] = a["error"] or "unreachable"
+        return a
+    if a["limit_usd"] and a["used_usd"] >= a["limit_usd"] - 0.05:
+        a["exhausted"] = True
+        total = 0.0
+        for d in sorted(a["days"], key=lambda d: d["date"]):
+            total += d["usd"]
+            if total >= a["limit_usd"] - 0.05:
+                a["exhausted_since"] = d["date"]
+                break
+    return a
+
+
+def _apify_accounts() -> list[dict]:
+    """Each Apify key (masked, never the key) from the Apify API, cached 5 minutes."""
+    import hashlib
     toks = [t.strip() for t in (os.environ.get("APIFY_TOKENS") or "").replace(";", ",").split(",")]
     toks = list(dict.fromkeys(t for t in [*toks, (os.environ.get("APIFY_TOKEN") or "").strip()] if t))
     out = []
     for tok in toks:
-        a = {"tail": tok[-4:], "masked": keys.mask(tok), "used_usd": None, "limit_usd": None, "cycle_end": None, "error": None}
-        try:
-            r = httpx.get("https://api.apify.com/v2/users/me/limits", headers={"Authorization": f"Bearer {tok}"}, timeout=10)
-            if r.status_code == 200:
-                d = r.json()["data"]
-                a |= {"used_usd": round((d.get("current") or {}).get("monthlyUsageUsd") or 0, 3),
-                      "limit_usd": (d.get("limits") or {}).get("maxMonthlyUsageUsd"),
-                      "cycle_end": ((d.get("monthlyUsageCycle") or {}).get("endAt") or "")[:10] or None}
-            else:
-                a["error"] = "invalid_key" if r.status_code in (401, 403) else f"http_{r.status_code}"
-        except Exception:  # noqa: BLE001
-            a["error"] = "unreachable"
+        k = "apify:" + hashlib.sha256(tok.encode()).hexdigest()
+        a = _cached(k, 300, lambda: _apify_account(tok))
+        if a["error"]:
+            _CACHE.pop(k, None)  # retry on the next load
         out.append(a)
     return out
 
@@ -410,23 +454,24 @@ def _ai_balance() -> dict | None:
 
 @router.get("/spend")
 def spend(db: Session = Depends(get_db, scope="function"), user: User = Depends(require_level("admin"))):
-    """Apify: today / 7 days from the runs the parser recorded (source_runs) + each key's month from the Apify API.
+    """Apify: per key from the Apify API (plan, cycle, $ per day and per source, limit); today / 7 days = Apify's daily
+    usage of all keys; source_runs (the parser's log) only as run counts.
     AI: calls, tokens and $ per day and model recorded by bot/llm.py (llm_usage; OpenRouter reports each call's cost),
     the same per purpose (llm_purpose, from 16.11), the provider's balance."""
     from datetime import datetime, timedelta, timezone
     keys.refresh()
     now = datetime.now(timezone.utc)
     today, month, week0 = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m"), (now - timedelta(days=6)).strftime("%Y-%m-%d")
-    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     runs = jload(settings.get(db, "source_runs"), {})
-    flat = [r for rr in runs.values() for r in rr]
+    accs = _apify_accounts()
     usage = jload(settings.get(db, "llm_usage"), {})
     purpose = jload(settings.get(db, "llm_purpose"), {})
     base = os.environ.get("OPENAI_BASE_URL") or ""
     return {
-        "apify": {"today_usd": round(sum(r[1] for r in flat if r[0] >= day0), 3), "week_usd": round(sum(r[1] for r in flat), 3),
-                  "by_source_week": {k: round(sum(r[1] for r in rr), 3) for k, rr in runs.items() if rr},
-                  "accounts": _apify_accounts()},
+        "apify": {"today_usd": round(sum(d["usd"] for a in accs for d in a["days"] if d["date"] == today), 4),
+                  "week_usd": round(sum(d["usd"] for a in accs for d in a["days"] if d["date"] >= week0), 4),
+                  "runs_week": {k: len(rr) for k, rr in runs.items() if rr},  # our own log: run attempts, not money
+                  "accounts": accs},
         "ai": {"mode": (os.environ.get("LLM_PROVIDER") or "openai").lower(), "provider": ai_provider(base),
                "base_url": base or "https://api.openai.com/v1", "model": os.environ.get("LLM_MODEL") or "gpt-4.1-mini",
                "today": _llm_sum({d: m for d, m in usage.items() if d == today}),

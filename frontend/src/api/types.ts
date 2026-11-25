@@ -862,9 +862,13 @@ export interface AiBalance { balance_usd?: number; used_usd?: number; key_used_u
 /** AI spend by what the call was for (bot/llm.py PURPOSES), the costliest first; per_search_usd: search_* $ / client searches. */
 export interface LlmPurposes { rows: { purpose: string; calls: number; tokens: number; completion: number; usd: number }[];
   searches: number; per_search_usd: number | null }
+/** One Apify key from the Apify API: plan, usage cycle (cycle_end = reset), $ per day, $ per source (actor runs of the cycle). */
+export interface ApifyAccount { tail: string; masked?: string; plan?: string | null; created_at?: string | null; cycle_start?: string | null;
+  cycle_end: string | null; used_usd: number | null; limit_usd: number | null; days?: { date: string; usd: number }[];
+  by_source?: { source: string; runs: number; usd: number }[]; exhausted?: boolean; exhausted_since?: string | null; error: string | null }
 export interface Spend {
-  apify: { today_usd: number; week_usd: number; by_source_week: Record<string, number>;
-    accounts: { tail: string; masked?: string; used_usd: number | null; limit_usd: number | null; cycle_end: string | null; error: string | null }[] };
+  /** today / week: Apify's own daily usage of all keys; runs_week: the parser's log, run counts only. */
+  apify: { today_usd: number; week_usd: number; runs_week: Record<string, number>; accounts: ApifyAccount[] };
   ai: { mode: string; provider: string; base_url: string; model: string; today: LlmSum; week: LlmSum; month: LlmSum; balance: AiBalance | null;
     purposes: { today: LlmPurposes; week: LlmPurposes; month: LlmPurposes } };
 }

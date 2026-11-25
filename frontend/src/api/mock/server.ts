@@ -804,8 +804,12 @@ on('GET', '/keys', () => keysOut());
 on('GET', '/keys/:name/value', (m) => ({ name: m[1], value: keyVal(m[1]) }));
 on('POST', '/keys/:name/check', (m) => ({ results: m[1].startsWith('APIFY') ? [{ label: 'apif…T4n0', ok: true, ms: 312, error: null }, { label: 'apif…Zz99', ok: false, ms: 280, error: 'Ключ не работает' }]
   : [{ label: 'google/gemma-4-31b-it', ok: true, ms: 840, error: null }] }));
-on('GET', '/spend', () => ({ apify: { today_usd: 0.11, week_usd: 0.87, by_source_week: { facebook: 0.38, threads: 0.21, ss: 0.28 },
-  accounts: [{ tail: 'T4n0', masked: 'apif…T4n0', used_usd: 1.2, limit_usd: 5, cycle_end: '2026-12-15', error: null }, { tail: 'Zz99', masked: 'apif…Zz99', used_usd: null, limit_usd: null, cycle_end: null, error: 'invalid_key' }] },
+on('GET', '/spend', () => ({ apify: { today_usd: 0, week_usd: 0.01, runs_week: { facebook: 41, threads: 7, ss: 20 },
+  accounts: [{ tail: 'T4n0', masked: 'apif…T4n0', plan: 'FREE', created_at: '2026-10-30', cycle_start: '2026-10-30', cycle_end: '2026-11-29',
+    used_usd: 5.01, limit_usd: 5, exhausted: true, exhausted_since: '2026-11-16', error: null,
+    days: [['10-30', 1.04], ['11-04', 0.72], ['11-10', 1.07], ['11-11', 0.66], ['11-12', 0.25], ['11-13', 0.28], ['11-14', 0.21], ['11-15', 0.26], ['11-16', 0.24], ['11-20', 0.01]]
+      .map(([d, usd]) => ({ date: `2026-${d}`, usd: usd as number })),
+    by_source: [{ source: 'facebook', runs: 120, usd: 3.9 }, { source: 'ss', runs: 60, usd: 0.7 }, { source: 'threads', runs: 14, usd: 0.4 }] }, { tail: 'Zz99', masked: 'apif…Zz99', used_usd: null, limit_usd: null, cycle_end: null, error: 'invalid_key' }] },
   ai: { mode: 'openai', provider: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: 'google/gemma-4-31b-it',
     today: llm(266, 0.2131), week: llm(266, 0.2131), month: llm(266, 0.2131), balance: { balance_usd: 9.79, used_usd: 0.21 } } }));
 on('PUT', '/keys/:name', (m, b) => { mockKeys[m[1]] = String(b.value); return keysOut(); });

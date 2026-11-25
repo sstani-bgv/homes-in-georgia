@@ -9,7 +9,9 @@ from tests.conftest import auth, make_user
 
 
 def test_spend(db, client, monkeypatch):
-    monkeypatch.setattr(content, "_apify_accounts", lambda: [{"tail": "ab12", "used_usd": 4.68, "limit_usd": 5, "cycle_end": "2026-11-29", "error": None}])
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    monkeypatch.setattr(content, "_apify_accounts", lambda: [{"tail": "ab12", "used_usd": 4.68, "limit_usd": 5, "cycle_end": "2026-11-29", "error": None,
+                                                              "days": [{"date": "1999-01-01", "usd": 3.0}, {"date": today, "usd": 0.07}]}])
     monkeypatch.setattr(content, "_ai_balance", lambda: {"balance_usd": 9.5, "used_usd": 0.5})
     monkeypatch.setattr(content, "_openrouter_prices", lambda: {"google/gemma": (1e-7, 2e-7)})
     now = time.time()
@@ -23,7 +25,7 @@ def test_spend(db, client, monkeypatch):
     db.commit()
     admin = make_user(db, "superadmin")
     r = client.get("/api/spend", headers=auth(admin)).json()
-    assert r["apify"]["today_usd"] == 0.07 and r["apify"]["week_usd"] == 0.17 and r["apify"]["by_source_week"]["facebook"] == 0.15
+    assert r["apify"]["today_usd"] == 0.07 and r["apify"]["week_usd"] == 0.07 and r["apify"]["runs_week"] == {"facebook": 2, "ss": 1}
     assert r["apify"]["accounts"][0]["used_usd"] == 4.68
     t = r["ai"]["today"]
     # gpt-4.1-mini at list price 0.56; gemma: 0.25 reported by OpenRouter + 1000 unpriced prompt tokens at its list price
@@ -37,3 +39,31 @@ def test_spend(db, client, monkeypatch):
     assert p["searches"] == 2 and p["per_search_usd"] == 0.02  # (0.01 + 0.03) / 2 picks
     assert r["ai"]["purposes"]["month"]["rows"] == p["rows"]
     assert client.get("/api/spend", headers=auth(make_user(db, "operator"))).status_code == 403
+
+
+def test_apify_account(monkeypatch):
+    """The Apify API answers -> plan, cycle, days, limit, $ per source, «limit exhausted since» the day the sum hit it."""
+    import httpx
+    data = {"/users/me": {"plan": {"id": "FREE"}, "createdAt": "2026-10-30T10:00:00.000Z"},
+            "/users/me/usage/monthly": {"usageCycle": {"startAt": "2026-10-30T00:00:00.000Z", "endAt": "2026-11-29T23:59:59.999Z"},
+                                        "dailyServiceUsages": [{"date": f"2026-11-{d:02d}T00:00:00.000Z", "totalUsageCreditsUsd": 1.0} for d in range(10, 16)]},
+            "/users/me/limits": {"limits": {"maxMonthlyUsageUsd": 5}, "current": {"monthlyUsageUsd": 5.01}},
+            "/actor-runs": {"items": [{"actId": "A", "startedAt": "2026-11-12T00:00:00Z", "usageTotalUsd": 0.5},
+                                      {"actId": "A", "startedAt": "2026-11-13T00:00:00Z", "usageTotalUsd": 0.25},
+                                      {"actId": "B", "startedAt": "2026-11-13T00:00:00Z", "usageTotalUsd": 0.1},
+                                      {"actId": "A", "startedAt": "2026-10-01T00:00:00Z", "usageTotalUsd": 9}]},
+            "/acts/A": {"username": "dami_studio", "name": "facebook-groups-scraper"}, "/acts/B": {"username": "x", "name": "y"}}
+
+    def handler(req):
+        assert req.headers["Authorization"] == "Bearer apify_api_secret_TAIL"
+        return httpx.Response(200, json={"data": data[req.url.path.removeprefix("/v2")]})
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    a = content._apify_account("apify_api_secret_TAIL")
+    assert a["plan"] == "FREE" and a["cycle_start"] == "2026-10-30" and a["cycle_end"] == "2026-11-29" and len(a["days"]) == 6
+    assert a["used_usd"] == 5.01 and a["exhausted"] and a["exhausted_since"] == "2026-11-14"
+    assert a["by_source"] == [{"source": "facebook", "runs": 2, "usd": 0.75}, {"source": "x/y", "runs": 1, "usd": 0.1}]
+    assert "secret" not in str(a)
+
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(401)), **kw))
+    assert content._apify_account("apify_api_secret_TAIL")["error"] == "invalid_key"
