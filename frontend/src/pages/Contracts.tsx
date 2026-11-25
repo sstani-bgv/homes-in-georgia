@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { cadastralError, cadastralHint, cadastralInput } from '../lib/cadastral';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Copy, Download, ExternalLink, FilePen, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Search, Send, UserCheck } from 'lucide-react';
+import { Building2, Copy, Download, ExternalLink, FilePen, FileText, Home, KeyRound, Plus, Printer, RotateCcw, Save, Search, Send, Upload, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { itemsOf } from '../api/client';
@@ -184,10 +184,14 @@ type EditSession = { id: number; key: string };
 // randomUUID needs a secure context: the mock on a LAN http address gets a random string instead
 const newSession = (id: number): EditSession => ({ id, key: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` });
 
-/** «Документы на подпись» (pages/SignDocs.tsx): any pasted document signed electronically — staff only. */
+/** «Документы на подпись» (pages/SignDocs.tsx): staff — any document; agents — «Договор между сторонами» (owner ↔ client,
+ * a ready PDF, Irakli / Stanislav 11-18): the upload opens that form, the list there is the history with the signed PDFs. */
 function SignDocsLink() {
   const { user } = useAuth();
-  return atLeast(user, 'operator') ? <Link className="btn btn-secondary" to="/sign-docs"><FilePen size={16} />{t('Документы на подпись')}</Link> : null;
+  return atLeast(user, 'agent') ? <>
+    <Link className="btn btn-secondary" to="/sign-docs?new=parties"><Upload size={16} />{t('Загрузить готовый PDF на подпись')}</Link>
+    <Link className="btn btn-ghost" to="/sign-docs"><FilePen size={16} />{t('Документы на подпись')}</Link>
+  </> : null;
 }
 
 export function ContractWizard({ compact }: { compact?: boolean }) {

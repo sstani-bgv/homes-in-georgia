@@ -728,11 +728,11 @@ REC = {"title": ("ელექტრონული ხელმოწერი�
        "sent": ("გაგზავნა", {"ru": "Отправил", "en": "Sent by"})}
 
 
-def record_page(second: str, doc: str, sha: str, signers: list, comp: tuple) -> str:
+def record_page(second: str, doc: str, sha: str, signers: list, comp: tuple | None) -> str:
     """The e-signing protocol page (the last page of a signed PDF): the document line (escaped html), the text's SHA-256,
     a table per signer — (REC heading key, a row with full_name, personal_id, phone, tg_*, signed_at, ip, user_agent,
     signature: an AgentNda or a SignDocSigner) — and the company's (heading key, signed at, sent by, signature)."""
-    t = lambda k: H.escape(f"{REC[k][0]} / {REC[k][1][second]}")  # noqa: E731
+    t = lambda k: H.escape(f"{REC[k][0]} / {REC[k][1][second]}" if k in REC else k)  # noqa: E731 — or a label as is
     e = lambda v: H.escape(str(v)) if v else "—"  # noqa: E731
     row = lambda k, v, cls="": f'<tr><td>{t(k)}</td><td{cls}>{v}</td></tr>'  # noqa: E731
     img = lambda s: f"<img src={chr(34)}{s}{chr(34)} alt={chr(34)}{chr(34)}>"  # noqa: E731
@@ -743,6 +743,8 @@ def record_page(second: str, doc: str, sha: str, signers: list, comp: tuple) -> 
                 f'{row("phone", e(n.phone))}{row("tg", tg)}{row("code", e(n.tg_hash), " class=mono")}'
                 f'{row("conf", _tbilisi(n.tg_auth_date) if n.tg_auth_date else "—")}{row("at", _tbilisi(n.signed_at) if n.signed_at else "—")}'
                 f'{row("ip", e(n.ip))}{row("ua", e(n.user_agent), " class=mono")}{row("sig", img(n.signature))}</table>')
+    if not comp:  # «Договор между сторонами»: no company signature
+        return out + "</section>"
     key, at, by, sig = comp
     return (out + f'<table><tr><td colspan="2"><b>{t(key)}</b></td></tr>{row("name", e(COMPANY["name"][second]) + " · IE " + COMPANY["ie"])}'
             f'{row("at", _tbilisi(at) if at else "—")}{row("sent", e(by and by.name))}{row("sig", img(sig))}</table></section>')

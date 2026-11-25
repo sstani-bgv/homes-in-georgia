@@ -105,7 +105,7 @@ export function App() {
         <Route path="team" element={<TeamPage />} />
         <Route path="contracts" element={<ContractsPage />} />
         <Route path="ndas" element={<RequireAuth roles={STAFF}><NdasPage /></RequireAuth>} />
-        <Route path="sign-docs" element={<RequireAuth roles={STAFF}><SignDocsPage /></RequireAuth>} />
+        <Route path="sign-docs" element={<RequireAuth roles={[...STAFF, 'agent']}><SignDocsPage /></RequireAuth>} />{/* agents: «между сторонами» only */}
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="calc" element={<CalcPage />} />
         <Route path="posts" element={<Navigate to="/objects?tab=review" replace />} />

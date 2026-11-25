@@ -21,12 +21,21 @@ class Person(BaseModel):
     telegram: str | None = Field(None, max_length=100)
 
 
+class Signer(Person):  # «Договор между сторонами»: a row (id = the existing signer, its link stays)
+    id: int | None = None
+    role: str | None = Field(None, max_length=60)
+
+
 class DocIn(BaseModel):
     lang: str = "KA-RU"
     title: dict[str, str] = {}
     body: dict[str, str] = {}
     party: Person = Person()
     cosigner: Person | None = None
+    mode: str | None = None  # "parties" = «Договор между сторонами» (a ready PDF, the signers below, no company signature)
+    signers: list[Signer] = Field([], max_length=20)
+    pdf: str | None = Field(None, max_length=21_000_000)  # a ready PDF instead of the text: data:…;base64 (≤ 15 MB)
+    pdf_name: str | None = Field(None, max_length=300)
 
 
 @router.get("/sign-docs")

@@ -21,7 +21,7 @@ interface NdaView {
   tg_name: string | null; signed_at: string | null; has_pdf: boolean; test_mode: boolean; html: string | null;
   details?: { iban_gel: string; iban_usd: string; ie: string };
   // a «Документ на подпись»
-  need_tg?: boolean; title?: Partial<Record<L, string>>; number?: string; signed?: boolean; signers?: { full_name: string; signed: boolean }[];
+  need_tg?: boolean; pdf?: { name: string; pages: number } | null; title?: Partial<Record<L, string>>; number?: string; signed?: boolean; signers?: { full_name: string; signed: boolean }[];
 }
 type Kind = 'nda' | 'doc';
 type L = 'ka' | 'ru' | 'en';
@@ -182,6 +182,10 @@ export function NdaSignPage({ kind = 'nda' }: { kind?: Kind }) {
         <Button size="sm" variant="secondary" onClick={() => document.getElementById('nda-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{t.toSign}</Button>
       </div>
       {v.html && <ContractFrame html={v.html} col={l === 'ka' ? 1 : 2} />}
+      {v.pdf && <>  {/* an uploaded PDF (sign_docs): the file itself, unchanged */}
+        <iframe title={v.pdf.name} src={`/api${base}/pdf`} style={{ width: '100%', height: '75vh', border: '1px solid var(--border, #ddd)', borderRadius: 8 }} />
+        <a className="btn btn-secondary" href={`/api${base}/pdf`} target="_blank" rel="noreferrer"><Download size={16} />{v.pdf.name} · {v.pdf.pages}</a>
+      </>}
     </div>
     {!doc && <div className="col gap-sm" id="nda-form">
       <span className="label">{t.step0}</span>
