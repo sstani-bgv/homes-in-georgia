@@ -459,13 +459,21 @@ def update(db: Session, cid: int, body: dict, user: User) -> Contract:
 def link(db: Session, cid: int, body: dict, user: User) -> Contract:
     """«Привязать к заявке»: a standalone contract joins a lead / deal later (11-13); a linked one keeps its link."""
     c = get(db, cid, user, lock=True)
-    if c.lead_id or c.deal_id:
-        raise DomainError("already_linked", "Договор уже привязан к заявке или сделке", 409)
     if c.status == "closed_no_deal":
         raise DomainError("bad_status", "Закрытый договор не меняется", 409)
     ids = _link(db, body, user)
     if not ids["lead_id"] and not ids["deal_id"]:
-        raise DomainError("bad_input", "Выберите заявку или сделку")
+        # David 11-26: a contract made without a lead gets its object (#15102) — the object only, once
+        if not ids["property_id"]:
+            raise DomainError("bad_input", "Выберите заявку, сделку или объект")
+        if c.property_id:
+            raise DomainError("already_linked", "Договор уже привязан к объекту", 409)
+        c.property_id, c.updated_at = ids["property_id"], now()
+        log_event(db, "contract", c.id, "linked", user, property_id=c.property_id)
+        db.commit()
+        return c
+    if c.lead_id or c.deal_id:
+        raise DomainError("already_linked", "Договор уже привязан к заявке или сделке", 409)
     c.lead_id, c.deal_id, c.property_id = ids["lead_id"], ids["deal_id"], c.property_id or ids["property_id"]
     if c.deal_id and c.status == "signed":  # as mark_deal: the deal is already there
         c.status = "deal"

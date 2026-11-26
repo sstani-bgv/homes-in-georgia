@@ -296,6 +296,24 @@ function LinkLead({ c, onChange, quiet }: { c: Contract; onChange: (c: Contract)
   );
 }
 
+/** «Привязать объект» (David 11-26): a contract without a lead gets its object by number, #15102 */
+function LinkObject({ c, onChange }: { c: Contract; onChange: (c: Contract) => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [id, setId] = useState('');
+  const m = useMutation({
+    mutationFn: () => api.contracts.link(c.id, { property_id: Number(id.replace(/\D/g, '')) }),
+    onSuccess: (x) => { onChange(x); qc.invalidateQueries({ queryKey: ['contracts'] }); toast(t('Договор привязан к объекту #{id}', { id: x.property_id ?? '' })); },
+    onError: (e) => toast(errText(e), true),
+  });
+  return (
+    <div className="row gap-sm mt" style={{ maxWidth: 520, alignItems: 'flex-end' }}>
+      <Field label={t('Привязать объект')}><Input inputMode="numeric" value={id} placeholder={t('Номер объекта, например 15102')} onChange={(e) => setId(e.target.value)} /></Field>
+      <Button variant="secondary" disabled={!/\d/.test(id)} loading={m.isPending} onClick={() => m.mutate()}>{t('Привязать')}</Button>
+    </div>
+  );
+}
+
 /** /contracts?id=N */
 export function ContractView({ id, base }: { id: number; base: string }) {
   const qc = useQueryClient();
@@ -354,9 +372,11 @@ export function ContractView({ id, base }: { id: number; base: string }) {
         <div className="row row-wrap gap-sm mt" style={{ fontSize: 13 }}>
           {c.lead_id && <Link to={`${root}/leads/${c.lead_id}`}>{t('Заявка #{id}', { id: c.lead_id })}</Link>}
           {deal && <Link to={`${root}/deals/${deal}`}>{t('Сделка #{id}', { id: deal })}</Link>}
+          {c.property_id && <Link to={`${root === '/m' ? '/m/properties' : '/objects'}/${c.property_id}`}>{t('Объект #{id}', { id: c.property_id })}</Link>}
         </div>
         {c.status === 'signed' && !deal && <DealButton c={c} root={root} onChange={set} />}
         {!c.lead_id && !c.deal_id && c.status !== 'closed_no_deal' && <LinkLead c={c} onChange={set} quiet={c.status === 'signed'} />}
+        {!c.lead_id && !c.deal_id && !c.property_id && c.status !== 'closed_no_deal' && <LinkObject c={c} onChange={set} />}
         {c.status === 'draft' && (
           <div className="row row-wrap gap-sm mt">
             <Link className={`btn ${c.has_pdf ? 'btn-secondary' : ''}`} to={editLink(base, c)}><Pencil size={16} />{c.has_pdf ? t('Изменить данные и перегенерировать') : t('Продолжить заполнение')}</Link>

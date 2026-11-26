@@ -247,7 +247,7 @@ export const api = {
       return http.post<Contract>(`/contracts/${id}/sign`, fd);
     },
     /** «Привязать к заявке»: a contract created without a lead / deal (11-13) */
-    link: (id: number, b: { lead_id?: number; deal_id?: number }) => http.post<Contract>(`/contracts/${id}/link`, b),
+    link: (id: number, b: { lead_id?: number; deal_id?: number; property_id?: number }) => http.post<Contract>(`/contracts/${id}/link`, b),
     /** «Оформить сделку»: the contract's lead for the deal form, made from the contract when it has none (11-18) */
     dealLead: (id: number) => http.post<Contract>(`/contracts/${id}/deal-lead`, {}),
     liftDealDue: (id: number) => http.post<Contract>(`/contracts/${id}/deal-due/lift`, {}),

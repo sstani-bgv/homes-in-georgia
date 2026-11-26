@@ -70,6 +70,7 @@ class ContractIn(BaseModel):
 class LinkIn(BaseModel):
     lead_id: int | None = None
     deal_id: int | None = None
+    property_id: int | None = None  # David 11-26: the object alone, when there is no lead
 
 
 class ESignIn(BaseModel):

@@ -2,6 +2,7 @@
 with a mandatory reason, the backfill of reasons for objects archived before stage 6."""
 
 
+from sqlalchemy import select
 from app.models import ChangeRequest, Event, Owner, Property
 from app.services import properties
 from tests.conftest import auth, fill_required, make_listing, make_user
@@ -120,3 +121,19 @@ def test_existing_flows_set_reasons_and_transfer_request(db, client, sent):
     assert client.post(f"/api/properties/{b}/rented-self", json={"rent_from": "2026-11-01", "rent_to": "2027-11-01"}, headers=auth(georgiy)).json()["archive_reason"] == "rented_by_owner"
     # re-taking a refused object clears its archive reason
     assert client.post("/api/properties", json={"listing_id": "ss6003"}, headers=auth(levan)).json()["archive_reason"] is None
+
+
+def test_staff_give_an_ownerless_object_an_agent(db, client, sent):
+    """David 11-26 #15102: a channel import has no owner and no agent («Платформа») — the operator assigns one."""
+    nino = make_user(db, "operator", "Нино")
+    levan = make_user(db, "agent", "Леван")
+    p = Property(address="1 Ateni St", status="published")
+    db.add(p)
+    db.commit()
+    r = client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": levan.id}, headers=auth(nino))
+    assert r.status_code == 200 and r.json()["change_request"] is None
+    db.expire_all()
+    assert db.get(Property, p.id).agent_id == levan.id
+    assert db.scalar(select(Event).where(Event.entity_id == str(p.id), Event.action == "agent_assigned")) is not None
+    assert client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": levan.id},
+                       headers=auth(levan)).status_code in (400, 409)

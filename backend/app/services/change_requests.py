@@ -43,6 +43,16 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     Staff transfer directly (properties.transfer_owner); then None is returned."""
     p = get_or_404(db, Property, int(pid), "property")
     o = db.get(Owner, p.owner_id) if p.owner_id else None
+    if o is None and at_least(actor, "operator"):  # David 11-26 #15102: a channel import has no owner — staff give it an agent
+        to = get_or_404(db, User, int(to_agent_id), "user")
+        if not is_field(to) or not to.is_active:
+            raise DomainError("bad_agent", "Передать можно только активному агенту")
+        old = db.get(User, p.agent_id) if p.agent_id else None
+        p.agent_id, p.updated_at = to.id, now()
+        log_event(db, "property", p.id, "agent_assigned", actor, from_agent_id=old.id if old else None, to_agent_id=to.id,
+                  reason=(reason or "").strip() or None, comment=f"{old.name if old else P.PLATFORM} → {to.name}")
+        db.commit()
+        return None
     if o is None or o.is_agent:
         raise DomainError("no_owner", "У объекта нет собственника")
     if at_least(actor, "operator"):

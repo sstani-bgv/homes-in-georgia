@@ -405,3 +405,16 @@ def test_translate_clause_mocked_llm(db, client, monkeypatch):
     assert r.status_code == 502 and "translate_failed" in r.text
     # the marker list of autotranslated paths survives the autosave
     assert C._edits({"rent_RU:8.0.41": "x", "rent_RU:auto": ["8.0.41"], "bad": 1}) == {"rent_RU:8.0.41": "x", "rent_RU:auto": ["8.0.41"]}
+
+
+def test_a_standalone_contract_gets_its_object(db, client):
+    """David 11-26: a contract made without a lead is linked to its object (#15102) by number; a lead can follow."""
+    op = make_user(db, "operator")
+    h = auth(op)
+    d = client.post("/api/contracts/draft", json={"kind": "rent", "data": {"owner_full_name": "Нино"}}, headers=h).json()
+    p = Property(address="1 Ateni St", status="published")
+    db.add(p)
+    db.commit()
+    r = client.post(f"/api/contracts/{d['id']}/link", json={"property_id": p.id}, headers=h)
+    assert r.status_code == 200 and r.json()["property_id"] == p.id and r.json()["lead_id"] is None
+    assert client.post(f"/api/contracts/{d['id']}/link", json={"property_id": p.id}, headers=h).status_code == 409
