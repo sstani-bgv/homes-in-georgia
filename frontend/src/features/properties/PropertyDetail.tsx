@@ -883,9 +883,12 @@ function CompareLink({ p }: { p: Property }) {
 function Gallery({ p }: { p: Property }) {
   const own = shotsOf(p);
   const fromAd = (p.listing?.photos || []).map((src, i): Shot => ({ id: `l${i}`, kind: 'photo', src }));
-  const toast = useToast();
-  const { user } = useAuth();
-  const staffOnly = can(user, 'originals');  // «Права»; default: superadmin, admin, operators (Irakli 11-22)
+  const { toast, set } = useProp(p.id);
+  const { user, isStaff } = useAuth();
+  const staffOnly = can(user, 'originals');
+  // David 11-26: the cover of a published object — staff may reorder here (backend: media editable for operator+);
+  // the channel post follows at the next repost («Поднять пост наверх»)
+  const order = useMutation({ mutationFn: (ids: number[]) => api.properties.mediaOrder(p.id, ids), onSuccess: set, onError: (e) => toast(errText(e), true) });  // «Права»; default: superadmin, admin, operators (Irakli 11-22)
   const [busy, setBusy] = useState(false);
   const originals = async () => {  // the photos as uploaded, without the channel watermark: for myhome / ss by hand
     setBusy(true);
@@ -906,7 +909,8 @@ function Gallery({ p }: { p: Property }) {
           <a key={v.id} className="btn btn-secondary btn-sm" href={mediaUrl(v.src)} download={`object_${p.id}_video${vs.length > 1 ? `_${i + 1}` : ''}.mp4`}>
             {t('Скачать видео')}{vs.length > 1 ? ` ${i + 1}` : ''}</a>))}
       </div> : undefined}>
-      <MediaGrid items={own.length ? own : fromAd} />
+      {isStaff && own.length > 1 && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t('Перетащите, чтобы поменять порядок (на телефоне — долгое нажатие). Первое фото — обложка; пост в канале обновится после «Поднять пост наверх».')}</div>}
+      <MediaGrid items={own.length ? own : fromAd} onOrder={isStaff && own.length > 1 ? (ids) => order.mutate(ids.map(Number)) : undefined} />
     </Card>
   );
 }
