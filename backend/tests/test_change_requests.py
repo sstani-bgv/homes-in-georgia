@@ -137,3 +137,24 @@ def test_staff_give_an_ownerless_object_an_agent(db, client, sent):
     assert db.scalar(select(Event).where(Event.entity_id == str(p.id), Event.action == "agent_assigned")) is not None
     assert client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": levan.id},
                        headers=auth(levan)).status_code in (400, 409)
+
+
+def test_a_transfer_from_the_card_takes_that_object_along(db, client, sent):
+    """David 11-26 #2012: the owner was David's, the object Irakli's — a transfer from the card moved only the owner."""
+    op, irakli, rezo = make_user(db, "operator", "Давид"), make_user(db, "agent", "Ираклий"), make_user(db, "agent", "Резо")
+    o = Owner(name="ia", agent_id=op.id)
+    db.add(o)
+    db.commit()
+    p = Property(address="7 Kipshidze", status="published", agent_id=irakli.id, owner_id=o.id)
+    db.add(p)
+    db.commit()
+    assert client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": rezo.id}, headers=auth(op)).status_code == 200
+    db.expire_all()
+    assert (db.get(Owner, o.id).agent_id, db.get(Property, p.id).agent_id) == (rezo.id, rezo.id)
+    # already done: a repeat is refused; an owner already moved earlier (object left behind) can be repeated from the card
+    assert client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": rezo.id}, headers=auth(op)).status_code in (400, 409)
+    db.get(Property, p.id).agent_id = irakli.id
+    db.commit()
+    assert client.post(f"/api/properties/{p.id}/transfer-request", json={"agent_id": rezo.id}, headers=auth(op)).status_code == 200
+    db.expire_all()
+    assert db.get(Property, p.id).agent_id == rezo.id

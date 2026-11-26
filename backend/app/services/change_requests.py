@@ -56,7 +56,7 @@ def request_transfer(db: Session, pid: int, to_agent_id: int, actor: User, reaso
     if o is None or o.is_agent:
         raise DomainError("no_owner", "У объекта нет собственника")
     if at_least(actor, "operator"):
-        P.transfer_owner(db, o.id, to_agent_id, actor, reason)
+        P.transfer_owner(db, o.id, to_agent_id, actor, reason, with_property=p.id)
         return None
     if actor.id not in (p.agent_id, o.agent_id):
         raise forbidden("object is taken by another agent")

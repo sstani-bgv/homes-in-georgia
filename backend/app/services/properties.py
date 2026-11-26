@@ -1262,7 +1262,7 @@ def _bind_owner(db: Session, p: Property, o: Owner | None, actor: User) -> None:
 
 
 def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, reason: str | None = None,
-                   commit: bool = True) -> Owner:
+                   commit: bool = True, with_property: int | None = None) -> Owner:
     """«Передать собственника агенту…»: staff only (stage 6's agent «Запрос оператору» is approved through here, e.g. the
     agent left). The owner and his live objects of the previous agent move to the new one; every object of the owner
     and the owner himself get a history event."""
@@ -1272,7 +1272,12 @@ def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, 
     to = get_or_404(db, User, int(to_agent_id), "user")
     if not is_field(to) or not to.is_active:
         raise DomainError("bad_agent", "Передать можно только активному агенту")
-    if o.agent_id == to.id:
+    # David 11-26 #2012: from an object's card that object goes along even when another agent holds it (the owner
+    # was David's, the object Irakli's: «moved: false», Rezo didn't get it); a repeat moves just that object
+    card = db.get(Property, int(with_property)) if with_property else None
+    if card is not None and card.owner_id != o.id:
+        card = None
+    if o.agent_id == to.id and (card is None or card.agent_id == to.id):
         raise DomainError("bad_status", "Собственник уже закреплён за этим агентом")
     old = db.get(User, o.agent_id) if o.agent_id else None
     reason = (reason or "").strip() or None
@@ -1283,7 +1288,7 @@ def transfer_owner(db: Session, owner_id: int, to_agent_id: int, by_user: User, 
     props = []
     for p in db.scalars(select(Property).where(Property.owner_id == o.id).with_for_update()):
         # an object dropped into the archive goes along (David 11-22: #8462 handed to Arthur stayed David's, unseen)
-        moved = p.agent_id == (old.id if old else None) and (
+        moved = p.id == (card.id if card else None) or p.agent_id == (old.id if old else None) and (
             p.status not in ("archived", "rented") or (p.status == "archived" and p.archive_reason in BACK_TO_WORK))
         if moved:
             p.agent_id, p.updated_at = to.id, now()

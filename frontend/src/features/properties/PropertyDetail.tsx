@@ -1555,11 +1555,11 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
   const [reason, setReason] = useState('');
   const agents = useQuery({ queryKey: ['users', 'field'], queryFn: () => api.users.list({ role: FIELD_FILTER, active: true }), enabled: open });
   const m = useMutation({
-    mutationFn: async () => { await (request || !p.owner ? api.properties.transferRequest(p.id, Number(to), reason) : api.owners.transfer(p.owner!.id, Number(to), reason)); },
+    mutationFn: async () => { await api.properties.transferRequest(p.id, Number(to), reason); },  // staff: right away, this object goes along
     onSuccess: () => { ['property', 'property-history', 'property-post'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(request ? REQUEST_SENT : t('Собственник передан агенту')); setOpen(false); },
     onError: (e) => toast(errText(e), true),
   });
-  const options = itemsOf(agents.data).filter((u) => u.id !== (p.owner ? p.owner.agent?.id : p.agent?.id)).map((u) => ({ value: u.id, label: agentLabel(u) }));
+  const options = itemsOf(agents.data).filter((u) => u.id !== p.agent?.id || (p.owner && u.id !== p.owner.agent?.id)).map((u) => ({ value: u.id, label: agentLabel(u) }));
   return (
     <>
       <Button variant="secondary" size="sm" className="mt" onClick={() => setOpen(true)}><ArrowRightLeft size={14} />{request ? t('Запрос: сменить агента…') : t('Сменить агента собственника…')}</Button>
