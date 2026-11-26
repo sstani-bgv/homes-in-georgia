@@ -132,10 +132,14 @@ def test_contract_with_own_lead_does_not_open_a_foreign_object(db, client):
         assert r.status_code in (403, 404), r.text
         r = client.post("/api/contracts/draft", json={"property_id": pid, "data": {"x": "1"}}, headers=h)
         assert r.status_code in (403, 404), r.text
-    # «Привязать к заявке» of a standalone contract: the endpoint takes no object, the lead's one comes along
+    # «Привязать к заявке» of a standalone contract: an object sent along must be his to use (11-26 the endpoint takes
+    # one for «Привязать объект»), with a lead that has one the lead's object comes along
     c = client.post("/api/contracts/draft", json={"kind": "rent", "data": {"x": "2"}}, headers=h).json()
-    r = client.post(f"/api/contracts/{c['id']}/link", json={"lead_id": bare.id, "property_id": foreign.id}, headers=h)
-    assert r.status_code == 200 and r.json()["property_id"] is None, r.text
+    for pid in (foreign.id, platform.id):
+        r = client.post(f"/api/contracts/{c['id']}/link", json={"lead_id": bare.id, "property_id": pid}, headers=h)
+        assert r.status_code in (403, 404), r.text
+        r = client.post(f"/api/contracts/{c['id']}/link", json={"property_id": pid}, headers=h)
+        assert r.status_code in (403, 404), r.text
     c = client.post("/api/contracts/draft", json={"kind": "rent", "data": {"x": "3"}}, headers=h).json()
     r = client.post(f"/api/contracts/{c['id']}/link", json={"lead_id": lead.id, "property_id": foreign.id}, headers=h)
     assert r.status_code == 200 and r.json()["property_id"] == mine.id, r.text
