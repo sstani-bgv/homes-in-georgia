@@ -888,7 +888,10 @@ function Gallery({ p }: { p: Property }) {
   const staffOnly = can(user, 'originals');
   // David 11-26: the cover of a published object — staff may reorder here (backend: media editable for operator+);
   // the channel post follows at the next repost («Поднять пост наверх»)
-  const order = useMutation({ mutationFn: (ids: number[]) => api.properties.mediaOrder(p.id, ids), onSuccess: set, onError: (e) => toast(errText(e), true) });  // «Права»; default: superadmin, admin, operators (Irakli 11-22)
+  const order = useMutation({ mutationFn: (ids: number[]) => api.properties.mediaOrder(p.id, ids), onSuccess: set, onError: (e) => toast(errText(e), true) });
+  // David 11-26 #4637: a doubled photo of a published object — staff delete it here too (same rule as the order)
+  const confirm = useConfirm();
+  const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: () => set({} as Property), onError: (e) => toast(errText(e), true) });  // «Права»; default: superadmin, admin, operators (Irakli 11-22)
   const [busy, setBusy] = useState(false);
   const originals = async () => {  // the photos as uploaded, without the channel watermark: for myhome / ss by hand
     setBusy(true);
@@ -910,7 +913,8 @@ function Gallery({ p }: { p: Property }) {
             {t('Скачать видео')}{vs.length > 1 ? ` ${i + 1}` : ''}</a>))}
       </div> : undefined}>
       {isStaff && own.length > 1 && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t('Перетащите, чтобы поменять порядок (на телефоне — долгое нажатие). Первое фото — обложка; пост в канале обновится после «Поднять пост наверх».')}</div>}
-      <MediaGrid items={own.length ? own : fromAd} onOrder={isStaff && own.length > 1 ? (ids) => order.mutate(ids.map(Number)) : undefined} />
+      <MediaGrid items={own.length ? own : fromAd} onOrder={isStaff && own.length > 1 ? (ids) => order.mutate(ids.map(Number)) : undefined}
+        onDelete={isStaff && own.length ? async (id) => { if (await confirm(t('Удалить этот файл из объекта?'))) del.mutate(Number(id)); } : undefined} />
     </Card>
   );
 }
