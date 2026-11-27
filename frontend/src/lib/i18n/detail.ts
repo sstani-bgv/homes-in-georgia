@@ -345,6 +345,7 @@ export const D: Record<string, [ka: string, en: string]> = {
   "Ресторан": ["რესტორანი", "Restaurant"],
   "Салон красоты": ["სილამაზის სალონი", "Beauty salon"],
   "Склад": ["საწყობი", "Warehouse"],
+  "Гараж": ["ავტოფარეხი", "Garage"],
   "Производство": ["წარმოება", "Manufacturing"],
   "Метро": ["მეტრო", "Metro"],
   "Площадь Свободы": ["თავისუფლების მოედანი", "Liberty Square"],

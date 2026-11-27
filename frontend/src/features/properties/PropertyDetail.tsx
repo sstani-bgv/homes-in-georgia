@@ -308,7 +308,10 @@ type GenForm = {
 };
 const BEDROOM_CHIPS: Record<string, string> = { 0: t('Студия'), 1: '1', 2: '2', 3: '3', 4: '4', 5: '5+' };
 // the old generator's sale block (backend SALE_AMENITIES): its own type order, beds up to 6+, only these amenities
-export const SALE_TYPES = ['Apartment', 'House', 'Land', 'Commercial', 'Retail', 'Business', 'Cafe', 'Restaurant', 'BeautySalon', 'Warehouses', 'Manufacture', 'Duplex', 'Townhouse'];
+export const SALE_TYPES = ['Apartment', 'House', 'Land', 'Commercial', 'Retail', 'Business', 'Cafe', 'Restaurant', 'BeautySalon', 'Warehouses', 'Manufacture', 'Duplex', 'Townhouse', 'Garage', 'Parking'];
+// Irakli 11-27: a garage / shop / land hides the flat-only inputs (the values stay, backend missing_fields agrees)
+export const isResidential = (type?: string) => !type || ['Apartment', 'House', 'Duplex', 'Townhouse'].includes(type);
+const FLAT_ONLY = ['design', 'bathrooms', 'pets'];
 // the site's sale sections (hge.ge services): resale, new buildings, commercial for sale
 const SALE_SERVICE: Record<string, string> = { sale: t('Вторичка'), new: t('Новостройка'), commercial: t('Коммерция') };
 export const SALE_BEDROOM_CHIPS: Record<string, string> = { ...BEDROOM_CHIPS, 5: '5', 6: '6+' };
@@ -411,6 +414,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   });
   const toggleMany = (k: 'amenities' | 'periods', a: string) => { const cur = pf[k] || []; setPf(k, cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]); };
   const sale = pf.deal === 'Sale';
+  const res = isResidential(pf.prop_type);
   const one = (k: string) => POST_ONE[k][1];
   const AMENITY_ALL = Object.keys(POST_MANY.amenities[1]);
   const AMENITY_REST = AMENITY_ALL.filter((a) => !AMENITY_FIXED.includes(a));
@@ -561,7 +565,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
         <div className="gen-block">
           <span className="gen-title">{t('2 · Объект')}</span>
           <Field group label={t('Тип')}><Chips options={sale ? Object.fromEntries(SALE_TYPES.map((t) => [t, one('prop_type')[t]])) : one('prop_type')} value={pf.prop_type} onChange={(v) => setPf('prop_type', v)} /></Field>
-          <Field group label={t('Спальни')}><Chips options={sale ? SALE_BEDROOM_CHIPS : BEDROOM_CHIPS} value={f.bedrooms} onChange={(v) => upd('bedrooms', v ?? '')} /></Field>
+          {res && <Field group label={t('Спальни')}><Chips options={sale ? SALE_BEDROOM_CHIPS : BEDROOM_CHIPS} value={f.bedrooms} onChange={(v) => upd('bedrooms', v ?? '')} /></Field>}
           <Field group label={t('Здание')}><Chips options={one('building')} value={pf.building} onChange={(v) => setPf('building', v)} /></Field>
           {sale && <Field group label={t('Состояние')}><Chips options={one('condition')} value={pf.condition} onChange={(v) => setPf('condition', v)} /></Field>}
           {sale && <Field group label={t('Раздел на сайте')}><Chips options={SALE_SERVICE} value={pf.service || 'sale'} onChange={(v) => setPf('service', v ?? 'sale')} /></Field>}
@@ -575,10 +579,10 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
                 <Input type="number" inputMode="numeric" aria-label={t('Всего этажей')} value={f.total_floors} onChange={(e) => upd('total_floors', e.target.value)} />
               </div>
             </Field>
-            {!sale && <Field label={t('Жильцы макс.')}><Input type="number" inputMode="numeric" min={1} value={pf.tenants ?? ''} onChange={(e) => setPf('tenants', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>}
+            {!sale && res && <Field label={t('Жильцы макс.')}><Input type="number" inputMode="numeric" min={1} value={pf.tenants ?? ''} onChange={(e) => setPf('tenants', e.target.value === '' ? undefined : Number(e.target.value))} /></Field>}
           </div>
-          <Field group label={t('Дизайн')}><Chips options={one('design')} value={pf.design} onChange={(v) => setPf('design', v)} /></Field>
-          <Field group label={t('Ванные комнаты')}><Chips options={one('bathrooms')} value={pf.bathrooms} onChange={(v) => setPf('bathrooms', v)} /></Field>
+          {res && <Field group label={t('Дизайн')}><Chips options={one('design')} value={pf.design} onChange={(v) => setPf('design', v)} /></Field>}
+          {res && <Field group label={t('Ванные комнаты')}><Chips options={one('bathrooms')} value={pf.bathrooms} onChange={(v) => setPf('bathrooms', v)} /></Field>}
           <Field group label={t('Отопление')}><Chips options={one('heating')} value={pf.heating} onChange={(v) => setPf('heating', v)} /></Field>
           {((sale ? [[t('Удобства'), SALE_AMENITIES]] : [[t('✅/✖️ в посте'), AMENITY_FIXED], [t('Остальные (только ✅ если есть)'), AMENITY_REST]]) as [string, string[]][]).map(([label, keys]) => (
             <Field group key={label} label={label}>
@@ -590,7 +594,7 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
               </div>
             </Field>
           ))}
-          {!sale && <Field group label={t('Питомцы')}><Chips options={one('pets')} value={pf.pets} onChange={(v) => setPf('pets', v)} /></Field>}
+          {!sale && res && <Field group label={t('Питомцы')}><Chips options={one('pets')} value={pf.pets} onChange={(v) => setPf('pets', v)} /></Field>}
         </div>
 
         <div className="gen-block">
@@ -1584,7 +1588,7 @@ function OwnerTransfer({ p, request }: { p: Property; request?: boolean }) {
 const opts = (o: Record<string, string>) => Object.entries(o).map(([value, label]) => ({ value, label }));
 export const metroLabel = (tag?: string | null) => (tag ? POST_ONE.metro[1][tag] || tag : '');
 export const POST_ONE: Record<string, [string, Record<string, string>]> = {
-  prop_type: [t('Тип'), { Apartment: t('Квартира'), House: t('Дом'), Commercial: t('Коммерция'), Duplex: t('Дуплекс'), Townhouse: t('Таунхаус'), Land: t('Земля'), Retail: t('Ритейл'), Business: t('Бизнес'), Cafe: t('Кафе'), Restaurant: t('Ресторан'), BeautySalon: t('Салон красоты'), Warehouses: t('Склад'), Manufacture: t('Производство') }],
+  prop_type: [t('Тип'), { Apartment: t('Квартира'), House: t('Дом'), Commercial: t('Коммерция'), Duplex: t('Дуплекс'), Townhouse: t('Таунхаус'), Land: t('Земля'), Retail: t('Ритейл'), Business: t('Бизнес'), Cafe: t('Кафе'), Restaurant: t('Ресторан'), BeautySalon: t('Салон красоты'), Warehouses: t('Склад'), Manufacture: t('Производство'), Garage: t('Гараж'), Parking: t('Парковка') }],
   metro: [t('Метро'), { LibertySquare: t('Площадь Свободы'), Rustaveli: t('Руставели'), Marjanishvili: t('Марджанишвили'), StationSquare: t('Вокзальная площадь'), Tsereteli: t('Церетели'), Gotsiridze: t('Гоциридзе'), Nadzaladevi: t('Надзаладеви'), Didube: t('Дидубе'), Grmagele: t('Грмагеле'), Guramishvili: t('Гурамишвили'), Sarajishvili: t('Сараджишвили'), AhmeteliTheatre: t('Театр Ахметели'), STUniversity: t('Госуниверситет'), VazhaPshavela: t('Важа-Пшавела'), Delisi: t('Делиси'), TCUniversity: t('Техуниверситет'), MCUniversity: t('Медуниверситет'), AvlabariMetro: t('Авлабари'), IsaniMetro: t('Исани'), '300Aragveli': t('300 Арагвели'), SamgoriMetro: t('Самгори'), Varketili: t('Варкетили') }],
   building: [t('Дом'), { NewBuilding: t('Новостройка'), OldBuilding: t('Старый фонд'), HistoricalBuilding: t('Исторический'), Reconstruction: t('Реконструкция') }],
   design: [t('Дизайн'), { New: t('Новый'), White: t('Белый'), Grey: t('Серый'), Yellow: t('Жёлтый'), Mixed: t('Смешанный'), Old: t('Старый'), Retro: t('Ретро'), UnderRepair: t('В ремонте') }],
@@ -1626,7 +1630,7 @@ function PostFieldsForm({ value: f, onChange, price }: { value: PostFields; onCh
         <Seg value={f.deal || 'Rent'} onChange={(d) => set('deal', d)} options={[{ value: 'Rent', label: t('Аренда') }, { value: 'Sale', label: t('Продажа') }]} />
       </div>
       <div className="form-grid">
-        {Object.entries(POST_ONE).filter(([k]) => (sale ? !RENT_ONLY.includes(k) : k !== 'condition')).map(([k, [label, o]]) => (
+        {Object.entries(POST_ONE).filter(([k]) => (sale ? !RENT_ONLY.includes(k) : k !== 'condition') && (isResidential(f.prop_type) || !FLAT_ONLY.includes(k))).map(([k, [label, o]]) => (
           <Field key={k} label={label}><Select value={(f as Record<string, string>)[k] || ''} placeholder="—" onChange={(e) => set(k, e.target.value)} options={opts(o)} /></Field>
         ))}
         {sale ? <Field label={t('Цена продажи, $')}><Input type="number" value={f.sale_price ?? ''} onChange={(e) => set('sale_price', num(e.target.value))} /></Field> : (
@@ -1699,7 +1703,7 @@ function EditModal({ p, open, onClose, repost }: { p: Property; open: boolean; o
             onFacts={(r) => setF((s) => ({ ...s, district: r.district || s.district || v.district, post_fields: { ...(s.post_fields || p.post_fields || {}), metro: r.metro || undefined } }))} />
           {lockHint('address') && <span className="muted" style={{ fontSize: 12 }}>{lockHint('address')}</span>}</div>
         <Field label={t('Цена, $')} hint={lockHint('price')}><Input type="number" value={v.price ?? ''} onChange={(e) => upd('price', numOrNull(e.target.value))} /></Field>
-        <Field label={t('Спальни')}><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>
+        {isResidential((f.post_fields || p.post_fields)?.prop_type) && <Field label={t('Спальни')}><Input type="number" value={v.bedrooms ?? ''} onChange={(e) => upd('bedrooms', numOrNull(e.target.value))} /></Field>}
         <Field label={t('Площадь, м²')}><Input type="number" value={v.area ?? ''} onChange={(e) => upd('area', numOrNull(e.target.value))} /></Field>
         <Field label={t('Этаж')}><Input type="number" value={v.floor ?? ''} onChange={(e) => upd('floor', numOrNull(e.target.value))} /></Field>
         <Field label={t('Этажей в доме')}><Input type="number" value={v.total_floors ?? ''} onChange={(e) => upd('total_floors', numOrNull(e.target.value))} /></Field>

@@ -223,7 +223,7 @@ def test_sale_object_is_a_property_with_its_own_lists_and_two_targets(db, client
     assert [x["id"] for x in board["review"]] == [s.id]
     assert client.get("/api/properties/counts", headers=auth(op), params={"deal": "rent"}).json() == {"review": 1}
     text = client.get(f"/api/properties/{s.id}/post", headers=auth(op)).json()["text"]
-    assert "🌟 Corner cafe 🌟" in text and "🏢 #2Bed #Cafe for #Sale" in text and "💰255.000$" in text
+    assert "🌟 Corner cafe 🌟" in text and "🏢 #Cafe for #Sale" in text and "💰255.000$" in text
     assert "#OldBuilding | #NewApartment | #WhiteFrame" in text and "85 Sq.m | 1/5 Floor | #ACHeating | #2Bathroom" in text
     assert "#Price240000to270000" in text and text.endswith("SALE IN TBILISI🇬🇪")
     # one «Опубликовать», two checkboxes: none = refused; the site only = no post, on hge.ge

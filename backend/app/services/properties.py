@@ -1816,12 +1816,17 @@ RENT_ONLY_POST = ("pets", "periods")
 def missing_fields(p: Property) -> list[str]:
     """Everything the agent must fill before the operator sees the object (one pass, one moderation): the card, the owner,
     and the post fields, so the post (TG now, other channels later) is built from the form, not typed by the operator."""
-    out = [label for f, label in REQUIRED_FIELDS.items() if getattr(p, f) in (None, "")]
+    pf = p.post_fields or {}
+    kind = pf.get("prop_type")
+    # Irakli 11-27: a garage / land / commercial object has no bedrooms, building, design, heating, pets
+    fields = REQUIRED_FIELDS if kind in RESIDENTIAL else \
+        {f: REQUIRED_FIELDS[f] for f in ("district", "address", "price", "area") + (("floor",) if kind in COMMERCIAL else ())}
+    out = [label for f, label in fields.items() if getattr(p, f) in (None, "")]
     if not p.owner_id:
         out.append("собственник")
-    pf = p.post_fields or {}
     sale = pf.get("deal") == "Sale"
-    out += [label for k, label in REQUIRED_POST.items() if not (sale and k in RENT_ONLY_POST) and not pf.get(k)]
+    post = REQUIRED_POST if kind in RESIDENTIAL else {"prop_type": REQUIRED_POST["prop_type"]}
+    out += [label for k, label in post.items() if not (sale and k in RENT_ONLY_POST) and not pf.get(k)]
     return out
 
 
@@ -1909,7 +1914,7 @@ SALE_PRICE_STEPS = (30000, 50000, 70000, 90000, 120000, 150000, 180000, 210000, 
 POST_ONE = {
     "deal": ("Rent", "Sale"),
     "prop_type": ("Apartment", "House", "Commercial", "Land", "Retail", "Business", "Cafe", "Restaurant", "BeautySalon",
-                  "Warehouses", "Manufacture", "Duplex", "Townhouse"),
+                  "Warehouses", "Manufacture", "Duplex", "Townhouse", "Garage", "Parking"),
     "metro": ("LibertySquare", "Rustaveli", "Marjanishvili", "StationSquare", "Tsereteli", "Gotsiridze", "Nadzaladevi",
               "Didube", "Grmagele", "Guramishvili", "Sarajishvili", "AhmeteliTheatre", "STUniversity", "VazhaPshavela",
               "Delisi", "TCUniversity", "MCUniversity", "AvlabariMetro", "IsaniMetro", "300Aragveli", "SamgoriMetro",
@@ -2101,7 +2106,9 @@ def post_text(db: Session, p: Property) -> str:
     if f.get("discount"):
         lines += ["❗️#Discount", ""]
     beds = "#Studio " if p.bedrooms == 0 else (f"#{p.bedrooms}Bed " if p.bedrooms else "")
-    if sale and p.bedrooms and p.bedrooms >= 6:
+    if f.get("prop_type") not in RESIDENTIAL:
+        beds = ""  # a garage / shop keeps its old bedrooms value hidden, not posted
+    if beds and sale and p.bedrooms and p.bedrooms >= 6:
         beds = "#6Bedplus "  # the old sale block: #5Bed, then #6Bedplus
     lines.append(f"🏢 {beds}{tag('prop_type') or '#Apartment'} for {'#Sale' if sale else '#Rent'}")
     design = "#NewApartment" if sale and f.get("design") == "New" else tag("design")  # the old sale block's tag
@@ -2283,7 +2290,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     sale = f.get("deal") == "Sale"
     district = district_tag(p.district).lstrip("#")
     beds = "Studio" if p.bedrooms == 0 else (f"{p.bedrooms} bedroom{'s' if p.bedrooms != 1 else ''}" if p.bedrooms else None)
-    commercial = f.get("prop_type") not in (None, "Apartment", "House", "Duplex", "Townhouse")
+    commercial = f.get("prop_type") not in RESIDENTIAL
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
     head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
                                   _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district))) if x)
@@ -2447,6 +2454,7 @@ def _unpost_later(db: Session, p: Property) -> None:
 
 
 RESIDENTIAL = (None, "Apartment", "House", "Duplex", "Townhouse")
+COMMERCIAL = ("Commercial", "Retail", "Business", "Cafe", "Restaurant", "BeautySalon", "Warehouses", "Manufacture")
 
 
 def channel_kind(p: Property) -> str:
