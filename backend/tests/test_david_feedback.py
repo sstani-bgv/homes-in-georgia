@@ -237,6 +237,21 @@ def test_rich_post_keeps_only_the_description_prose_of_an_old_post():
     assert (float(m[1] or m[3]), float(m[2] or m[4])) == (41.7918386, 44.7574398)  # «On the map» pin for an old-base object
 
 
+def test_rich_post_of_an_old_base_object_keeps_its_headline_line(db):
+    """Irakli 11-27: an archived old-base object published again lost its description in the post — the rich post
+    shows only the headline, and an old-base object has it inside the description (the whole agency post)."""
+    p = Property(status="published", address="35 Pekini Ave", source_type="legacy", price=800, description=(
+        "#Saburtalo 🚇 #MCUniversity\n📍[35 Pekini Ave](https://maps.app.goo.gl/x)\n\n"
+        "⭐️ Cozy apartment with high ceilings ⭐️\n\n🏢 #2Bed #Apartment for #Rent\n"
+        "🌟 [Check all listings](https://t.me/rent_tbilisi_ge/9859) | [Reviews](https://t.me/reviews_rent_tbilisi)"))
+    db.add(p)
+    db.commit()
+    assert "<p>⭐️ Cozy apartment with high ceilings</p>" in properties.post_rich(db, p, [])
+    assert "⭐️ Cozy apartment with high ceilings ⭐️" in properties.post_text(db, p)
+    p.post_fields = {"headline": "Typed at the object"}
+    assert "<p>⭐️ Typed at the object</p>" in properties.post_rich(db, p, [])
+
+
 def test_published_object_takes_leads_when_its_source_ad_is_gone(db):
     from app.services import leads
     x = make_client_listing(db, "tg55")

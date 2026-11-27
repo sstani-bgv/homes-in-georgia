@@ -2086,6 +2086,18 @@ def phone_line(agent: User | None) -> str:
     return "+995 599 20 67 16 #David" + (f" · Agent {tag}" if tag and tag.lower() != "#david" else "")
 
 
+OLD_HEADLINE = re.compile(r"^[ \t]*[⭐🌟].+[⭐🌟]\ufe0f?[ \t]*$", re.M)
+
+
+def headline(p: Property) -> str | None:
+    """The post's short line: post_fields.headline, else the «⭐️ … ⭐️» line of an old-base description (the whole agency
+    post; Irakli 11-27: an archived object published again lost it — the rich post shows only the headline)."""
+    if hl := (p.post_fields or {}).get("headline"):
+        return hl
+    m = OLD_HEADLINE.search(p.description or "")
+    return m[0].strip(" \t⭐🌟\ufe0f") or None if m else None
+
+
 def post_text(db: Session, p: Property) -> str:
     """Channel caption in the agency's own format: a port of buildRentPost() / buildSalePost() from the agency's old HTML
     post generator, fed by the object's fields and post_fields (empty ones are left out, as the generator does). The
@@ -2098,8 +2110,8 @@ def post_text(db: Session, p: Property) -> str:
     if p.address:
         url = maps_url(db, p)
         lines.append(f"📍[{p.address}]({url})" if url else f"📍{p.address}")
-    if f.get("headline"):
-        lines += ["", f"🌟 {f['headline']} 🌟" if sale else f"⭐️ {f['headline']} ⭐️"]
+    if hl := headline(p):
+        lines += ["", f"🌟 {hl} 🌟" if sale else f"⭐️ {hl} ⭐️"]
     lines.append("")
     if p.is_exclusive:
         lines += ["❗️#Exclusive", ""]
@@ -2306,8 +2318,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
                    + "</tg-slideshow>")
     out.append(f"<h2>{h(head)}</h2>" + (f"<p><b>{h(' · '.join(marks))}</b></p>" if marks else "")
                + (f"<p>🏢 {h(sub)}</p>" if sub else ""))
-    if f.get("headline"):  # David 11-25: no long description in the post — only the short line typed at the object
-        out.append(f"<p>⭐️ {h(f['headline'])}</p>")
+    if hl := headline(p):  # David 11-25: no long description in the post — only the short line typed at the object
+        out.append(f"<p>⭐️ {h(hl)}</p>")
     url = maps_url(db, p) if p.address else None
     short = short_address(p.address, p.district)
     where = [f'📍 <a href="{h(url)}">{h(short)}</a>' if url and short else (short and f"📍 {h(short)}"),
