@@ -1447,10 +1447,16 @@ function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClo
   const [price, setPrice] = useState('');
   const sale = p.post_fields?.deal === 'Sale';
   const currentPrice = (sale && p.post_fields?.sale_price) || p.price;
+  // David 11-27: the deposit goes down with the price when it was «1 month» (= the old price); else it's shown to edit
+  const oldDep = p.post_fields?.deposit;
+  const [dep, setDep] = useState<string | null>(null);
+  const follows = !sale && oldDep != null && Number(oldDep) === Number(p.price);
+  const depValue = dep ?? (follows ? price : String(oldDep ?? ''));
   const m = useMutation({
     mutationFn: () => {
       const nextPrice = Number(price);
-      const post_fields = { ...p.post_fields, discount: true, ...(sale ? { sale_price: nextPrice } : {}) };
+      const post_fields = { ...p.post_fields, discount: true, ...(sale ? { sale_price: nextPrice } : {}),
+        ...(!sale && oldDep != null && depValue !== '' ? { deposit: Number(depValue) } : {}) };
       return api.properties.update(p.id, { price: nextPrice, post_fields });
     },
     onSuccess: (r) => { set(r); toast(r.change_request ? t('Новая цена ушла оператору на проверку') : r.post_url ? t('Цена снижена · пост с #Discount перевыкладывается') : t('Цена снижена · в посте будет #Discount')); onClose(); },
@@ -1461,6 +1467,7 @@ function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClo
     <Modal open={open} onClose={onClose} title={t('Скидка')}>
       <div className="col gap-lg">
         <Field label={t('Новая цена, $')} hint={t('Сейчас {price}. В посте появится ❗️#Discount', { price: money(currentPrice, p.currency || 'USD') })}><Input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))} /></Field>
+        {!sale && oldDep != null && <Field label={t('Депозит, $')} hint={t('Сейчас {price}', { price: money(oldDep, p.currency || 'USD') })}><Input inputMode="numeric" value={depValue} onChange={(e) => setDep(e.target.value.replace(/\D/g, ''))} /></Field>}
         {(p.locked_fields || []).length > 0 && <div className="alert alert-info" style={{ fontSize: 13 }}>{t('Объект проверен оператором: новая цена уйдёт оператору, после подтверждения пост перевыложится сам.')}</div>}
         <Button block disabled={!ok} loading={m.isPending} onClick={() => m.mutate()}>{t('Снизить цену')}</Button>
       </div>

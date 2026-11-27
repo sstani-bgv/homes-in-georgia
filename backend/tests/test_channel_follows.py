@@ -42,6 +42,23 @@ def test_discount_and_edit_of_a_post_field_repost_by_themselves(db, client, monk
     assert db.query(Job).filter_by(kind="tg_repost", ref=str(pid), done_at=None).count() == 0
 
 
+def test_discount_lowers_a_one_month_deposit_too(db, client, monkeypatch):
+    """David 11-27: deposit = the old price follows the discount; another deposit stays."""
+    _, _, nino, pid = _published(db, client, monkeypatch)
+    p = db.get(Property, pid)
+    old = int(p.price)
+    p.post_fields = {**(p.post_fields or {}), "deposit": old}
+    db.commit()
+    client.patch(f"/api/properties/{pid}", json={"price": old - 100, "post_fields": {**p.post_fields, "discount": True}},
+                 headers=auth(nino))
+    db.expire_all()
+    p = db.get(Property, pid)
+    assert p.post_fields["deposit"] == old - 100 and f"Deposit {old - 100}$" in properties.post_text(db, p)
+    client.patch(f"/api/properties/{pid}", json={"price": old - 200, "post_fields": {**p.post_fields, "deposit": 500}},
+                 headers=auth(nino))
+    db.expire_all()
+    assert db.get(Property, pid).post_fields["deposit"] == 500
+
 def test_two_edits_make_one_repost(db, client, monkeypatch):
     calls, _, nino, pid = _published(db, client, monkeypatch)
     client.patch(f"/api/properties/{pid}", json={"floor": 3}, headers=auth(nino))

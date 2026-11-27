@@ -662,6 +662,7 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
     if oid := data.pop("owner_id", None):  # picked from the owners list: that contact, its phone may be hidden to agents
         o = pick_owner(db, oid, actor)
         data["owner_name"], data["owner_phone"] = o.name, o.phone
+    _discount_deposit(p, data)
     locked = {}
     if is_locked_for(p, actor):
         data, locked = split_locked(db, p, data)
@@ -681,6 +682,17 @@ def update(db: Session, pid: int, data: dict, actor: User, reason: str | None = 
     if key:
         agent_did(p, actor, "✏️ <b>Агент изменил проверенные поля</b>", ", ".join(key))
     return p
+
+
+def _discount_deposit(p: Property, data: dict) -> None:
+    """David 11-27: «Скидка» lowers the deposit too when it was the usual «Deposit = 1 month» (deposit == the old price,
+    as 87% of prod rents); a deposit the user changed in the same edit, or one unlike the price, stays as sent."""
+    pf, old_pf = data.get("post_fields"), p.post_fields or {}
+    if not (isinstance(pf, dict) and pf.get("discount") and "price" in data):
+        return
+    old, new, dep = _num(p.price), _num(data["price"]), _num(old_pf.get("deposit"))
+    if dep is not None and dep == old and new and _num(pf.get("deposit")) == dep:
+        data["post_fields"] = {**pf, "deposit": int(new)}
 
 
 def post_moderated(db: Session, p: Property, actor: User) -> bool:
