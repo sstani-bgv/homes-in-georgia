@@ -196,3 +196,18 @@ def test_big_video_in_parts_survives_a_dropped_part(db, client):
     r = client.post(url, headers=h, files={"file": ("c.mov", b"x", "video/quicktime")},
                     data={"upload_id": "../../etc", "name": "c.mov", "offset": 0, "total": 1})
     assert r.json()["code"] == "bad_upload"
+
+
+def test_staff_add_photos_to_a_published_object(db, client):
+    """Irakli 11-27: on a published object staff could delete a photo in the gallery but not add one."""
+    ag, p = _object(db, "ss907")
+    properties.upload_media(db, p.id, [("a.jpg", b"\xff\xd8x")], None, ag)
+    p.status = "published"
+    db.commit()
+    op = make_user(db, "operator")
+    file = {"files": ("b.jpg", b"\xff\xd8x", "image/jpeg")}
+    assert client.post(f"/api/properties/{p.id}/media", headers=auth(ag), files=file).status_code == 409
+    r = client.post(f"/api/properties/{p.id}/media", headers=auth(op), files=file)
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    assert len(properties.media(db, p.id)) == 2 and db.get(Property, p.id).status == "published"

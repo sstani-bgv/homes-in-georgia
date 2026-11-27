@@ -366,7 +366,6 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
   const { toast, set, qc } = useProp(p.id);
   const [f, setF] = useState<GenForm>(() => genOf(p));
   const [metroM, setMetroM] = useState<number | null>(null);  // the auto-picked station's distance, shown by the select
-  const fileRef = useRef<HTMLInputElement>(null);
   const exRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (f.is_exclusive && !p.is_exclusive) exRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [f.is_exclusive]); // eslint-disable-line react-hooks/exhaustive-deps
   const media = p.media || [];
@@ -421,89 +420,6 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
 
   const nPhoto = media.filter((m) => m.kind === 'photo').length;
   const nVideo = media.filter((m) => m.kind === 'video').length;
-  const full = nPhoto >= MAX_PHOTO && nVideo >= MAX_VIDEO;
-  const [queue, setQueue] = useState<{ name: string; state: 'wait' | 'prep' | 'up' | 'done' | 'err'; pct?: number; msg?: string; mb?: number }[]>([]);
-  const busy = queue.some((q) => q.state === 'wait' || q.state === 'prep' || q.state === 'up');
-  useEffect(() => (busy ? keepAwake() : undefined), [busy]);
-  const doneN = queue.filter((q) => q.state === 'done').length;
-  /** The ones that fit MAX_PHOTO photos + 1 video go up 3 at a time, photos resized first, the video last (the photos
-   * are done in seconds, the video's 100+ MB then has the whole uplink); one request per file, a dropped connection
-   * is retried twice. */
-  const uploadFiles = async (picked: File[]) => {
-    let ph = nPhoto, vd = nVideo;
-    const isVideo = (x: File) => x.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(x.name);
-    const fit = picked.filter((x) => (isVideo(x) ? ++vd <= MAX_VIDEO : ++ph <= MAX_PHOTO)).sort((a, b) => Number(isVideo(a)) - Number(isVideo(b)));
-    if (fit.length < picked.length) toast(t('Не добавлено {n}: у объекта максимум {p} фото и {v} видео', { n: picked.length - fit.length, p: MAX_PHOTO, v: MAX_VIDEO }), true);
-    if (!fit.length) return;
-    setQueue(fit.map((x) => ({ name: x.name, state: 'wait', mb: x.size >= 20e6 ? Math.round(x.size / 1e6) : undefined })));
-    const mark = (i: number, ch: Partial<(typeof queue)[number]>) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, ...ch } : x)));
-    let failed = 0;
-    const got: number[][] = [];  // the new media ids per picked file
-    await pool(fit, 3, async (x, i) => {
-      mark(i, { state: 'prep' });
-      try {
-        const small = await shrinkPhoto(x);
-        // a big file (an iPhone video) in 8 MB parts: one 2-3 minute request over a phone used to die midway (Irakli 11-18),
-        // now a drop costs one part, retried, and the server says where to go on from
-        const sendParts = async (): Promise<Property & { uploaded_ids?: number[] }> => {
-          const uid = crypto.randomUUID().replace(/-/g, '');
-          let off = 0, fails = 0;
-          for (;;) {
-            const end = Math.min(off + UPLOAD_PART, small.size), from = off;
-            mark(i, { state: 'up' });
-            try {
-              const r = await api.properties.uploadMediaPart(p.id, small.slice(from, end), { upload_id: uid, name: small.name, offset: from, total: small.size },
-                (f) => mark(i, { pct: Math.round(((from + f * (end - from)) / small.size) * 100) }));
-              fails = 0;
-              if ('received' in r) { off = r.received; continue; }
-              return r;
-            } catch (e) {
-              if (e instanceof ApiError && e.code === 'upload_gap') { off = Number(e.data?.have ?? 0); continue; }
-              const dropped = e instanceof ApiError && (e.status === 0 || e.code === 'upload_broken' || e.status >= 502);
-              if (!dropped || ++fails > 6) throw e;
-              mark(i, { state: 'prep', msg: t('связь прервалась, повторяем…') });
-              await new Promise((ok) => setTimeout(ok, 2000 * fails));
-            }
-          }
-        };
-        const send = async (tries: number): Promise<Property & { uploaded_ids?: number[] }> => {
-          if (small.size > 2 * UPLOAD_PART) return sendParts();
-          mark(i, { state: 'up', pct: 0 });
-          try {
-            return await api.properties.uploadMediaProgress(p.id, small, (f) => mark(i, { pct: Math.round(f * 100) }));
-          } catch (e) {
-            if (!(e instanceof ApiError && (e.status === 0 || e.code === 'upload_broken')) || tries >= 2) throw e;
-            mark(i, { state: 'prep', msg: t('связь прервалась, повторяем…') });
-            await new Promise((ok) => setTimeout(ok, 3000 * (tries + 1)));
-            return send(tries + 1);
-          }
-        };
-        const r = await send(0);
-        got[i] = r.uploaded_ids || [];
-        set(r);
-        mark(i, { state: 'done', pct: 100 });
-      } catch (e) { failed++; mark(i, { state: 'err', msg: errText(e) }); }
-    });
-    // the server numbers files in the order they finish (3 go up at once): put them back in the order they were picked
-    const newIds = got.flat();
-    if (newIds.length > 1) {
-      try {
-        const fresh = shotsOf(await api.properties.get(p.id));
-        const cur = [...fresh.filter((m) => m.kind !== 'video'), ...fresh.filter((m) => m.kind === 'video')];
-        const isNew = new Set(newIds), kind = new Map(cur.map((m) => [Number(m.id), m.kind]));
-        const queueOf = (k: string | undefined) => newIds.filter((id) => kind.get(id) === k);
-        const q = new Map<string | undefined, number[]>();
-        const ids = cur.map((m) => Number(m.id)).map((id) => {
-          if (!isNew.has(id)) return id;
-          if (!q.has(kind.get(id))) q.set(kind.get(id), queueOf(kind.get(id)));
-          return q.get(kind.get(id))!.shift()!;
-        });
-        if (ids.some((id, j) => id !== Number(cur[j].id))) set(await api.properties.mediaOrder(p.id, ids));
-      } catch { /* the order stays as uploaded; the agent can drag it */ }
-    }
-    refresh();
-    if (!failed) { toast(fit.length > 1 ? t('Загружено файлов: {n}', { n: fit.length }) : t('Файл загружен')); setQueue([]); }
-  };
   const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
   const del = useMutation({ mutationFn: (mid: number) => api.properties.deleteMedia(p.id, mid), onSuccess: refresh });
   const order = useMutation({ mutationFn: (ids: number[]) => api.properties.mediaOrder(p.id, ids), onSuccess: set, onError: (e) => { toast(errText(e), true); refresh(); } });
@@ -637,29 +553,13 @@ function PostGeneratorStep({ p, canEdit }: { p: Property; canEdit: boolean }) {
         </div>
         {canEdit && (
           <>
-            <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; if (fl.length) uploadFiles(fl); }} />
-            <Button block loading={busy} disabled={full} onClick={() => fileRef.current?.click()}><Upload size={16} />{full ? t('Загружено максимум файлов') : t('Загрузить фото и видео')}</Button>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {full ? t('Чтобы заменить файл, удалите его.')
-                : `${t('От {min} до {p} фото и {v} видео — выберите в галерее сразу все.', { min: MIN_PHOTOS, p: MAX_PHOTO, v: MAX_VIDEO })}${roomsOn ? t(' Комнату под фото указывать необязательно.') : ''}`}
-              {' '}{t('В пост Telegram уходят первые {n} фото и видео, на сайте — все фото. Порядок — перетаскиванием.', { n: ALBUM_PHOTOS })}
-            </div>
-            {queue.length > 0 && (
-              <div className="upload-queue">
-                <div className="row row-between"><b>{t('Загружено {n} из {total}', { n: doneN, total: queue.length })}</b>{busy && <span className="muted">{t('не закрывайте страницу и не сворачивайте браузер')}</span>}</div>
-                <progress className="uq-total" max={queue.length} value={doneN} />
-                {queue.map((q, i) => (
-                  <div key={i} className={`uq uq-${q.state}`}>
-                    <div className="row row-between gap-sm">
-                      <span className="uq-name">{q.name}</span>
-                      <span className="uq-state">{q.state === 'wait' ? t('в очереди') : q.state === 'prep' ? q.msg || t('сжимаем…') : q.state === 'up' ? `${q.pct ?? 0}%${q.mb ? ` · ${t('{n} МБ', { n: q.mb })}` : ''}` : q.state === 'done' ? t('готово') : q.msg || t('ошибка')}</span>
-                    </div>
-                    {(q.state === 'up' || q.state === 'done') && <progress max={100} value={q.pct ?? 0} />}
-                  </div>
-                ))}
-                {!busy && <Button size="sm" variant="ghost" onClick={() => setQueue([])}>{t('Скрыть')}</Button>}
-              </div>
-            )}
+            <MediaUpload p={p} hint={(full) => (
+          <div className="muted" style={{ fontSize: 12 }}>
+            {full ? t('Чтобы заменить файл, удалите его.')
+              : `${t('От {min} до {p} фото и {v} видео — выберите в галерее сразу все.', { min: MIN_PHOTOS, p: MAX_PHOTO, v: MAX_VIDEO })}${roomsOn ? t(' Комнату под фото указывать необязательно.') : ''}`}
+            {' '}{t('В пост Telegram уходят первые {n} фото и видео, на сайте — все фото. Порядок — перетаскиванием.', { n: ALBUM_PHOTOS })}
+          </div>
+            )} />
           </>
         )}
         <MediaGrid p={p} grouped onOrder={canEdit ? (ids) => order.mutate(ids.map(Number)) : undefined} onDelete={canEdit ? (id) => del.mutate(Number(id)) : undefined} onRoom={canEdit && roomsOn ? pickRoom : undefined} />
@@ -883,6 +783,123 @@ function CompareLink({ p }: { p: Property }) {
   );
 }
 
+/** Photo / video upload (resize, 3 at a time, big files in parts): the agent's media step, and staff on a published
+ * object's gallery (Irakli 11-27: delete was there, add was not). The channel post is not reposted here. */
+function MediaUpload({ p, hint, block = true }: { p: Property; hint?: (full: boolean) => React.ReactNode; block?: boolean }) {
+  const { toast, set, qc } = useProp(p.id);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const media = p.media || [];
+  const nPhoto = media.filter((m) => m.kind === 'photo').length;
+  const nVideo = media.filter((m) => m.kind === 'video').length;
+  const full = nPhoto >= MAX_PHOTO && nVideo >= MAX_VIDEO;
+  const refresh = () => qc.invalidateQueries({ queryKey: ['property', p.id] });
+  const [queue, setQueue] = useState<{ name: string; state: 'wait' | 'prep' | 'up' | 'done' | 'err'; pct?: number; msg?: string; mb?: number }[]>([]);
+  const busy = queue.some((q) => q.state === 'wait' || q.state === 'prep' || q.state === 'up');
+  useEffect(() => (busy ? keepAwake() : undefined), [busy]);
+  const doneN = queue.filter((q) => q.state === 'done').length;
+  /** The ones that fit MAX_PHOTO photos + 1 video go up 3 at a time, photos resized first, the video last (the photos
+   * are done in seconds, the video's 100+ MB then has the whole uplink); one request per file, a dropped connection
+   * is retried twice. */
+  const uploadFiles = async (picked: File[]) => {
+    let ph = nPhoto, vd = nVideo;
+    const isVideo = (x: File) => x.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(x.name);
+    const fit = picked.filter((x) => (isVideo(x) ? ++vd <= MAX_VIDEO : ++ph <= MAX_PHOTO)).sort((a, b) => Number(isVideo(a)) - Number(isVideo(b)));
+    if (fit.length < picked.length) toast(t('Не добавлено {n}: у объекта максимум {p} фото и {v} видео', { n: picked.length - fit.length, p: MAX_PHOTO, v: MAX_VIDEO }), true);
+    if (!fit.length) return;
+    setQueue(fit.map((x) => ({ name: x.name, state: 'wait', mb: x.size >= 20e6 ? Math.round(x.size / 1e6) : undefined })));
+    const mark = (i: number, ch: Partial<(typeof queue)[number]>) => setQueue((q) => q.map((x, j) => (j === i ? { ...x, ...ch } : x)));
+    let failed = 0;
+    const got: number[][] = [];  // the new media ids per picked file
+    await pool(fit, 3, async (x, i) => {
+      mark(i, { state: 'prep' });
+      try {
+        const small = await shrinkPhoto(x);
+        // a big file (an iPhone video) in 8 MB parts: one 2-3 minute request over a phone used to die midway (Irakli 11-18),
+        // now a drop costs one part, retried, and the server says where to go on from
+        const sendParts = async (): Promise<Property & { uploaded_ids?: number[] }> => {
+          const uid = crypto.randomUUID().replace(/-/g, '');
+          let off = 0, fails = 0;
+          for (;;) {
+            const end = Math.min(off + UPLOAD_PART, small.size), from = off;
+            mark(i, { state: 'up' });
+            try {
+              const r = await api.properties.uploadMediaPart(p.id, small.slice(from, end), { upload_id: uid, name: small.name, offset: from, total: small.size },
+                (f) => mark(i, { pct: Math.round(((from + f * (end - from)) / small.size) * 100) }));
+              fails = 0;
+              if ('received' in r) { off = r.received; continue; }
+              return r;
+            } catch (e) {
+              if (e instanceof ApiError && e.code === 'upload_gap') { off = Number(e.data?.have ?? 0); continue; }
+              const dropped = e instanceof ApiError && (e.status === 0 || e.code === 'upload_broken' || e.status >= 502);
+              if (!dropped || ++fails > 6) throw e;
+              mark(i, { state: 'prep', msg: t('связь прервалась, повторяем…') });
+              await new Promise((ok) => setTimeout(ok, 2000 * fails));
+            }
+          }
+        };
+        const send = async (tries: number): Promise<Property & { uploaded_ids?: number[] }> => {
+          if (small.size > 2 * UPLOAD_PART) return sendParts();
+          mark(i, { state: 'up', pct: 0 });
+          try {
+            return await api.properties.uploadMediaProgress(p.id, small, (f) => mark(i, { pct: Math.round(f * 100) }));
+          } catch (e) {
+            if (!(e instanceof ApiError && (e.status === 0 || e.code === 'upload_broken')) || tries >= 2) throw e;
+            mark(i, { state: 'prep', msg: t('связь прервалась, повторяем…') });
+            await new Promise((ok) => setTimeout(ok, 3000 * (tries + 1)));
+            return send(tries + 1);
+          }
+        };
+        const r = await send(0);
+        got[i] = r.uploaded_ids || [];
+        set(r);
+        mark(i, { state: 'done', pct: 100 });
+      } catch (e) { failed++; mark(i, { state: 'err', msg: errText(e) }); }
+    });
+    // the server numbers files in the order they finish (3 go up at once): put them back in the order they were picked
+    const newIds = got.flat();
+    if (newIds.length > 1) {
+      try {
+        const fresh = shotsOf(await api.properties.get(p.id));
+        const cur = [...fresh.filter((m) => m.kind !== 'video'), ...fresh.filter((m) => m.kind === 'video')];
+        const isNew = new Set(newIds), kind = new Map(cur.map((m) => [Number(m.id), m.kind]));
+        const queueOf = (k: string | undefined) => newIds.filter((id) => kind.get(id) === k);
+        const q = new Map<string | undefined, number[]>();
+        const ids = cur.map((m) => Number(m.id)).map((id) => {
+          if (!isNew.has(id)) return id;
+          if (!q.has(kind.get(id))) q.set(kind.get(id), queueOf(kind.get(id)));
+          return q.get(kind.get(id))!.shift()!;
+        });
+        if (ids.some((id, j) => id !== Number(cur[j].id))) set(await api.properties.mediaOrder(p.id, ids));
+      } catch { /* the order stays as uploaded; the agent can drag it */ }
+    }
+    refresh();
+    if (!failed) { toast(fit.length > 1 ? t('Загружено файлов: {n}', { n: fit.length }) : t('Файл загружен')); setQueue([]); }
+  };
+  return (
+    <>
+      <input ref={fileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ''; if (fl.length) uploadFiles(fl); }} />
+      <Button block={block} size={block ? undefined : 'sm'} variant={block ? undefined : 'secondary'} loading={busy} disabled={full} onClick={() => fileRef.current?.click()}><Upload size={16} />{full ? t('Загружено максимум файлов') : t('Загрузить фото и видео')}</Button>
+      {hint?.(full)}
+      {queue.length > 0 && (
+        <div className="upload-queue">
+          <div className="row row-between"><b>{t('Загружено {n} из {total}', { n: doneN, total: queue.length })}</b>{busy && <span className="muted">{t('не закрывайте страницу и не сворачивайте браузер')}</span>}</div>
+          <progress className="uq-total" max={queue.length} value={doneN} />
+          {queue.map((q, i) => (
+            <div key={i} className={`uq uq-${q.state}`}>
+              <div className="row row-between gap-sm">
+                <span className="uq-name">{q.name}</span>
+                <span className="uq-state">{q.state === 'wait' ? t('в очереди') : q.state === 'prep' ? q.msg || t('сжимаем…') : q.state === 'up' ? `${q.pct ?? 0}%${q.mb ? ` · ${t('{n} МБ', { n: q.mb })}` : ''}` : q.state === 'done' ? t('готово') : q.msg || t('ошибка')}</span>
+              </div>
+              {(q.state === 'up' || q.state === 'done') && <progress max={100} value={q.pct ?? 0} />}
+            </div>
+          ))}
+          {!busy && <Button size="sm" variant="ghost" onClick={() => setQueue([])}>{t('Скрыть')}</Button>}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Own photos/videos, or the origin ad's photos until the shoot. */
 function Gallery({ p }: { p: Property }) {
   const own = shotsOf(p);
@@ -917,6 +934,7 @@ function Gallery({ p }: { p: Property }) {
             {t('Скачать видео')}{vs.length > 1 ? ` ${i + 1}` : ''}</a>))}
       </div> : undefined}>
       {isStaff && own.length > 1 && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t('Перетащите, чтобы поменять порядок (на телефоне — долгое нажатие). Первое фото — обложка; пост в канале обновится после «Поднять пост наверх».')}</div>}
+      {isStaff && own.length > 0 && p.status === 'published' && <div className="col gap-sm" style={{ marginBottom: 8 }}><MediaUpload p={p} block={false} /></div>}
       <MediaGrid items={own.length ? own : fromAd} onOrder={isStaff && own.length > 1 ? (ids) => order.mutate(ids.map(Number)) : undefined}
         onDelete={isStaff && own.length ? async (id) => { if (await confirm(t('Удалить этот файл из объекта?'))) del.mutate(Number(id)); } : undefined} />
     </Card>
