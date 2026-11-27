@@ -628,9 +628,35 @@ export function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder, off, o
     document.addEventListener('touchmove', stop, { passive: false });
     return () => document.removeEventListener('touchmove', stop);
   }, [!!drag]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // near the top / bottom edge of what scrolls (window, #root in Telegram, a modal body) the page scrolls by itself,
+  // faster the closer the finger, so the last photo can be carried to the first slot in one go (Irakli 11-27)
+  const ptr = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    if (!drag || !press.current) return;
+    let box: HTMLElement | null = press.current.el.parentElement;
+    while (box && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+    const sc = box || (document.scrollingElement as HTMLElement);
+    const from = drag.from;
+    let raf = 0;
+    const tick = () => {
+      const r = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const top = Math.max(r.top, 0), bottom = Math.min(r.bottom, window.innerHeight), { x, y } = ptr.current, EDGE = 60;
+      const v = y < top + EDGE ? -(top + EDGE - y) : y > bottom - EDGE ? y - (bottom - EDGE) : 0;
+      if (v) {
+        const was = sc.scrollTop;
+        sc.scrollTop += Math.max(-EDGE, Math.min(EDGE, v)) / 3;  // up to ~20 px a frame
+        // the finger may sit on the sticky header / bottom bar: aim at the tile just inside the edge zone instead
+        if (sc.scrollTop !== was) { const over = overAt(x, Math.max(top + EDGE + 10, Math.min(bottom - EDGE - 10, y)), from); if (over !== null) setDrag((d) => d && ({ ...d, over })); }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [!!drag]);  // eslint-disable-line react-hooks/exhaustive-deps
   const start = (x: number, y: number) => {
     const s = press.current!;
     dragged.current = true;
+    ptr.current = { x, y };
     navigator.vibrate?.(15);
     setDrag({ from: s.i, over: s.i, x, y, w: s.el.getBoundingClientRect().width });
   };
@@ -661,6 +687,7 @@ export function MediaGrid({ p, items, grouped, onDelete, onRoom, onOrder, off, o
         return;
       }
       if (!s.el.hasPointerCapture(e.pointerId)) capture(s.el, e.pointerId);
+      ptr.current = { x: e.clientX, y: e.clientY };
       const over = overAt(e.clientX, e.clientY, drag.from);
       setDrag({ ...drag, x: e.clientX, y: e.clientY, over: over ?? drag.over });
     },
