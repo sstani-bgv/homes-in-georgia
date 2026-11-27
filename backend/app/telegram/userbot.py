@@ -713,6 +713,30 @@ def serve_http(client, loop, port):
     return srv
 
 
+async def cache_dialogs(client, limit=300, page=100):
+    """Fills the entity cache (access hashes) for clients who already wrote: raw GetDialogs pages (Telethon caches
+    the users / chats of every response). Not get_dialogs(): Telethon 1.46 dies on a «DialogCommunity» (no .peer) and
+    the rest of the list was lost; such dialogs are skipped here. -> the number of dialogs seen."""
+    from telethon import utils
+    from telethon.tl import functions, types
+    seen, offset_date, offset_id, offset_peer = 0, None, 0, types.InputPeerEmpty()
+    while seen < limit:
+        r = await client(functions.messages.GetDialogsRequest(offset_date=offset_date, offset_id=offset_id, offset_peer=offset_peer,
+                                                              limit=page, hash=0))
+        dialogs = getattr(r, "dialogs", [])
+        seen += len(dialogs)
+        last = next((d for d in reversed(dialogs) if getattr(d, "peer", None)), None)
+        if len(dialogs) < page or not last:
+            break
+        ents = {utils.get_peer_id(x): x for x in [*r.users, *r.chats]}
+        pid = utils.get_peer_id(last.peer)
+        msg = next((m for m in r.messages if m.id == last.top_message and utils.get_peer_id(m.peer_id) == pid), None)
+        if pid not in ents:
+            break
+        offset_date, offset_id, offset_peer = msg and msg.date, last.top_message, utils.get_input_peer(ents[pid])
+    return seen
+
+
 async def run(client, http=True):
     """Work as a connected, logged-in client until it disconnects (logged out in Telegram, session revoked, network).
     http: also start the HTTP server (a local stand with its own session; the process starts it once in amain)."""
@@ -730,10 +754,10 @@ async def run(client, http=True):
         return
     store.q("INSERT INTO settings (key, value) VALUES ('userbot_tg_id', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             (str(me.id),))  # the bot answers «slots:» inline queries from this account only
-    try:  # fills the entity cache (access hashes) for clients who already wrote
-        await client.get_dialogs(limit=300)
-    except AttributeError as e:  # Telethon 1.46 trips on a «DialogCommunity» (no .peer): the cache stays partial, the
-        log.warning("userbot: dialogs not cached: %r", e)  # account works on — it restarted every 10 s (11-22)
+    try:
+        log.info("userbot: %s dialogs cached", await cache_dialogs(client))
+    except Exception as e:  # noqa: BLE001 — the cache stays partial, the account works on (it restarted every 10 s, 11-22)
+        log.warning("userbot: dialogs not cached: %r", e)
 
     @client.on(events.NewMessage(incoming=True, func=lambda ev: ev.is_private))
     async def incoming(ev):

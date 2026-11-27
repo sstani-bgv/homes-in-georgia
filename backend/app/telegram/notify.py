@@ -577,7 +577,7 @@ CARD_WHAT = {"slots": "время просмотра", "remind": "напомин
 def client_card(kind, ref, lead, fallback=None, choice=None):
     """The card «kind» (ref: lead id, t14: deal id) to the lead's client from the operator's account. Numbered fallback:
     the card's callback buttons (not «Другое время») as options, unless `fallback` text/`choice` are given.
-    -> None when the userbot sent it, else the error text (USERBOT_OFF / USERBOT_FAILED)."""
+    -> None when the userbot (or, it failing, the bot) sent it, else the error text (USERBOT_OFF / USERBOT_FAILED)."""
     if not conf("USERBOT_URL").strip():
         return USERBOT_OFF
     built = CARDS[kind](ref)
@@ -589,7 +589,15 @@ def client_card(kind, ref, lead, fallback=None, choice=None):
     ok = userbot.send_to_client(cl, fallback or plain_html(text), None if fallback else [b["text"] for b in btns],
                                 choice or {"lead": g(lead, "id"), "kind": kind, "options": [b["callback_data"] for b in btns]},
                                 inline=f"{kind}:{new_card(kind, ref)}")
-    return None if ok else USERBOT_FAILED
+    if ok:
+        return None
+    # the operator's account can't reach a client who only wrote to the bot (no access hash, no @username; lead 14512,
+    # Irakli 11-27): the same card from the bot, whose presses journey.on_client_journey takes as well
+    if (chat := chat_of(cl)) and tg.send(chat, text, {"inline_keyboard": rows}):
+        store.q("INSERT INTO events (entity, entity_id, action, actor_label, data, at) VALUES ('lead', %s, 'client_card_via_bot', "
+                "'bot', %s::jsonb, now())", (str(g(lead, "id")), json.dumps({"kind": kind, "note": CARD_WHAT[kind]}, ensure_ascii=False)))
+        return None
+    return USERBOT_FAILED
 
 
 def card_to_client(kind, ref, lead, **kw):
@@ -631,8 +639,8 @@ def slot_confirmed_client(lead, agent):
                f"\n📞 {phone}" if (phone := intl_phone(ag.get("phone"))) else "")
     text = plain(CONFIRMED[lang], when=texts.when_long(at, lang) if at else "—", addr=address(i, lang), agent=staff_name(ag),
                  contact=contact)
-    if not userbot.send_to_client(cl, text):
-        log.warning("lead %s: the viewing details were not delivered (userbot)", lid)
+    if not userbot.send_to_client(cl, text) and not ((chat := chat_of(cl)) and tg.send(chat, text, html=False)):  # as client_card
+        log.warning("lead %s: the viewing details were not delivered (userbot, bot)", lid)
 
 
 @safe

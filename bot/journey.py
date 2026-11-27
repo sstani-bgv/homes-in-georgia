@@ -1074,6 +1074,13 @@ async def on_client_text(update: Update, ctx, cl):
     """Free text the client's state is waiting for in the bot (the budget, the «Other» country). -> True if handled."""
     kind, _ = awaiting(cl)
     text = update.effective_message and update.effective_message.text
+    choice = (cl.get("state") or {}).get("dm_choice") or {}
+    # a card that came from the bot (notify.client_card: the userbot couldn't reach the client) asked for a typed
+    # answer («Другое время», what didn't fit, the T14 problem): it lands here, not in the operator's DM
+    if text and any(choice.get(k) for k in ("own", "comment", "problem")) and await th(userbot.dm_answer, cl, choice, text):
+        await th(userbot.set_state, cl["id"], dm_choice=None)
+        await update.effective_message.reply_text(tr(cl, "👌 Передал агенту", "👌 Passed to the agent", "👌 აგენტს გადავეცი"))
+        return True
     if kind not in ("budget", "country") or not text:
         return False
     await (on_budget_text if kind == "budget" else on_country_text)(ctx.bot, cl, text)

@@ -427,6 +427,9 @@ def test_viewing_details_go_from_the_operators_account(db, monkeypatch):
                                  {"name": "Георгий", "username": None, "phone": "555 000 588"})
     assert got[0][1].endswith("👤 Ваш агент: Георгий\n📞 +995555000588")      # no @username: the phone, tappable
     assert not [u for u, d in http.urls if d.get("chat_id") == "5550001"]
+    monkeypatch.setattr(userbot, "send_to_client", lambda *a, **kw: None)     # the userbot can't reach them: the bot
+    notify.slot_confirmed_client({"id": lead.id, "client_id": cl.id, "listing_id": lead.listing_id, "viewing_at": at}, {"name": "Георгий"})
+    assert [d["text"] for u, d in http.urls if d.get("chat_id") == "5550001"][0].startswith("✅ Просмотр: ")
 
 
 def test_pushed_object_looks_like_a_search_result(db, monkeypatch, tmp_path):
@@ -606,3 +609,50 @@ def test_phone_login_wrong_code_then_2fa(db):
         srv.shutdown()
         loop.call_soon_threadsafe(loop.stop)
         userbot.STATE.update(me=None, client=None, login={"status": "idle"}, start=None, phone=None)
+
+
+def test_slots_go_from_the_bot_when_the_userbot_cant_reach_the_client(db, monkeypatch):
+    """Lead 14512 (Irakli 11-27): a client who only wrote to the bot (no @username, never in the operator's DMs) -> the
+    userbot fails; the same slot card goes from the bot (its presses: journey.on_client_journey), an event says so."""
+    import httpx
+    from app.models import Event
+    from app.telegram import client as tg
+    op, ag, cl = make_user(db, "operator"), make_user(db, "agent"), make_client(db)
+    cl.username = cl.phone = None
+    db.commit()
+    lead = leads.create_from_like(db, cl.id, make_listing(db).id)
+    leads.assign_agent(db, lead.id, ag.id, op)
+    monkeypatch.undo()
+    http = FakeHttp()
+    monkeypatch.setattr(tg, "_client", lambda: http)
+    monkeypatch.setenv("USERBOT_URL", "http://userbot:8091/")
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: type("R", (), {"status_code": 502, "json": lambda self: {"ok": False}})())
+    at = datetime(2031, 3, 4, 12, tzinfo=timezone.utc)
+    assert leads.add_slots(db, lead.id, [at], ag).status == "slots_sent"
+    card = next(d for u, d in http.urls if u.endswith("/sendMessage") and d.get("chat_id") == "5550001")
+    data = [b.get("callback_data") for r in json.loads(card["reply_markup"])["inline_keyboard"] for b in r]
+    slot = db.query(LeadSlot).filter_by(lead_id=lead.id).one()
+    assert f"ls:pick:{slot.id}" in data and f"ls:own:{lead.id}" in data
+    db.expire_all()
+    assert db.query(Event).filter_by(entity="lead", entity_id=str(lead.id), action="client_card_via_bot").one().data["kind"] == "slots"
+
+
+def test_cache_dialogs_skips_a_dialog_without_a_peer():
+    """Telethon 1.46's get_dialogs died on a «DialogCommunity» (no .peer) and the rest of the list stayed uncached."""
+    from telethon.tl import types
+
+    class Fake:
+        def __init__(self):
+            self.reqs = []
+
+        async def __call__(self, req):
+            self.reqs.append(req)
+            if len(self.reqs) > 1:
+                return types.messages.DialogsSlice(count=3, dialogs=[], messages=[], chats=[], users=[])
+            u = types.User(id=7, access_hash=1)
+            d = type("Dialog", (), {"peer": types.PeerUser(7), "top_message": 5})()  # its constructor differs across versions
+            m = types.Message(id=5, peer_id=types.PeerUser(7), date=datetime(2026, 11, 1, tzinfo=timezone.utc), message="hi")
+            return types.messages.DialogsSlice(count=3, dialogs=[d, type("DialogCommunity", (), {})()], messages=[m], chats=[], users=[u])
+    fake = Fake()
+    assert asyncio.run(userbot.cache_dialogs(fake, page=2)) == 2
+    assert fake.reqs[1].offset_id == 5 and fake.reqs[1].offset_peer.user_id == 7
