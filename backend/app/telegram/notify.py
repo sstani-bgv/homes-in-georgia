@@ -1167,6 +1167,10 @@ def _topic(chat, key):
     return chat_and_topic("PUBLISH_CHAT_ID", key)[1] if chat == agency_chat() else None
 
 
+def _join(warning, extra):
+    return f"{warning}; {extra}" if warning else extra
+
+
 def _album(items, n_photos=9):
     """The album's share of [(kind, ...)] in order: the first n_photos photos + the videos, ≤10 (Telegram's limit);
     the rest of the photos are only on the site (properties.ALBUM_PHOTOS)."""
@@ -1458,6 +1462,19 @@ def publish_post(prop):
             pass  # the rich post went out
         elif media:
             res = send_group(chat, album_topic, ready, caption)
+            if not res:  # 2026-11-28 #15720: «Message was not sent» sank the whole publish; one bad file must not
+                warning = _join(warning, "Telegram не принял альбом целиком")
+                plain = [x for x in ready if x[0] != "video"]
+                res = send_group(chat, album_topic, plain, caption) if plain != ready else None  # without the video
+                if res:
+                    warning = _join(warning, "видео не вошло в альбом")
+                    vid = send_group(chat, album_topic, [x for x in ready if x[0] == "video"][:1]) if len(plain) < len(ready) else None
+                    if vid:
+                        sent += vid
+                        warning = _join(warning, "видео ушло отдельным сообщением")
+                if not res:  # no media at all: the text post still goes
+                    warning = _join(warning, "пост ушёл без медиа")
+                    res = [t] if (t := tg.send(chat, caption, thread_id=album_topic)) else None
             m = res[0] if res else None
             sent += res[1:] if res else []
         else:

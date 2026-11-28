@@ -140,3 +140,33 @@ def test_originals_only_at_the_first_publication(db, client, monkeypatch):
     properties.publish(db, pid, nino)  # an update / repost, even with a new photo: nothing
     worker.tick()
     assert len(sent) == 1
+
+
+def test_album_refused_falls_back_without_the_video(bot, monkeypatch, tmp_path):
+    """2026-11-28 #15720: sendMediaGroup «Message was not sent» sank the publish (502). Now: the album without the video,
+    the video on its own, a warning; and when nothing goes, the text post."""
+    f = tmp_path / "f"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(notify, "storage", SimpleNamespace(fetch=lambda key, tmp: str(f)))
+    monkeypatch.setattr(notify, "_tg_video", lambda key, tmp, p=None: p)
+    monkeypatch.setattr(notify, "_bot_media", lambda media, tmp: media)
+    monkeypatch.setattr(notify, "_meta", lambda k, p: {})
+    monkeypatch.setattr(notify, "post_chat", lambda kind: (MAIN, None))
+    post = _post("sale")
+    post.post_media_keys = [("photo", "a"), ("photo", "b"), ("video", "v")]
+    base = tg.call
+    refuse = {"sendMediaGroup": lambda p: any(i["type"] == "video" for i in p["media"])}
+
+    def call(method, files=None, **p):
+        if method in refuse and refuse[method](p):
+            return None
+        r = base(method, files, **p)
+        return [r] if method == "sendMediaGroup" else r
+    monkeypatch.setattr(tg, "call", call)
+    ref = notify.publish_post(post)
+    assert ref and [m for m, _ in bot.sent] == ["sendMediaGroup", "sendVideo"]
+    assert "без видео" not in ref[4] and "видео не вошло" in ref[4] and "отдельным" in ref[4]
+    refuse["sendMediaGroup"] = lambda p: True
+    bot.sent.clear()
+    ref = notify.publish_post(post)
+    assert ref and bot.sent == [("sendMessage", MAIN)] and "без медиа" in ref[4]
