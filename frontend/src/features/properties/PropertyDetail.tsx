@@ -1444,7 +1444,7 @@ function Republish({ p, onEdit }: { p: Property; onEdit: () => void }) {
   );
 }
 
-/** «Скидка»: the new price and ❗️#Discount in the post; the post is reposted by itself (backend apply_update → tg_repost). */
+/** «Скидка»: the new price and ❗️#Discount in the post; the post is reposted by itself 5 min after the last edit (backend apply_update → tg_repost). */
 function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClose: () => void }) {
   const { toast, set } = useProp(p.id);
   const [price, setPrice] = useState('');
@@ -1462,7 +1462,7 @@ function DiscountModal({ p, open, onClose }: { p: Property; open: boolean; onClo
         ...(!sale && oldDep != null && depValue !== '' ? { deposit: Number(depValue) } : {}) };
       return api.properties.update(p.id, { price: nextPrice, post_fields });
     },
-    onSuccess: (r) => { set(r); toast(r.change_request ? t('Новая цена ушла оператору на проверку') : r.post_url ? t('Цена снижена · пост с #Discount перевыкладывается') : t('Цена снижена · в посте будет #Discount')); onClose(); },
+    onSuccess: (r) => { set(r); toast(r.change_request ? t('Новая цена ушла оператору на проверку') : r.post_url ? t('Цена снижена · пост с #Discount перевыложится через 5 минут') : t('Цена снижена · в посте будет #Discount')); onClose(); },
     onError: (e) => toast(errText(e), true),
   });
   const ok = Number(price) > 0 && Number(price) < Number(currentPrice || Infinity);

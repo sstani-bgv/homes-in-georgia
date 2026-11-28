@@ -2,12 +2,21 @@
 «% Скидка» / «Правка» repost by themselves, «Снять с публикации» and «Приостановить» take the post down and the way
 back posts it again, a rented flat gets the channel's «#FlatRented» announcement once, and a rented object goes back
 to the market from the card."""
+from datetime import timedelta
+
 from app import worker
+from app.services.common import now
 from app.models import Job, Property, PropertyPublication
 from app.services import properties
 from tests.conftest import auth, make_user
 from tests.test_tg_unpost import _actions, _posts
 from tests.test_publish_card import _submitted
+
+
+def _repost_due_now(db):
+    """An edit's repost waits properties.REPOST_DEBOUNCE: the test skips the wait."""
+    db.query(Job).filter_by(kind="tg_repost", done_at=None).update({"due_at": now()})
+    db.commit()
 
 
 def _live(db, pid):
@@ -34,7 +43,16 @@ def test_discount_and_edit_of_a_post_field_repost_by_themselves(db, client, monk
     r = client.patch(f"/api/properties/{pid}", json={"price": float(p.price) - 100, "post_fields": {**(p.post_fields or {}), "discount": True}},
                      headers=auth(nino))
     assert r.status_code == 200
-    assert db.query(Job).filter_by(kind="tg_repost", ref=str(pid), done_at=None).count() == 1
+    job = db.query(Job).filter_by(kind="tg_repost", ref=str(pid), done_at=None).one()
+    assert abs(job.due_at - now() - properties.REPOST_DEBOUNCE) < timedelta(seconds=30)
+    # a second save within the 5 minutes: still one job, the timer starts over
+    first_due = job.due_at
+    client.patch(f"/api/properties/{pid}", json={"description": "Новое описание"}, headers=auth(nino))
+    job = db.query(Job).filter_by(kind="tg_repost", ref=str(pid), done_at=None).one()
+    assert job.due_at >= first_due
+    worker.tick()
+    assert "tg_reposted" not in _actions(db, pid)  # not yet: waits for the series of edits to end
+    _repost_due_now(db)
     worker.tick()
     assert _live(db, pid) == ["120"] and "tg_reposted" in _actions(db, pid)
     # a field the post doesn't show: no repost
@@ -63,6 +81,7 @@ def test_two_edits_make_one_repost(db, client, monkeypatch):
     calls, _, nino, pid = _published(db, client, monkeypatch)
     client.patch(f"/api/properties/{pid}", json={"floor": 3}, headers=auth(nino))
     client.patch(f"/api/properties/{pid}", json={"floor": 4}, headers=auth(nino))
+    _repost_due_now(db)
     worker.tick()
     assert _live(db, pid) == ["120"]
 

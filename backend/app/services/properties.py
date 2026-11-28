@@ -734,7 +734,7 @@ def apply_update(db: Session, p: Property, data: dict, actor: User) -> None:
     was_exclusive, was_rent_to, was_post = p.is_exclusive, p.rent_to, _post_key(p)
     _apply(p, data)
     if p.status == "published" and _post_key(p) != was_post and has_post(db, p):
-        schedule_repost(db, p)
+        schedule_repost(db, p, REPOST_DEBOUNCE)
     if p.rent_to != was_rent_to:
         schedule_lease_reminders(db, p)
     _set_owner_contact(db, p, data.get("owner_name"), data.get("owner_phone"), actor, bool(data.get("owner_separate")),
@@ -787,10 +787,13 @@ def repost_limit(db: Session, user: User) -> int:
     return max(1, n // REPOST_PER)
 
 
-def schedule_repost(db: Session, p: Property) -> None:
+REPOST_DEBOUNCE = timedelta(minutes=5)  # David 11-27: 4 saves in 10 min gave 4 posts; an edit's repost waits, each save restarts it
+
+
+def schedule_repost(db: Session, p: Property, delay: timedelta = timedelta(0)) -> None:
     """The worker posts the object again (job tg_repost -> publish: the new post out, then the old ones deleted, so the
-    channel never holds two). One pending job per object: a second edit just replaces it. No commit."""
-    jobs.schedule(db, "tg_repost", p.id, now())
+    channel never holds two). One pending job per object: a second edit replaces it, so the timer starts over. No commit."""
+    jobs.schedule(db, "tg_repost", p.id, now() + delay)
 
 
 def _mask_phone(phone: str | None) -> str:

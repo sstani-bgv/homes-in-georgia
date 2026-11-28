@@ -291,7 +291,7 @@ export const D: Record<string, [ka: string, en: string]> = {
   "Снять объект с сайта hge.ge? В базе и в Telegram он останется.": ["მოვხსნა ობიექტი საიტიდან hge.ge? ბაზაში და Telegram-ში დარჩება.", "Remove the property from hge.ge? It stays in the base and in Telegram."],
   "Пост перевыложен: старый удалён": ["პოსტი ხელახლა განთავსდა: ძველი წაიშალა", "Post reposted: the old one deleted"],
   "Редактировать пост": ["პოსტის რედაქტირება", "Edit post"],
-  "Цена снижена · пост с #Discount перевыкладывается": ["ფასი შემცირდა · პოსტი #Discount-ით ხელახლა ქვეყნდება", "Price lowered · the post is reposted with #Discount"],
+  "Цена снижена · пост с #Discount перевыложится через 5 минут": ["ფასი შემცირდა · პოსტი #Discount-ით ხელახლა გამოქვეყნდება 5 წუთში", "Price lowered · the post is reposted with #Discount in 5 minutes"],
   "Объект проверен оператором: новая цена уйдёт оператору, после подтверждения пост перевыложится сам.": ["ობიექტი ოპერატორმა შეამოწმა: ახალი ფასი ოპერატორს გადაეგზავნება, დადასტურების შემდეგ პოსტი თავად განახლდება.", "The operator verified the property: the new price goes to the operator, the post is reposted once confirmed."],
   "Снято с публикации: сайт и канал": ["გამოქვეყნებიდან მოიხსნა: საიტი და არხი", "Unpublished: the site and the channel"],
   "Вернуть публикацию": ["გამოქვეყნების დაბრუნება", "Restore publication"],

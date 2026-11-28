@@ -5,7 +5,7 @@ from app import worker
 from app.models import ChangeRequest, Job, Property
 from app.services import change_requests
 from tests.conftest import auth
-from tests.test_channel_follows import _live, _published
+from tests.test_channel_follows import _live, _published, _repost_due_now
 
 
 def test_agents_post_edit_goes_to_the_operator(db, client, monkeypatch):
@@ -25,6 +25,7 @@ def test_agents_post_edit_goes_to_the_operator(db, client, monkeypatch):
     db.expire_all()
     p = db.get(Property, pid)
     assert p.floor == (floor or 0) + 2 and p.post_fields["pets"] == pets
+    _repost_due_now(db)
     worker.tick()
     assert len(_live(db, pid)) == 1 and _live(db, pid) == ["120"]
 
