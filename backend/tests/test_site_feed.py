@@ -8,7 +8,7 @@ from PIL import Image
 
 from tests import hge_import as imp
 from app.models import Car, Owner, Property, PropertyMedia, PropertyPublication
-from app.services import catalog, site_feed
+from app.services import catalog, properties, site_feed
 from tests.conftest import auth, make_user
 
 AGENT = {"telegram": "David_Tibelashvili", "phone": "+995 599 20 67 16"}
@@ -239,7 +239,10 @@ def test_sale_object_is_a_property_with_its_own_lists_and_two_targets(db, client
     r = client.post(f"/api/properties/{s.id}/publish", headers=auth(op), json={"tg": True, "site": False}).json()
     assert r["post_url"] == "https://t.me/rent_tbilisi_ge/777" and r["site_hidden"] is False
     (post,), = sent.of("publish_post")
-    assert post.post_text == text and post.post_rich is None  # the rich post is the rent one
+    assert post.post_text == text and post.post_rich is not None  # sale goes out as the rich post too (Irakli 11-28)
+    html = properties.post_rich(db, db.get(Property, s.id), ["tg://photo?id=m0"])
+    db.rollback()
+    assert "$255 000" in html and "for sale" in html and not any(w in html for w in ("Deposit", "Lease", "Tenants", "Pets"))
     # the first publication without «На сайт» keeps the object off the site
     t = _sale(db, agent, prop_type="Apartment")
     r = client.post(f"/api/properties/{t.id}/publish", headers=auth(op), json={"tg": True, "site": False}).json()

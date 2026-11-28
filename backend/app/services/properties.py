@@ -2320,7 +2320,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     commercial = f.get("prop_type") not in RESIDENTIAL
     price = f.get("sale_price") or (int(p.price) if p.price is not None else None)
     head = " · ".join(x for x in (price and f"${price:,}".replace(",", " "),
-                                  _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district))) if x)
+                                  _human(f["prop_type"]).lower() if commercial else beds, (districts.BY_TAG[district][2] if district in districts.BY_TAG else _human(district)),
+                                  sale and "for sale") if x)
     # Irakli 11-24 (his sample post): «🏢 building · m² · floor», the headline and the description, 📍 a short address ·
     # Ⓜ️ Metro <station>, ✅ the amenities and 💰 deposit · lease open, one collapsed «Parameters, amenities and tags»,
     # «ID …» at the bottom; «Exclusive» stands out when it is one
@@ -2346,7 +2347,7 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
     key = ("Conditioner", "Balcony", "Terrace")
     feats = [_human(a) for a in key if a in am] + ([_human(f["heating"])] if f.get("heating") else [])
     rest = [_human(a) for a in am if a not in key]
-    months = sorted(int(x[:-5]) for x in f.get("periods") or [] if x.endswith("Month") and x[:-5].isdigit())
+    months = sorted(int(x[:-5]) for x in f.get("periods") or [] if not sale and x.endswith("Month") and x[:-5].isdigit())
     dep = f.get("deposit", price)
     money_line = " · ".join(x for x in ((not sale and price and (f"Deposit ${dep}" if dep else "No deposit")),
                                         months and f"from {months[0]} month{'s' if months[0] != 1 else ''}") if x)
@@ -2357,8 +2358,8 @@ def post_rich(db: Session, p: Property, media: list[str]) -> str:
             ("Air conditioners", "yes" if "Conditioner" in am else None), ("Balconies", "yes" if "Balcony" in am else None),
             ("Heating", f.get("heating") and _human(f["heating"])), ("Design", f.get("design") and _human(f["design"])),
             ("Condition", sale and f.get("condition") and _human(f["condition"])),
-            ("Pets", f.get("pets") and _human(f["pets"])), ("Tenants", f.get("tenants") and f"up to {f['tenants']}"),
-            ("Lease term", f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
+            ("Pets", not sale and f.get("pets") and _human(f["pets"])), ("Tenants", not sale and f.get("tenants") and f"up to {f['tenants']}"),
+            ("Lease term", not sale and f.get("periods") and ", ".join(_human(x) + ("s" if x not in ("1Day", "1Month") else "") for x in f["periods"])),
             ("Deposit", not sale and price and (f"${dep}" if dep else "none")),
             ("Commission", "0%")]
     table = "".join(f"<tr><td>{h(k)}</td><td>{h(v)}</td></tr>" for k, v in rows if v)
@@ -2594,7 +2595,7 @@ def publish(db: Session, pid: int, actor: User, text: str | None = None, media_i
         auto = post_text(db, p)
         p.post_text = (text or "").strip() or auto  # transient attributes read by notify.publish_post
         # the rich post is built from the fields: a caption the operator rewrote by hand goes out as the plain album
-        p.post_rich = (lambda ids: post_rich(db, p, ids)) if p.post_text == auto and not is_sale(p) else None
+        p.post_rich = (lambda ids: post_rich(db, p, ids)) if p.post_text == auto else None
         p.post_media_ids = media_ids
         p.post_channel = channel_kind(p)
         p.progress_key = f"publish:{p.id}"  # the card polls GET /properties/{id}/publish/progress
