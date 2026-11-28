@@ -1,5 +1,6 @@
 // properties: Russian (the key, shown as is for ru) → [Georgian, English]
 export const D: Record<string, [ka: string, en: string]> = {
+  'Поделиться': ['გაზიარება', 'Share'],
   // Funnels.tsx: «Объекты» page, manual object, leads page
   'Нет доступа к объекту': ['ობიექტზე წვდომა არ გაქვთ', 'No access to this property'],
   'Объект закреплён за другим агентом или не найден.': ['ობიექტი სხვა აგენტზეა მიმაგრებული ან ვერ მოიძებნა.', 'The property belongs to another agent or was not found.'],

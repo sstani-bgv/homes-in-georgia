@@ -5,12 +5,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Archive, ArrowRightLeft, Camera, CheckCircle2, Copy, FileText, ChevronDown, Clock, ExternalLink, Globe, Share2, Home, Lock, Pencil, Phone, PhoneOff, Play, RotateCcw, Send, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api, type PublishProgress } from '../../api';
 import { ApiError, itemsOf, mediaUrl, thumbUrl, withKeepalive } from '../../api/client';
 import type { Media, PostFields, Property } from '../../api/types';
 import { FIELD_FILTER, can } from '../../api/types';
-import { useAuth } from '../../auth/AuthContext';
+import { tgWebApp, useAuth } from '../../auth/AuthContext';
 import { AiFlagBadges, CopyPhone, DupCheck, ExclusiveConflictBadge, PropertyStatusBadge, Timeline } from '../../components/domain';
 import { errText, useToast } from '../../components/toast';
 import { SimilarList } from '../../components/Similar';
@@ -1910,6 +1910,7 @@ function OwnerLeaseNote({ p, canWork }: { p: Property; canWork: boolean }) {
 
 export function PropertyDetail({ id, compact }: { id: number; compact?: boolean }) {
   const { user, isStaff } = useAuth();
+  const toast = useToast();
   // an exclusive's duplicate search runs in the worker (~30 s): the card looks again until it is done
   const { data: p, isLoading, error } = useQuery({ queryKey: ['property', id], queryFn: () => api.properties.get(id),
     refetchInterval: (q) => (q.state.data?.duplicate_scan?.pending ? 10_000 : false) });
@@ -1961,6 +1962,17 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
   // the media / review steps show the files with their own controls
   const mediaInAction = walkIn || ['shoot_scheduled', 'media_uploaded', 'returned'].includes(p.status) || (p.status === 'review' && isStaff);
   const ownerVisible = !!(p.owner?.phone || p.owner_phone);
+  // the same link the bot's Mini App buttons use (links.property_app): PUBLIC_URL/objects/<id>
+  const share = async () => {
+    const url = `${window.location.origin}/objects/${p.id}`;
+    const text = `${t('Объект')} #${p.id}${p.address ? `, ${p.address}` : ''}`;
+    const wa = tgWebApp();
+    try {
+      if (wa?.initData && wa.openTelegramLink) wa.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+      else if (navigator.share) await navigator.share({ url, text });
+      else { await navigator.clipboard.writeText(url); toast(t('Ссылка скопирована')); }
+    } catch (e) { if ((e as Error).name !== 'AbortError') toast(errText(e), true); }
+  };
   const objLink = (oid: number) => (compact ? `/m/properties/${oid}` : `/objects/${oid}`);
 
   return (
@@ -1979,6 +1991,7 @@ export function PropertyDetail({ id, compact }: { id: number; compact?: boolean 
             </div>
           </div>
           <div className="price-col">
+            <Button size="sm" variant="secondary" onClick={share}><Share2 size={14} />{t('Поделиться')}</Button>
             <div className="price" style={{ fontSize: 24 }}>{money(p.post_fields?.deal === 'Sale' ? p.post_fields.sale_price ?? p.price : p.price, p.currency || 'USD')}{p.post_fields?.deal !== 'Sale' && <span className="muted" style={{ fontSize: 12 }}>{t('/мес')}</span>}</div>
             <div className="muted" style={{ fontSize: 13 }}>{[districtLabel(p.district), bedroomsLabel(p.bedrooms), p.area ? `${p.area} ${t('м²')}` : null].filter(Boolean).join(' · ')}</div>
           </div>
