@@ -4,8 +4,8 @@ import { t } from '../lib/i18n';
 import { Button, Field, Input } from './ui';
 
 type Prompt = { label: string; required?: boolean };
-type Ask = (message: string, input?: Prompt) => Promise<string | null>;
-type Request = { message: string; input?: Prompt; key: string; resolve: (answer: string | null) => void };
+type Ask = (message: string, input?: Prompt, ok?: string) => Promise<string | null>;
+type Request = { message: string; input?: Prompt; ok?: string; key: string; resolve: (answer: string | null) => void };
 const ActionDialog = createContext<Ask | null>(null);
 
 export function ActionDialogProvider({ children }: { children: ReactNode }) {
@@ -15,9 +15,9 @@ export function ActionDialogProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<Request | null>(null);
   const [answer, setAnswer] = useState('');
 
-  const ask = useCallback<Ask>((message, input) => new Promise((resolve) => {
+  const ask = useCallback<Ask>((message, input, ok) => new Promise((resolve) => {
     if (pending.current) { resolve(null); return; }
-    const next = { message, input, key, resolve };
+    const next = { message, input, ok, key, resolve };
     pending.current = next;
     setAnswer('');
     setRequest(next);
@@ -54,7 +54,7 @@ export function ActionDialogProvider({ children }: { children: ReactNode }) {
           {request.input && <Field label={request.input.label}><Input value={answer} onChange={(e) => setAnswer(e.target.value)} aria-required={request.input.required} /></Field>}
           <div className="row row-wrap action-dialog-buttons">
             <Button variant="secondary" onClick={() => finish(null)}>{t('Отмена')}</Button>
-            <Button type="submit" disabled={missingAnswer}>{t('Подтвердить')}</Button>
+            <Button type="submit" disabled={missingAnswer}>{request.ok || t('Подтвердить')}</Button>
           </div>
         </form>}
       </dialog>
@@ -70,5 +70,6 @@ export function useActionDialog(): Ask {
 
 export function useConfirm() {
   const ask = useActionDialog();
-  return async (message: string) => (await ask(message)) !== null;
+  /** ok: the confirm button's label (default «Подтвердить») */
+  return async (message: string, ok?: string) => (await ask(message, undefined, ok)) !== null;
 }

@@ -122,8 +122,11 @@ function IdleTimer({ at }: { at: string }) {
  * (backend change_requests.request_owner); any other error: the toast as before. */
 /** owner_taken: the owner's objects (backend properties.owner_objects) as « Объекты собственника: #12 Addr; …» */
 export function takenObjects(e: ApiError): string {
-  const items = (e.data?.items as { id: number; address?: string | null }[] | undefined) || [];
-  return items.length ? ` ${t('Объекты собственника')}: ${items.map((x) => `#${x.id}${x.address ? ` ${x.address}` : ''}`).join('; ')}.` : '';
+  const items = (e.data?.items as { id: number; address?: string | null; status?: string }[] | undefined) || [];
+  if (!items.length) return '';
+  // manual-object-owner-taken 11-28: an owner whose objects are all archived read like «dead duplicate» — say so plainly
+  const archived = items.every((x) => x.status === 'archived') ? ` ${t('Все его объекты в архиве.')}` : '';
+  return ` ${t('Объекты собственника')}: ${items.map((x) => `#${x.id}${x.address ? ` ${x.address}` : ''}`).join('; ')}.${archived}`;
 }
 
 function useOwnerTaken(p: Property) {
@@ -131,7 +134,7 @@ function useOwnerTaken(p: Property) {
   const confirm = useConfirm();
   return async (e: unknown, phone?: string) => {
     if (e instanceof ApiError && e.code === 'owner_taken' && phone) {
-      if (await confirm(`${e.message}.${takenObjects(e)} ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`)) {
+      if (await confirm(`${e.message}.${takenObjects(e)} ${t('Отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`, t('Отправить запрос'))) {
         try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
       }
       return;

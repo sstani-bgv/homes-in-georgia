@@ -42,7 +42,8 @@ export function ManualProperty({ open, onClose, base = '', deal = 'rent' }: { op
     onError: async (e) => {
       const phone = cleanPhones(f.phones)[0]?.phone;
       if (!(e instanceof ApiError && e.code === 'owner_taken' && phone)) return toast(errText(e), true);
-      if (!(await confirm(`${e.message}.${takenObjects(e)} ${t('Создать объект и отправить оператору запрос передать этого собственника вам? Агента собственника тоже уведомим.')}`))) return;
+      // manual-object-owner-taken 11-28: an agent read this as «дубль, отказ» and cancelled — say it isn't one
+      if (!(await confirm(`${e.message}.${takenObjects(e)} ${t('Это не дубль и не отказ: объект создастся, а оператору уйдёт запрос передать собственника вам. Агента собственника тоже уведомим.')}`, t('Создать и отправить запрос')))) return;
       try {
         const p = await api.properties.create(body());
         try { await api.properties.ownerRequest(p.id, phone); toast(t('Запрос ушёл оператору')); } catch (x) { toast(errText(x), true); }
